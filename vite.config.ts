@@ -1,9 +1,11 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+const metaContentSecurityPolicy =
+  "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests";
+
 const securityHeaders = {
-  "Content-Security-Policy":
-    "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'",
+  "Content-Security-Policy": `${metaContentSecurityPolicy}; frame-ancestors 'none'`,
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
@@ -17,7 +19,30 @@ const securityHeaders = {
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "replay-production-security-meta",
+      apply: "build",
+      transformIndexHtml() {
+        return [
+          {
+            tag: "meta",
+            attrs: {
+              "http-equiv": "Content-Security-Policy",
+              content: metaContentSecurityPolicy,
+            },
+            injectTo: "head-prepend",
+          },
+          {
+            tag: "meta",
+            attrs: { name: "referrer", content: "no-referrer" },
+            injectTo: "head-prepend",
+          },
+        ];
+      },
+    },
+  ],
   build: {
     rollupOptions: {
       output: {

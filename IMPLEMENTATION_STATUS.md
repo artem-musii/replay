@@ -4,7 +4,7 @@ Last updated: 2026-08-27
 
 ## Current milestone
 
-The end-to-end local application is implemented and has a passing recorded automated-test and performance snapshot. Release completion now depends on live hosting, supported-model probabilistic eval runs, and the remaining manual accessibility, export, and privacy checks.
+The end-to-end application is implemented, published from a public repository, and verified on its GitHub Pages URL. Submission completion now depends on recording the public video, supported-model probabilistic eval runs, and the remaining manual accessibility and export checks.
 
 ## Implemented product
 
@@ -20,19 +20,22 @@ The end-to-end local application is implemented and has a passing recorded autom
 - README, MIT license, architecture/data/security/WebMCP/testing/deployment documentation, demo/submission materials, provider-neutral static-host files, and Cloudflare Pages configuration.
 - Removed unused planning dependencies Zustand, Immer, `webmcp-types`, and `@testing-library/user-event`; current state uses `ReplayEngine` plus React, and WebMCP declarations are repository-owned.
 
-## Recorded local verification
+## Recorded verification
 
 The 2026-08-27 snapshot recorded in `docs/testing.md` reports:
 
 - format check, lint, strict typecheck, and production build passed;
 - Vitest: **53/53 tests across 6 files**;
-- Playwright: **32/32 project runs** in 14.7 seconds, comprising 16 scenarios in desktop Chromium and the same 16 in mobile Chrome;
+- Playwright: **32/32 project runs** in 16.0 seconds, comprising 16 scenarios in desktop Chromium and the same 16 in mobile Chrome;
 - automated axe checks found no serious or critical violations in the landing page, blank-case wizard, demo workspace, and human-finalization dialog.
 - Lighthouse 13.4.1 scored the seeded strict production preview **96 performance, 100 accessibility, 100 best practices, and 100 SEO**, with 10 ms total blocking time and zero layout shift.
+- The public GitHub Pages build scored **99 performance, 100 accessibility, 100 best practices, and 100 SEO**, with 0 ms total blocking time and zero layout shift.
+- The public in-app browser discovered the 17-tool baseline, ran `get_case_summary`, visibly applied and safely reverted an `add_observation` mutation, built a report preview, discovered the 18th `add_report_note` tool, and found one declarative `finalize_factual_report` form with no `toolautosubmit`.
+- A separate public-origin journey created a blank case, reloaded, and restored it from IndexedDB.
 
 Vitest covers schema/seed/import behavior, engine invariants, hypotheses/evidence/report rules, interpolation/consistency, timeline components, and WebMCP registry lifecycle/schema/cancellation behavior. Playwright covers the primary manual and polyfilled-agent journeys, fallback mode, persistence reload, blank-case path/event/impact/damage/lock authoring, normalized evidence annotations, report finalization, screenshots, responsive projects, and the automated accessibility guardrails above.
 
-These results are a local snapshot, not proof of live hosting, real Site Tools behavior, complete WCAG conformance, or probabilistic model reliability.
+The direct Site Tools checks prove the tool contracts work in the tested public in-app browser session; they are not a supported-model prompt-following pass rate, complete WCAG conformance claim, or cross-browser compatibility matrix.
 
 ## Known implementation limits
 
@@ -46,19 +49,21 @@ These results are a local snapshot, not proof of live hosting, real Site Tools b
 
 ## Deployment status
 
-Not deployed. The repository contains `wrangler.toml`, `public/_headers`, `public/_redirects`, and documented Cloudflare Pages/Netlify/Vercel instructions, but no authenticated provider, live URL, or live response-header result has been confirmed. The workspace is not currently a Git checkout, so creating and publishing the required public repository is also an external release step.
+Published from [github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol) to [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/) with GitHub Actions. The initial verified deployment used commit `c95df75` and workflow run `33105222174`; subsequent pushes to `main` use the same checked workflow.
+
+The landing page, deterministic `#demo`, generated assets, favicon, manifest, 404 page, persistence, baseline/reviewed-report Site Tools lifecycles, and public Lighthouse audit have been verified. GitHub Pages does not honor `public/_headers`: the production HTML therefore includes a restrictive CSP and no-referrer meta policy, while response-only `Permissions-Policy`, COOP/COEP, `X-Content-Type-Options`, and `X-Frame-Options` require a host such as Cloudflare Pages or Netlify. Site Tools worked in the tested top-level GitHub Pages session despite that provider limitation.
 
 ## Manual and external gates
 
-- Deploy the exact verified build over HTTPS, then inspect `Permissions-Policy: tools=(self)`, origin isolation, CSP, frame, referrer, and content-type headers on the live response.
-- Verify imperative registration, lifecycle, invocation cancellation, and the declarative `toolactivated`/`toolcancel` flow in a current compatible Chrome build.
+- If full response-policy enforcement is required, deploy the same artifact to a host that honors `public/_headers`, then inspect `Permissions-Policy: tools=(self)`, origin isolation, CSP, frame, referrer, and content-type headers.
+- Verify invocation cancellation and the declarative `toolactivated`/`toolcancel` presentation path across additional current compatible browser/client versions.
 - Run the human-agent demo and full probabilistic eval matrix with each currently supported Site Tools model/client; retain tool traces and do not aggregate away any safety failure.
 - Complete keyboard-only and VoiceOver/NVDA review, dialog focus/escape/restoration checks, 200% zoom, reduced motion, and broader WCAG 2.2 AA inspection.
 - Manually exercise pointer editing, local evidence upload/annotation/delete/reload, JSON import collision behavior, and open every downloaded PDF/JSON/SVG/PNG.
 - Inspect generated imagery for accidental text, plates, people, trademarks, and implausible geometry.
-- Complete production console/network/privacy audits and compare live-host performance with the recorded local Lighthouse baseline.
-- Create the public repository, publish the live URL and under-three-minute public YouTube demo, then replace only verified submission placeholders.
+- Complete the remaining production console/network/privacy matrix and manual export-file inspection.
+- Record and publish the under-three-minute public YouTube demo, then replace its final submission placeholder.
 
 ## Release rule
 
-Do not describe live deployment, current-browser Site Tools compatibility, screen-reader conformance, export fidelity, or model-eval pass rates as complete until the corresponding gate above has a dated result for the exact public commit and URL.
+Do not generalize the single verified public Site Tools session into cross-client compatibility, screen-reader conformance, export fidelity, or model-eval pass rates until each corresponding gate has a dated result for the exact public commit and URL.

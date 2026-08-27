@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "A local-first shared black box for reconstructing minor road incidents with humans and AI agents.",
+  "homepage": "https://artem-musii.github.io/replay-sol/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artem-musii/replay-sol.git"
+  },
+  "bugs": {
+    "url": "https://github.com/artem-musii/replay-sol/issues"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=22"

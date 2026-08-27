@@ -1,6 +1,6 @@
 # REPLAY WebMCP tool contract
 
-Status: **implemented inventory with verification caveats**, last reconciled with the repository and the 2026-08-26 WebMCP draft on 2026-08-27. The 18 imperative tools and declarative final-review form exist; live Chrome/Site Tools compatibility remains unverified.
+Status: **implemented inventory with verification caveats**, last reconciled with the repository and the 2026-08-26 WebMCP draft on 2026-08-27. The 18 imperative tools and declarative final-review form exist. A direct public in-app browser smoke run verified the 17/18-tool lifecycle, read/mutate/revert behavior, and non-autosubmitting finalization form; broad Chrome/client compatibility and supported-model evals remain unverified.
 
 ## Why WebMCP is fundamental here
 

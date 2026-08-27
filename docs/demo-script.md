@@ -7,7 +7,7 @@ This script uses the deterministic `#demo` route, the live REPLAY workspace, and
 ## Recording setup
 
 1. Build and deploy the exact commit to be submitted over HTTPS.
-2. Open `<live-app-url>/#demo` in the ChatGPT/Codex built-in browser or a WebMCP-enabled Chrome session.
+2. Open [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) in the ChatGPT/Codex built-in browser. For a strict WebMCP-enabled Chrome test, use a header-capable deployment or the local production preview because GitHub Pages does not emit the repository’s origin-isolation and permissions response headers.
 3. Confirm the header reports Site Tools available. Open **Case options → WebMCP inspector** only during preflight and confirm the expected tools are registered; close it before recording.
 4. Reset from **Case options → Reset deterministic demo**, then refresh once. Confirm the title is **Roundabout incident — 17:42**, the case version is stable, and the deliberate geometry inconsistency is present.
 5. Use a 1440 × 900 or larger capture, 100% page zoom, a large readable cursor, and a layout where the agent conversation and workspace remain legible.
@@ -116,7 +116,7 @@ This script uses the deterministic `#demo` route, the live REPLAY workspace, and
 
 ## Reset instructions
 
-- Direct reset: navigate to `<live-app-url>/#demo` from another route or a clean browsing context.
+- Direct reset: navigate to [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) from another route or a clean browsing context.
 - In-workspace reset: **Case options → Reset deterministic demo**.
 - Verify the case returns to version 1, active branch **Baseline reconstruction**, four synthetic evidence items, and the seeded geometry inconsistency before each take.
 - Do not reuse a take after hidden warm-up commands; they change case version and activity.

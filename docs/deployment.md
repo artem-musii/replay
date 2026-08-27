@@ -1,8 +1,13 @@
 # Deploying REPLAY
 
-Deployment status at **2026-08-27**: **not deployed**. No authenticated hosting provider or live URL has been confirmed in this workspace. Do not replace the README/Devpost placeholders until the exact deployed commit passes the checks below.
+Deployment status at **2026-08-27**: **public and verified on GitHub Pages**.
 
-REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API. A host only needs to serve the contents of `dist/` over HTTPS with the required response headers.
+- Landing: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
+- Deterministic demo: [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo)
+- Repository: [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)
+- Initial verified deployment: commit `c95df75`, GitHub Actions run `33105222174`
+
+REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API.
 
 ## Build artifact
 
@@ -13,17 +18,31 @@ npm ci
 npm run build
 ```
 
-The deployable output is `dist/`. Test that exact output locally:
+The deployable output is `dist/`. GitHub Pages uses the repository subpath, so its build sets the base explicitly:
 
 ```bash
-npm run preview -- --host 127.0.0.1 --port 4173
+VITE_BASE_PATH=/replay-sol/ npm run build
 ```
 
-Open `http://127.0.0.1:4173/#demo`. REPLAY uses hash navigation, so the deterministic demo does not require a server-side rewrite for `#demo`; the server receives `/`.
+Test a root-hosted artifact locally with `npm run preview -- --host 127.0.0.1 --port 4173`, then open `http://127.0.0.1:4173/#demo`. REPLAY uses hash navigation, so `#demo` is never sent to the server.
 
-## Included hosting contract
+## Current GitHub Pages release
 
-Vite’s `server.headers` and `preview.headers` apply only to local development/preview. The repository therefore includes `public/_headers` and `public/_redirects`; Vite copies them into `dist/`. Cloudflare Pages and Netlify can apply the headers file and use the rewrite as a static-app fallback. The current header contract is:
+Every push to `main` runs `.github/workflows/deploy-pages.yml`. The workflow:
+
+1. checks out the public source;
+2. installs the lockfile with Node.js 22;
+3. runs ESLint and the deterministic Vitest suite;
+4. builds with `VITE_BASE_PATH=/replay-sol/`; and
+5. uploads and deploys `dist/` through GitHub Pages.
+
+The public release was checked for successful HTTPS responses, base-path assets, favicon, manifest, sitemap, 404 page, deterministic demo loading, IndexedDB persistence after reload, and direct Site Tools behavior. Lighthouse 13.4.1 scored the deployed workspace **99 performance, 100 accessibility, 100 best practices, and 100 SEO**.
+
+The in-app browser discovered 17 baseline tools on the public origin. `get_case_summary`, `add_observation`, and `revert_agent_action` completed against visible shared state. Building a report preview registered the 18th `add_report_note` tool and exposed one declarative `finalize_factual_report` form with no `toolautosubmit`. This is a direct tool-contract smoke result, not a supported-model evaluation pass.
+
+## Security-policy result
+
+The strict local production-preview server emits the intended security headers; the development server emits only the WebMCP eligibility headers needed for iteration. `public/_headers` carries the complete provider-neutral contract for Cloudflare Pages and Netlify:
 
 ```text
 Permissions-Policy: tools=(self), camera=(), microphone=(), geolocation=(), payment=(), usb=()
@@ -37,136 +56,58 @@ Cross-Origin-Embedder-Policy: require-corp
 Cross-Origin-Resource-Policy: same-origin
 ```
 
-The exact CSP must continue to allow local evidence previews (`blob:`) and explicit scene/image export (`data:`/`blob:`) while blocking remote scripts, frames, connections, and objects. Do not set `document.domain` or `Origin-Agent-Cluster: ?0`; either conflicts with the WebMCP eligibility boundary documented by Chrome.
+GitHub Pages does **not** consume `_headers`. Its verified response therefore does not contain the application’s `Permissions-Policy`, CSP, COOP/COEP, `X-Content-Type-Options`, or `X-Frame-Options` values. The production build mitigates the policies representable in markup by injecting restrictive Content Security Policy and no-referrer meta elements. Meta CSP cannot express `frame-ancestors`, and it cannot replace response-level origin isolation or permissions policy.
 
-Vercel requires equivalent values in `vercel.json`; it does not consume the provider-neutral file. Confirm the selected provider actually applies every intended value. A committed `_headers` file alone is not proof of a live response policy.
+Site Tools worked in the tested top-level GitHub Pages session under the browser’s default top-level policy. Do not generalize that observation into framed/cross-origin support or a complete Chrome compatibility claim.
 
-## Recommended path: Cloudflare Pages direct upload
+## Header-capable hosting alternative
 
-Cloudflare credentials are an external prerequisite. Authenticate through the provider’s supported local login or environment variables; never commit a token.
+Use Cloudflare Pages, Netlify, or another static host that honors the full response policy when response-level isolation and defense in depth are required. The exact CSP must continue to allow local evidence previews (`blob:`) and explicit scene/image export (`data:`/`blob:`) while blocking remote scripts, frames, connections, and objects. Do not set `document.domain` or `Origin-Agent-Cluster: ?0`.
 
-One-time project creation:
+For Cloudflare Pages, authenticate outside the repository, create a project, run `npm run build`, and deploy `dist/`. For Netlify, use build command `npm run build` and publish directory `dist`. Both should consume the included `_headers` and `_redirects` files; verify that they actually do. Vercel requires equivalent values in `vercel.json` because it does not consume the provider-neutral file.
 
-```bash
-npx wrangler pages project create replay-webmcp
-```
+## Reproduce the live checks
 
-Build and deploy:
+### Responses, assets, and metadata
 
 ```bash
-npm ci
-npm run build
-npx wrangler pages deploy dist --project-name replay-webmcp
+curl -sS -D - -o /dev/null https://artem-musii.github.io/replay-sol/
+curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/replay-hero.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-roundabout-wide.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/site.webmanifest
+curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/sitemap.xml
 ```
 
-Record the immutable deployment URL and any configured production alias. The required public routes are:
+Inspect the returned HTML for its title, description, canonical URL, favicon, absolute social image, CSP meta, and referrer meta. Confirm no generated source PNG is present in the clean build or loaded by the UI.
 
-```text
-https://<deployment-host>/
-https://<deployment-host>/#demo
-```
+### Product journey
 
-If the Pages dashboard is used instead, configure:
-
-```text
-Build command: npm run build
-Build output directory: dist
-Node version: 22 or newer
-Environment secrets: none for the core app
-```
-
-## Alternatives
-
-### Netlify
-
-Configure build command `npm run build` and publish directory `dist`. Ensure the final `dist/_headers` file is deployed and honored. A CLI release can use `npx netlify deploy --prod --dir=dist` after authenticated project linkage.
-
-### Vercel
-
-Import the repository as a Vite project or use `npx vercel --prod`. The output directory is `dist`. Add and verify a `vercel.json` headers configuration equivalent to the required policy above; Vite preview headers do not carry into Vercel automatically.
-
-Do not maintain multiple provider configurations unless they are kept semantically equivalent and tested. The public documentation should name the provider actually used.
-
-## Live verification
-
-Run these checks against both the deployment URL returned by the provider and the final public alias.
-
-### 1. Response and headers
-
-```bash
-curl -sS -D - -o /dev/null https://<deployment-host>/
-```
-
-Confirm:
-
-- HTTPS returns a successful response with no authentication or geographic restriction;
-- `Permissions-Policy` includes `tools=(self)`;
-- `Origin-Agent-Cluster` is `?1`, never `?0`;
-- CSP, frame restriction, content-type, referrer, opener, and resource policies are present as intended;
-- redirects retain HTTPS and do not discard the path before the hash is applied by the browser.
-
-### 2. Static assets and metadata
-
-```bash
-curl -fsS -o /dev/null https://<deployment-host>/assets/generated/replay-hero.webp
-curl -fsS -o /dev/null https://<deployment-host>/assets/generated/demo-roundabout-wide.webp
-```
-
-Open the landing page and verify title, description, favicon, social image, hero, all four evidence images, and no failed network request. Confirm no generated source PNG is present in the clean build or loaded by the UI.
-
-### 3. Product journey
-
-1. Open `https://<deployment-host>/#demo` in a clean context.
-2. Complete scene/timeline editing, facts, evidence, questions, hypotheses, report review, and all exports in manual browser mode.
+1. Open the [public demo](https://artem-musii.github.io/replay-sol/#demo) in a clean context.
+2. Complete scene/timeline editing, facts, evidence, questions, hypotheses, report review, and exports in manual browser mode.
 3. Reload and verify IndexedDB case persistence on the same origin.
 4. Reset the demo and verify deterministic state.
 5. Create a blank case, close the workspace, and resume it from the landing page.
-6. Inspect console and network logs for errors, unhandled rejections, missing assets, and unexpected external requests.
+6. Inspect console and network logs for errors, missing assets, and unexpected external requests.
 
-### 4. WebMCP and Site Tools
+### WebMCP and Site Tools
 
-1. Open the live `#demo` route in a currently compatible WebMCP-enabled Chrome session.
-2. Confirm REPLAY detects `document.modelContext`, registers the correct lifecycle tools once, and unregisters them after leaving the workspace.
-3. Run a read and a safe versioned mutation; verify the same visible state and activity feed update.
-4. Open the URL in the ChatGPT/Codex built-in browser with a currently supported Site Tools model/workspace.
-5. Execute [demo-script.md](demo-script.md) from a fresh reset.
-6. Verify the declarative report form can be prepared but not automatically submitted.
+1. Open the public demo in the ChatGPT/Codex built-in browser or another currently compatible top-level Site Tools context.
+2. Confirm REPLAY detects `document.modelContext` and registers each lifecycle tool once.
+3. Run a read and a safe versioned mutation; verify the visible state and activity feed update before success is accepted.
+4. Build a report preview and verify `add_report_note` joins the lifecycle.
+5. Verify the declarative report form can be prepared but not automatically submitted.
+6. Run [demo-script.md](demo-script.md) from a fresh reset for supported-model behavior evidence.
 
-Record the exact browser/app/model versions, deployed commit, and tool snapshot. API rollout limitations are not equivalent to a product defect, but they must be disclosed accurately.
+For a strict WebMCP-enabled Chrome header/isolation test, use the local preview or a header-capable deployment rather than treating GitHub Pages as proof of the complete response policy.
 
-### 5. Accessibility and performance
+## Remaining release evidence
 
-Run the production checks in [testing.md](testing.md), including keyboard, screen reader, reduced motion, axe, responsive sizes, export opening, Lighthouse/equivalent, and console/network audits.
-
-## Release record
-
-Add a completed record to the implementation/test status documents:
-
-```text
-Git commit:
-Provider/project:
-Deploy command:
-Immutable deploy URL:
-Public landing URL:
-Public demo URL:
-Deployment time/time zone:
-HTTP/header result:
-Asset checks:
-Persistence/reset checks:
-Manual fallback checks:
-Chrome WebMCP check:
-ChatGPT/Codex Site Tools check:
-Accessibility/performance result:
-Known limitations:
-```
-
-Then update README, Devpost copy, demo script placeholders, and the judging matrix with the verified URLs only.
+- Record the under-three-minute public YouTube demo.
+- Run the ten-scenario supported-model matrix and retain tool traces.
+- Complete the screen-reader and cross-browser manual matrix.
+- Open and inspect every exported PDF/JSON/SVG/PNG.
+- If migrated to a header-capable host, capture its exact response headers.
 
 ## Rollback
 
-Keep the previous known-good immutable deployment. If the final release has a P0/P1 defect, broken asset, missing header, persistence regression, or WebMCP registration failure:
-
-1. move the production alias back to the previous deployment through the host;
-2. record the rollback and affected commit;
-3. fix and rerun the entire release command and live-verification sequence;
-4. do not leave the submission link pointing at an unverified preview.
+GitHub Pages deployments retain workflow history. If the final release has a P0/P1 defect, revert the defective commit with a normal audited Git revert, push `main`, wait for the Pages workflow, and rerun the live checks. Do not leave the public submission link on a known-broken artifact.

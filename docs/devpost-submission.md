@@ -1,6 +1,6 @@
 # Devpost submission draft
 
-Replace every bracketed link and the verification-status paragraph after deploying and recording the final commit. Do not submit with placeholders.
+The application and repository links below are verified. Replace the remaining YouTube placeholder after recording the final public demo; do not submit with that placeholder.
 
 ## Project title
 
@@ -12,9 +12,9 @@ REPLAY is a local-first visual workspace where a person and an AI agent reconstr
 
 ## Links
 
-- Live app: **[ADD VERIFIED HTTPS URL]**
-- Deterministic demo: **[ADD VERIFIED HTTPS URL]/#demo**
-- Public repository: **[ADD PUBLIC REPOSITORY URL]**
+- Live app: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
+- Deterministic demo: [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo)
+- Public repository: [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)
 - Public YouTube demo, under three minutes: **[ADD YOUTUBE URL]**
 
 ## Inspiration and problem
@@ -107,7 +107,7 @@ Evidence notes, filenames, imported statements, and hypothesis text are untruste
 
 The repository includes deterministic Vitest coverage for schemas and seed validity, domain commands, versioning, idempotency, locks, human-only confirmation/finalization, undo/redo, report filtering, import/export references, interpolation, consistency rules, timeline behavior, and WebMCP registration/lifecycle. At the 2026-08-27 documentation snapshot, lint and strict typecheck passed, Vitest passed 53/53 tests across six files, Playwright passed 32/32 runs across desktop and mobile Chromium, and the production build passed. The Playwright run includes manual-browser fallback, a WebMCP polyfill mutation, persistence, blank-case authoring and lock controls, evidence annotations, the main product journey, screenshots, and axe checks of four principal UI states with no serious or critical violations.
 
-The repository also includes ten machine-readable WebMCP eval scenarios covering inspect, reconstruction, human correction, hypothesis branching, confirmation protection, locks, human-only reporting, prompt injection, stale versions, and cancellation. These are an eval specification, not fabricated model-run results. Capture the supported-model run matrix and live deployment verification before final Devpost submission, and update the status documents with the exact commit and client versions.
+The repository also includes ten machine-readable WebMCP eval scenarios covering inspect, reconstruction, human correction, hypothesis branching, confirmation protection, locks, human-only reporting, prompt injection, stale versions, and cancellation. These are an eval specification, not fabricated model-run results. The public deployment has a direct Site Tools smoke record: 17 baseline tools, read/mutate/revert behavior, an 18-tool reviewed-report lifecycle, a non-autosubmitting finalization form, and persisted blank-case reload. Capture the supported-model prompt/eval matrix before final Devpost submission and retain the exact commit and client versions.
 
 ## Judging criteria
 
@@ -117,7 +117,7 @@ WebMCP exposes the semantics ordinary screen automation lacks: branch-scoped tra
 
 ### Execution
 
-REPLAY implements the full manual journey from landing and blank/demo start through scene/timeline editing, evidence, facts, questions, branches, activity, persistence, consistency, report review, finalization, and local export. It includes optimized original assets, fallback browser behavior, tests, and public-facing documentation. The final hosted URL and cross-client browser verification must be added before submission.
+REPLAY implements the full manual journey from landing and blank/demo start through scene/timeline editing, evidence, facts, questions, branches, activity, persistence, consistency, report review, finalization, and local export. It includes optimized original assets, fallback browser behavior, tests, public-facing documentation, a public GitHub repository, and a verified GitHub Pages deployment. Cross-client supported-model runs and the public video remain final submission gates.
 
 ### Potential Impact
 

@@ -14,12 +14,12 @@ _Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The 
 
 ## Try it
 
-| Destination        | Link                                                                                                           |
-| ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Live app           | **Not published yet.** Add the verified HTTPS URL before submission.                                           |
-| Deterministic demo | After deployment: `<live-app-url>/#demo`. Locally: [http://localhost:5173/#demo](http://localhost:5173/#demo). |
-| Public repository  | **Not published yet.** Add the public repository URL before submission.                                        |
-| Demo video         | **Not recorded yet.** Add the public YouTube URL before submission.                                            |
+| Destination        | Link                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| Live app           | [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)           |
+| Deterministic demo | [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) |
+| Public repository  | [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)           |
+| Demo video         | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.            |
 
 To start without WebMCP, run the app locally and choose **Try the demo case**. Every core workspace feature remains available in an ordinary browser.
 
@@ -179,7 +179,7 @@ npm run build
 
 The repository contains deterministic coverage for the domain engine, seed/schema/report rules, consistency and interpolation, timeline behavior, and WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
 
-Local verification on 2026-08-27 completed with lint and strict typecheck passing, **53/53 Vitest tests**, **32/32 Playwright runs** across desktop and mobile Chromium, and a successful production build. The Playwright run included blank-case path, event, impact, damage, lock, and evidence-annotation journeys plus axe checks of the landing page, blank wizard, workspace, and finalization dialog with no serious or critical violations. Lighthouse 13.4.1 scored the seeded strict production preview **96 performance, 100 accessibility, 100 best practices, and 100 SEO**. Supported-model evals and screen-reader review remain separate manual release gates.
+Verification on 2026-08-27 completed with lint and strict typecheck passing, **53/53 Vitest tests**, **32/32 Playwright runs** across desktop and mobile Chromium, and a successful production build. The Playwright run included blank-case path, event, impact, damage, lock, and evidence-annotation journeys plus axe checks of the landing page, blank wizard, workspace, and finalization dialog with no serious or critical violations. Lighthouse 13.4.1 scored the seeded strict local production preview **96 performance, 100 accessibility, 100 best practices, and 100 SEO**; the public GitHub Pages build scored **99/100/100/100**. A direct public in-app browser run discovered the 17-tool baseline, executed read/mutate/revert operations, built the report preview, observed the 18-tool reviewed-report lifecycle, and verified the non-autosubmitting human finalization form. Supported-model probabilistic evals and screen-reader review remain separate release gates.
 
 See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, Site Tools steps, and how to record results without conflating deterministic tests with probabilistic evals.
 
@@ -202,9 +202,9 @@ Prompts, dimensions, file sizes, visual-review criteria, and SHA-256 checksums a
 
 ## Deployment
 
-`npm run build` creates the static application in `dist/`. A production host must serve it over HTTPS and retain the WebMCP security headers, including `Permissions-Policy: tools=(self)` and compatible origin isolation. No deployment credential or live URL is stored in this repository.
+`npm run build` creates the static application in `dist/`. GitHub Actions publishes `main` to [GitHub Pages](https://artem-musii.github.io/replay-sol/) over HTTPS. The deployed build injects a restrictive CSP and no-referrer policy in HTML; provider-neutral `_headers` are also included for hosts such as Cloudflare Pages or Netlify that support full response policies.
 
-Follow [docs/deployment.md](docs/deployment.md), then replace the pending links above only after the live demo, assets, persistence, headers, and WebMCP status have been checked.
+GitHub Pages does not apply the repository’s `_headers` file, so response-only defenses such as `Permissions-Policy`, COOP/COEP, and `X-Frame-Options` are documented deployment limitations. Site Tools registration and invocation were nevertheless verified in the public top-level page. See [docs/deployment.md](docs/deployment.md) for the exact release record and the stricter-host alternative.
 
 ## Project documents
 

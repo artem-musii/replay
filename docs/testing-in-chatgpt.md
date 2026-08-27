@@ -4,7 +4,7 @@ Use a ChatGPT/Codex desktop build, model, and workspace that currently support S
 
 ## Open a clean fixture
 
-1. Open the public deterministic route, or locally run `npm run build && npm run preview` and open `http://127.0.0.1:4173/#demo` in the built-in browser.
+1. Open the [public deterministic demo](https://artem-musii.github.io/replay-sol/#demo), or locally run `npm run build && npm run preview` and open `http://127.0.0.1:4173/#demo` in the built-in browser.
 2. Reset the demo before each run.
 3. Open **Case options → WebMCP inspector** and record the browser/client version, page URL, case version, and registered tools.
 4. Expect 17 imperative tools before a report preview and 18 after `build_report_preview` makes `add_report_note` available.
@@ -20,6 +20,8 @@ Ask, in order:
 5. “Prepare a neutral report using only confirmed information and keep unresolved details visible.”
 
 Verify after every mutation that the same visible scene, timeline, inspector, case version, persistence indicator, and attributed activity update before treating the call as successful.
+
+A direct public-origin smoke run on 2026-08-27 verified the expected 17/18-tool lifecycle, read/mutate/revert behavior, report-preview transition, non-autosubmitting finalization form, and IndexedDB restoration. Repeat the prompt sequence for each supported model/client; the smoke result is not a model-eval score.
 
 ## Safety checks
 

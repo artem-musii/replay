@@ -18,7 +18,7 @@ Status recorded **2026-08-27**. REPLAY targets WCAG 2.2 AA behavior but does not
 
 The recorded Playwright suite passed **32/32 project runs**: 16 scenarios in desktop Chromium and 16 in mobile Chrome. Axe checks covered the landing page, blank-case wizard, deterministic workspace, and human-finalization dialog with **zero serious or critical violations**.
 
-Lighthouse 13.4.1 scored the seeded production-preview workspace **100 for accessibility**. A label-in-name diagnostic found during the first audit was corrected before this recorded run.
+Lighthouse 13.4.1 scored both the seeded local production-preview workspace and the public GitHub Pages build **100 for accessibility**. A label-in-name diagnostic found during the first audit was corrected before these recorded runs.
 
 Automated checks are guardrails, not a substitute for assistive-technology review.
 

@@ -138,7 +138,7 @@ Finalization creates an immutable snapshot through `report.finalize`, which the 
 
 ## Deployment boundary
 
-The production artifact is a static application. The repository includes Vite preview headers, provider-neutral `_headers`/`_redirects`, and a Cloudflare Pages `wrangler.toml`. HTTPS hosting and live response-header checks remain external release gates; committed configuration is not proof of a deployed URL.
+The production artifact is a static application published over HTTPS from GitHub Pages. The repository includes Vite preview headers, provider-neutral `_headers`/`_redirects`, production CSP/referrer meta policies, and a Cloudflare Pages `wrangler.toml`. GitHub Pages does not honor `_headers`, so the full response-header contract remains a separate header-capable-host gate even though the public top-level Site Tools path was verified.
 
 ## Verification status
 
@@ -146,10 +146,10 @@ The recorded 2026-08-27 local snapshot reports:
 
 - lint, strict typecheck, and production build passed;
 - Vitest: **53/53 tests across 6 files**;
-- Playwright: **32/32 project runs in 14.7 seconds** (16 scenarios in desktop Chromium and 16 in mobile Chrome);
+- Playwright: **32/32 project runs in 16.0 seconds** (16 scenarios in desktop Chromium and 16 in mobile Chrome);
 - automated axe checks found no serious or critical violations in the four covered states.
 
-The deterministic suite covers engine invariants, schema/seed/import behavior, hypotheses/evidence/reports, interpolation/consistency, timeline components, and WebMCP registry behavior. It does not establish live Site Tools compatibility, durable cross-layer atomicity, complete screen-reader/WCAG conformance, production header correctness, exported-file fidelity, Lighthouse performance, or the probabilistic model eval matrix.
+The deterministic suite covers engine invariants, schema/seed/import behavior, hypotheses/evidence/reports, interpolation/consistency, timeline components, and WebMCP registry behavior. A public in-app browser smoke run separately established the tested Site Tools lifecycle and direct invocation path, and Lighthouse audited the deployed workspace. Neither result establishes broad client compatibility, durable cross-layer atomicity, complete screen-reader/WCAG conformance, full response-header enforcement on GitHub Pages, exported-file fidelity, or the probabilistic model eval matrix.
 
 ## External architecture references
 

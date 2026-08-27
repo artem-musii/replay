@@ -172,7 +172,7 @@ Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none';
 
 `'unsafe-inline'` above is limited to styles and should be removed if the verified production UI does not need it. Do not add `'unsafe-eval'`, wildcard script/connect sources, or arbitrary external image origins. If hosting, PDF, worker, or development behavior needs a change, document the narrow production exception and retest. CSP `frame-ancestors 'none'` is the primary frame restriction; `X-Frame-Options: DENY` is legacy defense in depth.
 
-Do not claim these headers are live until they are checked on the deployed URL. Local Vite development headers are not proof of production configuration.
+The 2026-08-27 GitHub Pages response was checked and does not apply the repository’s `_headers` file. The production document injects restrictive CSP and no-referrer meta policies, but those cannot provide `Permissions-Policy`, origin isolation, `frame-ancestors`, or the other response-only defenses. Use a host that honors `_headers` when the complete contract is required. Local Vite development headers are not proof of production configuration.
 
 ## Privacy-safe logging and activity
 
@@ -182,7 +182,7 @@ There is no analytics by default. If diagnostics are ever added, they require a 
 
 ## Verification status and remaining checks
 
-The recorded local snapshot has passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 14.7 seconds** (16 desktop and 16 mobile). Deterministic tests cover human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, and pre-command cancellation. Playwright covers manual fallback, blank-case authoring/locks, normalized evidence annotations, and automated axe checks in four principal states.
+The recorded local snapshot has passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 16.0 seconds** (16 desktop and 16 mobile). Deterministic tests cover human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, and pre-command cancellation. Playwright covers manual fallback, blank-case authoring/locks, normalized evidence annotations, and automated axe checks in four principal states.
 
 The following are not yet established by that snapshot and remain manual or external gates:
 
@@ -192,7 +192,7 @@ The following are not yet established by that snapshot and remain manual or exte
 - File-extension spoofing, polyglot images, corrupt local-record recovery, XSS fixtures, and oversized arrays in real browsers.
 - Object-URL cleanup, physical blob deletion, JSON collision behavior, and downloaded-file inspection.
 - Complete report citation/provenance review, including system-derived structural statements.
-- Deployed HTTPS response contains the verified policy/isolation/CSP headers.
+- Full response-policy enforcement remains unavailable on the current GitHub Pages host; verify it if the artifact moves to Cloudflare Pages, Netlify, or another header-capable provider.
 - No unexpected network request occurs during the core demo.
 
 ## Residual risks

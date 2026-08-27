@@ -39,7 +39,7 @@ The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` auto
 | Timeline component            | `tests/components/timeline.test.tsx`              | Playback controls and keyboard/event interaction at the component boundary.                                                                                                       |
 | WebMCP registry               | `tests/webmcp/registry.test.ts`                   | Feature detection, tool inventory/schema/annotations, lifecycle groups, duplicate protection, direct execution, cancellation/reconciliation behavior, and fallback.               |
 
-At the documentation snapshot, lint and strict typecheck passed, Vitest reported **53/53 tests across 6 files**, Playwright reported **32/32 runs in 14.7 seconds** across `chromium-desktop` (16/16) and `mobile-chrome` (16/16), and the production build passed. The Playwright run included blank-case path/event/impact/damage authoring, lock behavior, evidence annotations, and axe checks of the landing page, blank-case wizard, demo workspace, and human-finalization dialog with no serious or critical violations. This is not a claim that screen-reader review, complete WCAG conformance, or the supported-model eval matrix has passed. See `IMPLEMENTATION_STATUS.md` for the most recent project-wide status.
+At the documentation snapshot, lint and strict typecheck passed, Vitest reported **53/53 tests across 6 files**, Playwright reported **32/32 runs in 16.0 seconds** across `chromium-desktop` (16/16) and `mobile-chrome` (16/16), and the production build passed. The Playwright run included blank-case path/event/impact/damage authoring, lock behavior, evidence annotations, and axe checks of the landing page, blank-case wizard, demo workspace, and human-finalization dialog with no serious or critical violations. This is not a claim that screen-reader review, complete WCAG conformance, or the supported-model eval matrix has passed. See `IMPLEMENTATION_STATUS.md` for the most recent project-wide status.
 
 ## End-to-end coverage
 
@@ -62,7 +62,7 @@ Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile pro
 15. axe analysis of landing and blank wizard; and
 16. axe analysis of workspace and finalization dialog.
 
-Pointer drag/rotation, local user-evidence upload/delete, downloaded-file opening, full JSON import/export recovery, dialog focus behavior, screen readers, real WebMCP Chrome, and live Site Tools remain explicit manual or future automated gates below. Playwright screenshot PNGs are success artifacts in `playwright-report`; they are not visual-regression baselines.
+Pointer drag/rotation, local user-evidence upload/delete, downloaded-file opening, full JSON import/export recovery, dialog focus behavior, screen readers, and a cross-client WebMCP matrix remain explicit manual or future automated gates below. A direct public Site Tools smoke run is recorded later in this document, but it is not a probabilistic model-eval pass. Playwright screenshot PNGs are success artifacts in `playwright-report`; they are not visual-regression baselines.
 
 ## Deterministic demo fixture
 
@@ -122,7 +122,7 @@ Use a disposable demo fixture for direct mutation tests. Never use personal evid
 
 Use a deployed HTTPS URL because that is the submission environment. At the source-of-truth date, the official OpenAI Site Tools documentation lists GPT-5.6 Sol and GPT-5.6 Terra as supported and notes rollout/workspace limitations; recheck before the final run.
 
-1. Open `<live-app-url>/#demo` in the desktop app’s built-in browser.
+1. Open [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) in the desktop app’s built-in browser.
 2. Confirm REPLAY’s page status says Site Tools available.
 3. Ask the four prompts in [demo-script.md](demo-script.md) without naming internal tools.
 4. Capture tool names, arguments, order, results, case versions, activity IDs, and visible UI effects.
@@ -131,7 +131,7 @@ Use a deployed HTTPS URL because that is the submission environment. At the sour
 7. Verify the agent prepares but cannot complete the declarative finalization flow.
 8. Reset and repeat every scenario in `evals/webmcp-evals.json` at least five times per currently supported target model, recording exact model/client/build/commit.
 
-The machine-readable eval suite and scoring rules are documented in [webmcp-evals.md](webmcp-evals.md). Do not publish an aggregate pass rate that hides any confirmation, finalization, lock, stale-version, cancellation, or prompt-injection safety failure.
+The machine-readable eval suite and scoring rules are documented in [webmcp-evals.md](webmcp-evals.md). A 2026-08-27 public smoke run discovered 17 baseline tools, called `get_case_summary`, visibly added and safely reverted an observation, built the report preview, discovered the 18th `add_report_note` tool, and verified one non-autosubmitting `finalize_factual_report` form. A separate blank-case journey survived reload through IndexedDB. Do not publish this direct contract verification as an aggregate model-eval rate, or publish an aggregate that hides any confirmation, finalization, lock, stale-version, cancellation, or prompt-injection safety failure.
 
 ## Accessibility verification
 
@@ -158,25 +158,26 @@ Automated axe results are a starting point, not a substitute for interaction rev
 7. Check deployed response headers with:
 
 ```bash
-curl -sS -D - -o /dev/null https://<deployment-host>/#demo
+curl -sS -D - -o /dev/null https://artem-musii.github.io/replay-sol/
 ```
 
-The response must be HTTPS and include the intended `Permissions-Policy`, origin isolation, CSP, frame restriction, content-type, and referrer policies. Hash fragments are client-side and are not sent to the server; header checks therefore target `/`.
+The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so its live response lacks the intended `Permissions-Policy`, origin isolation, CSP, frame restriction, content-type, and referrer response policies. The production document mitigates the policies representable in HTML with restrictive CSP and no-referrer meta elements; use Cloudflare Pages, Netlify, or another header-capable host when the complete response contract is required. Hash fragments are client-side and are not sent to the server, so header checks target `/`.
 
 ## Performance and visual verification
 
 - Record interaction responsiveness while dragging, scrubbing, playing at 2×, and overlaying two branches.
 - Lighthouse 13.4.1 audited the seeded workspace from the strict production preview: **96 performance, 100 accessibility, 100 best practices, and 100 SEO**. Recorded lab metrics were FCP 2.0 s, LCP 2.4 s, Speed Index 2.0 s, total blocking time 10 ms, CLS 0, and interactive 2.4 s.
+- The same Lighthouse version audited the public GitHub Pages workspace at **99 performance, 100 accessibility, 100 best practices, and 100 SEO**. Public lab metrics were FCP 1.8 s, LCP 1.9 s, Speed Index 1.8 s, total blocking time 0 ms, CLS 0, and interactive 1.9 s.
 - Confirm no broken generated image, layout shift, clipped focus ring, unreadable status, or horizontal overflow at 1440 × 900, 1024 × 768, 390 × 844, and 200% zoom.
 - Inspect the five generated images for the criteria in [generated-assets.md](generated-assets.md).
 - Check the console for errors, unhandled rejections, hydration warnings, missing assets/source maps affecting users, and failed requests.
 - Search production paths for placeholders and TODOs:
 
 ```bash
-rg -n "TODO|FIXME|PLACEHOLDER|example\.com|ADD VERIFIED|ADD PUBLIC" src public index.html README.md docs
+rg -n "TODO|FIXME|PLACEHOLDER|example\.com|ADD VERIFIED|ADD PUBLIC|<live-app-url>|<deployment-host>" src public index.html README.md docs
 ```
 
-Submission documents are expected to retain link placeholders only until deployment; remove them before release.
+The published app and repository must have no remaining placeholders. Before the video is recorded, the only intentional submission token is `[ADD YOUTUBE URL]` in the Devpost draft.
 
 ## Result record template
 
