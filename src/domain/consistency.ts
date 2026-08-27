@@ -1,4 +1,5 @@
 import { distance, getActorPoseAtTime, pointInPolygon } from "./interpolation";
+import { containsLiabilityConclusion } from "./languageSafety";
 import type {
   ConsistencyIssue,
   ConsistencyScope,
@@ -6,6 +7,7 @@ import type {
   ReplayCase,
   TimelineEvent,
 } from "./models";
+import { validWorkspaceCitationPaths } from "./report";
 
 export type ConsistencyValidationScope =
   "all" | "scene" | "timeline" | "geometry" | "damage" | "provenance" | "completeness" | "report";
@@ -184,13 +186,25 @@ function timelineIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
 
 function isWithinScene(replayCase: ReplayCase, x: number, y: number): boolean {
   const { bounds, roadPolygon } = replayCase.environment;
-  return (
-    x >= bounds.minX &&
-    x <= bounds.maxX &&
-    y >= bounds.minY &&
-    y <= bounds.maxY &&
-    pointInPolygon({ x, y }, roadPolygon)
-  );
+  const insideBounds = x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
+  if (!insideBounds || !pointInPolygon({ x, y }, roadPolygon)) return false;
+
+  if (replayCase.environment.sceneType === "intersection") {
+    // Mirrors the functional SVG template: a 21%-wide north/south road
+    // crossing a 30%-high east/west road.
+    return (x >= 39.5 && x <= 60.5) || (y >= 35 && y <= 65);
+  }
+
+  // The roundabout template is the union of its approach roads and outer
+  // ellipse, excluding the central island. SVG uses a 1000×700 viewBox, so
+  // the normalized horizontal and vertical radii differ.
+  const dx = x - 50;
+  const dy = y - 50;
+  const insideOuterRoundabout = (dx / 20.5) ** 2 + (dy / 29.3) ** 2 <= 1;
+  const insideIsland = (dx / 11.4) ** 2 + (dy / 16.3) ** 2 < 1;
+  const onHorizontalApproach = y >= 37.1 && y <= 62.9;
+  const onVerticalApproach = x >= 41 && x <= 59;
+  return !insideIsland && (insideOuterRoundabout || onHorizontalApproach || onVerticalApproach);
 }
 
 function geometryIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyIssue[] {
@@ -452,10 +466,7 @@ function provenanceIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   const actorIds = new Set(replayCase.actors.map((actor) => actor.id));
 
   for (const claim of replayCase.claims) {
-    if (
-      claim.status === "confirmed" &&
-      /\b(?:at fault|liable|liability conclusion|caused the collision)\b/i.test(claim.statement)
-    ) {
+    if (claim.status === "confirmed" && containsLiabilityConclusion(claim.statement)) {
       issues.push(
         issue(
           "provenance.liability-as-fact",
@@ -727,6 +738,7 @@ function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = [];
   const claims = new Map(replayCase.claims.map((claim) => [claim.id, claim]));
   const evidence = new Map(replayCase.evidence.map((asset) => [asset.id, asset]));
+  const workspacePaths = validWorkspaceCitationPaths(replayCase);
   const previews = replayCase.reportSnapshots.map((snapshot) => ({
     ownerId: snapshot.id,
     preview: snapshot.preview,
@@ -734,10 +746,9 @@ function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   for (const { ownerId, preview } of previews) {
     for (const section of preview.sections) {
       for (const statement of section.statements) {
-        const substantive = statement.certainty !== "system";
-        if (
-          /\b(?:at fault|liable|liability conclusion|caused the collision)\b/i.test(statement.text)
-        ) {
+        const hasClaimOrEvidenceCitation =
+          statement.citations.claimIds.length > 0 || statement.citations.evidenceIds.length > 0;
+        if (containsLiabilityConclusion(statement.text)) {
           issues.push(
             issue(
               "report.liability-language",
@@ -751,9 +762,10 @@ function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
           );
         }
         if (
-          substantive &&
-          statement.citations.claimIds.length === 0 &&
-          statement.citations.evidenceIds.length === 0
+          (statement.certainty !== "system" && !hasClaimOrEvidenceCitation) ||
+          (statement.certainty === "system" &&
+            !hasClaimOrEvidenceCitation &&
+            statement.citations.workspacePaths.length === 0)
         ) {
           issues.push(
             issue(
@@ -766,6 +778,21 @@ function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
               ["Add source citations", "Remove the unsupported statement"],
             ),
           );
+        }
+        for (const workspacePath of statement.citations.workspacePaths) {
+          if (!workspacePaths.has(workspacePath)) {
+            issues.push(
+              issue(
+                "report.invalid-workspace-citation",
+                "report",
+                "error",
+                "Report workspace citation is unavailable",
+                "A structured report source no longer resolves to an inspectable case object.",
+                [ownerId, statement.id],
+                ["Restore the referenced case object", "Remove the unsupported statement"],
+              ),
+            );
+          }
         }
         for (const claimId of statement.citations.claimIds) {
           const claim = claims.get(claimId);
@@ -808,7 +835,7 @@ function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   }
 
   for (const note of replayCase.reportNotes) {
-    if (/\b(?:at fault|liable|liability conclusion|caused the collision)\b/i.test(note.text)) {
+    if (containsLiabilityConclusion(note.text)) {
       issues.push(
         issue(
           "report.liability-language",

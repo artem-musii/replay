@@ -40,21 +40,23 @@ This script uses the deterministic `#demo` route, the live REPLAY workspace, and
 
 > The agent reads the structured case, not pixels. It can distinguish a human-confirmed observation from a report, an unknown, or a deterministic inconsistency.
 
-**Pass cue:** No case content changes during the read-only inspection.
+**Pass cue:** No case version, canonical mutation activity, or factual content changes during inspection. Completed calls may appear in session-only invocation audit.
 
-### 0:35–0:55 — Build a visible reconstruction
+### 0:35–0:55 — Propose and review a reconstruction
 
 **Agent prompt, verbatim:**
 
-> Create a first reconstruction from the current information, but do not decide fault.
+> Propose coordinated paths for both vehicles from the current information, but do not apply them or decide fault.
 
-**Expected Site Tools:** a targeted state read if needed, then `set_actor_trajectory` for the visible paths and `mark_impact_event` only as reported, uncertain, or agent hypothesis.
+**Expected Site Tools:** a targeted state read if needed, then one `propose_scene_changes` call containing both vehicle paths. It must not call the direct trajectory tools for this coordinated change.
 
-**Picture:** Show the trajectory and impact geometry changing on the SVG scene, the timeline updating, and an agent-authored activity entry appearing.
+**Picture:** Show the pending proposal and base-versus-proposed paths while current geometry remains unchanged. Click **Accept and apply**, then confirm the visible dialog yourself; show both paths update together and the proposal plus human-decision activity entries.
 
 **Narration:**
 
-> Narrow tools update the same scene and timeline I am looking at. Every change is attributed, versioned, and reviewable.
+> For a coordinated change, the agent creates a reversible preview instead of moving the scene behind my back. Only I can adjust, accept, or reject it, and acceptance applies the reviewed revision together.
+
+**Pass cue:** No scene geometry changes before the human click. After acceptance, both paths, proposal status, durable activity, and persistence agree.
 
 ### 0:55–1:15 — Human override
 
@@ -116,17 +118,18 @@ This script uses the deterministic `#demo` route, the live REPLAY workspace, and
 
 ## Reset instructions
 
-- Direct reset: navigate to [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) from another route or a clean browsing context.
+- Fresh-origin reset: use a clean browser origin with no saved demo data.
 - In-workspace reset: **Case options → Reset deterministic demo**.
-- Verify the case returns to version 1, active branch **Baseline reconstruction**, four synthetic evidence items, and the seeded geometry inconsistency before each take.
-- Do not reuse a take after hidden warm-up commands; they change case version and activity.
+- Opening `/#demo` alone resumes a valid saved seed-v1 or seed-v2 demo case and is not a reset.
+- After an explicit reset, verify `seedVersion = 2`, case version 1, active branch **Baseline reconstruction**, four synthetic evidence items, and the seeded geometry inconsistency before each take.
+- Do not reuse a take after hidden warm-up commands. Reads add session audit, while mutations also change case version and durable activity.
 
 ## Backup recording sequence
 
 If model latency makes one continuous take awkward, capture these clips from the same deployed commit and fresh fixture, then edit only dead time:
 
 1. clean workspace opening and first read-only Site Tools call;
-2. trajectory/impact mutation with visible agent activity;
+2. coordinated proposal preview followed by visible human acceptance;
 3. human drag and rotation followed by recent-activity reread;
 4. branch creation and comparison;
 5. evidence badge and provenance links;

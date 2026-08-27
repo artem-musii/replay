@@ -4,6 +4,16 @@ export type Awaitable<T> = T | Promise<T>;
 
 export type ReplayIssue = Readonly<Record<string, unknown>>;
 
+export class ReplayWebMCPContractError extends Error {
+  readonly code: "INVALID_INPUT" | "NOT_FOUND";
+
+  constructor(code: "INVALID_INPUT" | "NOT_FOUND", message: string) {
+    super(message);
+    this.name = "ReplayWebMCPContractError";
+    this.code = code;
+  }
+}
+
 export interface ReplayVisibleState {
   workspaceMode: string;
   selectedItemId?: string;
@@ -14,6 +24,7 @@ export interface WebMCPResult<T = unknown> {
   message: string;
   caseVersion: number;
   activityId?: string;
+  idempotent?: boolean;
   affectedIds: string[];
   issues: ReplayIssue[];
   visibleState: ReplayVisibleState;
@@ -50,6 +61,7 @@ export interface ReplayAdapterResult {
   message: string;
   caseVersion: number;
   activityId?: string;
+  idempotent?: boolean;
   affectedIds?: readonly string[];
   issues?: readonly ReplayIssue[];
   code?: string;
@@ -64,6 +76,20 @@ export interface ReplayInvocationContext {
 export interface ReplayAgentWorkingState {
   active: boolean;
   toolName: WebMCPToolName;
+  requestId?: string;
+}
+
+/**
+ * A visible, session-scoped audit entry for a tool call that did not create a
+ * canonical domain activity of its own. Keeping this outside ReplayCase
+ * preserves read-only tool semantics.
+ */
+export interface ReplayToolInvocationAudit {
+  toolName: WebMCPToolName;
+  ok: boolean;
+  message: string;
+  caseVersion: number;
+  affectedIds: readonly string[];
   requestId?: string;
 }
 
@@ -91,7 +117,7 @@ export interface ReplayWebMCPAdapter {
     context: ReplayInvocationContext,
   ): Awaitable<readonly ReplayIssue[]>;
   compareHypotheses(
-    input: Readonly<{ branchIds: readonly string[]; comparisonMode: HypothesisComparisonMode }>,
+    input: Readonly<{ branchIds: readonly string[] }>,
     context: ReplayInvocationContext,
   ): Awaitable<unknown>;
 
@@ -119,13 +145,13 @@ export interface ReplayWebMCPAdapter {
     input: Readonly<{
       branchId?: string;
       expectedVersion: number;
-      requestId: string;
     }>,
     context: ReplayInvocationContext,
   ): Awaitable<ReplayAdapterResult>;
 
   setAgentWorking?(state: ReplayAgentWorkingState): Awaitable<void>;
   revealAffected?(affectedIds: readonly string[]): Awaitable<void>;
+  recordToolInvocation?(audit: ReplayToolInvocationAudit): Awaitable<void>;
 }
 
 export const WORKSPACE_SECTIONS = [
@@ -160,15 +186,6 @@ export type ActivityAuthorFilter = (typeof ACTIVITY_AUTHOR_FILTERS)[number];
 export const CONSISTENCY_SCOPES = ["all", "scene", "timeline", "provenance", "report"] as const;
 export type ConsistencyScope = (typeof CONSISTENCY_SCOPES)[number];
 
-export const HYPOTHESIS_COMPARISON_MODES = [
-  "summary",
-  "geometry",
-  "timing",
-  "evidence",
-  "full",
-] as const;
-export type HypothesisComparisonMode = (typeof HYPOTHESIS_COMPARISON_MODES)[number];
-
 export const TOOL_GROUPS = ["base", "scene", "facts", "hypothesis", "report"] as const;
 export type WebMCPToolGroup = (typeof TOOL_GROUPS)[number];
 
@@ -184,6 +201,7 @@ export const BASE_TOOL_NAMES = [
 export const SCENE_TOOL_NAMES = [
   "upsert_scene_actor",
   "set_actor_trajectory",
+  "propose_scene_changes",
   "mark_impact_event",
   "mark_vehicle_damage",
 ] as const;

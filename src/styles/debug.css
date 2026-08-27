@@ -60,10 +60,10 @@
   gap: 1px;
 }
 .debug-support strong {
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 .debug-support span {
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .debug-layout {
@@ -77,7 +77,10 @@
   border-right: 1px solid var(--rule);
   background: var(--paper);
 }
-.debug-tool-list > button {
+.debug-tool-list > [role="listitem"] {
+  width: 100%;
+}
+.debug-tool-list > [role="listitem"] > button {
   width: 100%;
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
@@ -89,10 +92,10 @@
   background: transparent;
   padding: 8px;
 }
-.debug-tool-list > button:hover {
+.debug-tool-list > [role="listitem"] > button:hover {
   background: var(--paper-deep);
 }
-.debug-tool-list > button.is-selected {
+.debug-tool-list > [role="listitem"] > button.is-selected {
   border-color: var(--rule-strong);
   background: var(--paper-raised);
 }
@@ -102,13 +105,13 @@
   min-width: 0;
 }
 .debug-tool-list strong {
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 .debug-tool-list small {
   overflow: hidden;
   color: var(--muted);
   font:
-    0.53rem ui-monospace,
+    0.75rem ui-monospace,
     monospace;
   text-overflow: ellipsis;
 }
@@ -143,8 +146,8 @@
   margin: 0 0 4px;
 }
 .debug-detail code {
-  color: var(--selection);
-  font-size: 0.67rem;
+  color: oklch(0.4 0.12 240);
+  font-size: 0.75rem;
 }
 .registration-badge {
   border: 1px solid var(--rule);
@@ -152,16 +155,16 @@
   padding: 4px 7px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.52rem;
+  font-size: 0.75rem;
 }
 .registration-badge.is-registered {
-  color: var(--confirmed);
+  color: oklch(0.4 0.085 180);
   border-color: var(--confirmed);
 }
 .debug-detail > p {
   color: var(--muted);
   line-height: 1.55;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   max-width: 720px;
 }
 .annotation-row {
@@ -177,7 +180,7 @@
   border: 1px solid var(--rule);
   border-radius: 999px;
   padding: 4px 7px;
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .debug-detail details {
@@ -191,7 +194,7 @@
   gap: 5px;
   padding: 8px;
   cursor: pointer;
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 .debug-detail pre {
@@ -212,7 +215,7 @@
   gap: 5px;
 }
 .debug-input > span {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 730;
 }
 .debug-input textarea {
@@ -222,7 +225,7 @@
   padding: 9px;
   background: var(--paper);
   font:
-    0.64rem/1.5 ui-monospace,
+    0.75rem/1.5 ui-monospace,
     monospace;
   resize: vertical;
 }
@@ -234,10 +237,10 @@
 }
 .debug-actions .button {
   min-height: 34px;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 .debug-hint {
-  font-size: 0.61rem !important;
+  font-size: 0.75rem !important;
 }
 .debug-result {
   border-left: 3px solid var(--confirmed);
@@ -248,11 +251,11 @@
 .debug-result.is-error {
   border-color: var(--conflict);
   color: var(--conflict);
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 .debug-result > span {
   display: block;
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   font-weight: 750;
   margin-bottom: 5px;
 }
@@ -263,10 +266,10 @@
   border-top: 1px solid var(--rule);
   padding: 7px 18px;
   color: var(--muted);
-  font-size: 0.58rem;
+  font-size: 0.75rem;
 }
 .debug-panel > footer code {
-  color: var(--agent);
+  color: oklch(0.4 0.12 275);
 }
 @media (max-width: 720px) {
   .debug-backdrop {

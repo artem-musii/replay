@@ -1,12 +1,12 @@
 # Security and privacy notes
 
-Last threat-model review: 2026-08-27. This document records implemented controls and known gaps; it is not a security certification. Local automated results do not substitute for live response-header, browser, dependency, or penetration review.
+Last threat-model review: 2026-08-28. This document records implemented controls and known gaps; it is not a security certification. Local automated results do not substitute for live response-header, browser, dependency, or penetration review.
 
 ## Security objectives
 
 REPLAY protects four things:
 
-1. **Confidentiality:** incident notes, evidence, filenames, and reports stay on the user’s device unless the user explicitly exports them.
+1. **Confidentiality:** manual-mode case data stays in origin-local storage until explicit export. In Site Tools mode, only the selected structured result—not uploaded image bytes—is disclosed to the connected client/model service under its separate privacy boundary.
 2. **Integrity:** agent or imported content cannot silently become a confirmed fact, rewrite locked geometry, erase evidence, or finalize a report.
 3. **Provenance:** every substantive claim, evidence link, hypothesis, and mutation remains attributable and reviewable.
 4. **Availability/recovery:** malformed local data, a cancelled tool, failed export, or unsupported WebMCP browser does not destroy the open case or blank the application.
@@ -15,31 +15,33 @@ REPLAY is not a high-assurance forensic system. It does not establish fault, leg
 
 ## Trust boundaries
 
-| Boundary                     | Trust decision                                                                                                                                  |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Human UI input               | Intentional but still schema/range validated and escaped.                                                                                       |
-| WebMCP call                  | Untrusted input from an agent; validate schema, origin state, actor permissions, version, request ID, references, and locks.                    |
-| WebMCP annotations           | Hints to the client, never authorization or proof of read-only behavior.                                                                        |
-| Evidence text/image/filename | Untrusted case data. Visible text inside an image can itself be a prompt-injection payload.                                                     |
-| Imported JSON/case data      | Fully untrusted; strict parse, size/version limits, and referential validation before storage. General case-shape migration is not implemented. |
-| IndexedDB                    | Same-origin local storage, not a secure enclave. Any script executing in the origin can access it.                                              |
-| Browser extension            | Outside REPLAY’s control; host-permission extensions can inspect/modify page data.                                                              |
-| Generated demo asset         | Synthetic fixture only; label it and never present it as authentic evidence.                                                                    |
-| PDF/JSON/scene export        | Explicit user-directed egress. Exports may contain sensitive data and need a warning.                                                           |
+| Boundary                          | Trust decision                                                                                                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Human UI input                    | Intentional but still schema/range validated and escaped.                                                                                                                                        |
+| WebMCP call                       | Untrusted input from an agent; validate schema, origin state, actor permissions, version, request ID, references, and locks.                                                                     |
+| Site Tools client/model service   | External structured-data recipient. Tool-returned titles, claims, metadata, notes, assumptions, questions, activity, and report text can leave the browser; uploaded evidence bytes are omitted. |
+| WebMCP annotations                | Hints to the client, never authorization or proof of read-only behavior.                                                                                                                         |
+| Evidence text/image/filename      | Untrusted case data. Visible text inside an image can itself be a prompt-injection payload.                                                                                                      |
+| Imported structured case transfer | Fully untrusted unless loaded from REPLAY's trusted local-vault path; migrate known v1 shape, validate v2/references, and reset unsigned trust attestations before storage.                      |
+| IndexedDB / origin                | Same-origin local storage, not a secure enclave. Any script executing on the origin can access it; the public `/replay-sol/` path shares the `artem-musii.github.io` origin with other projects. |
+| Browser extension                 | Outside REPLAY’s control; host-permission extensions can inspect/modify page data.                                                                                                               |
+| Generated demo asset              | Synthetic fixture only; label it and never present it as authentic evidence.                                                                                                                     |
+| PDF/JSON/scene/recovery export    | Explicit user-directed egress. Structured JSON excludes blobs and resets trust on unsigned import; raw recovery may contain invalid/sensitive content.                                           |
 
 ## Local-first privacy baseline
 
-The core demo requires no account, backend, analytics, advertising, location access, telemetry, runtime model call, or external evidence upload. Case JSON and image blobs are stored under the application’s origin in IndexedDB. Static synthetic demo assets ship with the application.
+The core application requires no REPLAY-operated account, backend, analytics, advertising, location access, telemetry, runtime model API, or external evidence upload. Case JSON and image blobs are stored under the application’s origin in IndexedDB. Static synthetic demo assets ship with the application. This statement does not include the connected Site Tools client/model service: invoking a tool can disclose its selected structured result outside the browser.
 
 This architecture reduces network disclosure but does not make local data secret:
 
 - another person using the same browser profile may open the case;
 - local backups and downloads inherit filesystem/cloud-sync exposure;
 - browser extensions with sufficient permissions may read the page;
-- clearing site data removes local cases unless the user exported a backup;
+- the public GitHub Pages project shares its origin-local vault with other `artem-musii.github.io` projects;
+- clearing site data removes local cases even if the browser granted REPLAY's best-effort persistent-storage request;
 - IndexedDB is not encrypted by REPLAY; device/browser protections remain relevant.
 
-The UI discloses local storage, shows save status, confirms demo reset and evidence deletion, and exposes no bulk-destructive WebMCP tool. A structured JSON export is implemented, but it does not contain evidence blobs. A complete evidence backup and general per-case storage manager are not implemented and must not be implied by release copy.
+The UI discloses local storage/shared-origin risk, shows save status, confirms demo reset and evidence deletion, retains malformed records for explicit recovery, and exposes no bulk-destructive WebMCP tool. Structured JSON is a case transfer, not a backup: it excludes evidence blobs, contains the source case ID, and deliberately clears/demotes trust attestations on unsigned import. The UI assigns the imported copy a fresh local root case ID before saving it. A complete evidence backup and general per-case storage manager are not implemented and must not be implied by release copy.
 
 ## WebMCP security model
 
@@ -64,21 +66,26 @@ Browser call review and annotation hints are defense in depth. Every handler mus
 
 - open case and valid lifecycle state;
 - strict runtime schema and typed ID resolution;
-- expected case version and idempotent request ID;
+- expected case version and request ID bound to the validated semantic caller-intent fingerprint;
 - allowed author/origin transition;
 - lock, branch, and immutable-snapshot rules;
 - agent prohibition on confirmed facts and finalization;
+- agent prohibition on evidence deletion and proposal adjustment/acceptance/rejection;
 - output minimization.
 
 A write tool never gains extra authority because a prompt says the user approved it.
 
 ### Cancellation and persistence sequencing
 
-Registration and execution signals have different jobs. Registration abort unregisters a tool. The `execute(input, { signal })` signal cancels that invocation and is checked by the registry, adapter, and engine before synchronous command execution.
+Registration and execution signals have different jobs. Registration abort unregisters a tool. The `execute(input, { signal })` signal cancels that invocation and is checked before adapter work, isolated staging, primary persistence, and staged commit.
 
-The current `ReplayEngine` commits validated state in memory, notifies React subscribers, and only then saves the case through Dexie. Imperative WebMCP mutation handlers await that post-command save before returning success, but the engine and IndexedDB are not one rollback transaction. Cancellation before the engine command leaves state unchanged; cancellation or storage failure after the engine commit cannot undo that commit. The UI exposes save failure, and the tool wrapper can return `EXECUTION_FAILED`, but durable rollback/reconciliation remains a known gap.
+The ordinary human UI calls `ReplayEngine` directly: validated state commits in memory, React is notified, and a compare-and-swap Dexie save is queued afterward. A failed UI save can therefore leave live memory newer than storage; the workspace pauses further mutations and offers retry or recovery export.
 
-Chrome documents that unregistering no longer cancels an already-running call as of Chrome 153, so lifecycle cleanup and invocation cancellation remain separate. Registry tests cover cancellable fake-adapter work; cancellation during real IndexedDB work is a manual integration gate.
+Imperative WebMCP mutations take the opposite order around the same domain command. The adapter reduces against an isolated copy of the case, history, and request receipts, compare-and-swap saves the staged case against the live baseline, then adopts/notifies only if the baseline still matches. A rejected primary save leaves live state untouched. If cancellation or a live conflict follows a resolved save, the adapter compare-and-swap restores the pre-mutation live case; failed compensation returns/audits `PERSISTENCE_FAILED`. The engine and IndexedDB remain separate physical operations, Web Locks remain best effort, and browser paint is not coupled transactionally to the tool promise.
+
+Domain mutations append durable canonical activity. Successful/rejected reads and UI-only tool calls without a canonical activity ID create a capped session-only invocation entry outside `ReplayCase`. That visible audit is not persisted and does not change case version or report eligibility.
+
+Chrome documents that unregistering no longer cancels an already-running call as of Chrome 153, so lifecycle cleanup and invocation cancellation remain separate. Deterministic real-adapter tests cover cancellation while a primary save is pending, successful compensation, and compensation failure. Combining that adapter with actual Dexie and real-browser paint/timing remains a separate integration gate.
 
 ## Prompt-injection resistance
 
@@ -89,7 +96,7 @@ Controls:
 - Tool names, descriptions, schemas, and routing are static developer-owned definitions.
 - Tool implementations switch on allowlisted operations and statuses, never instructions extracted from evidence.
 - Evidence, notes, witness statements, filenames, imported text, and hypotheses are returned only as data fields.
-- Read tools returning that data set `untrustedContentHint: true`.
+- All imperative tools set `untrustedContentHint: true` because compact success/failure output can contain case-derived text or metadata.
 - Read-only tools set `readOnlyHint: true`, but tests still assert no mutation.
 - Tool outputs are compact and omit raw evidence bytes, whole-case dumps, hidden DOM, and unrelated local data.
 - React text rendering/DOM properties are used; never inject untrusted strings with `dangerouslySetInnerHTML`, `innerHTML`, or executable SVG/HTML.
@@ -119,14 +126,14 @@ Implemented handling includes generated opaque blob keys, SHA-256 checksums, loc
 - check declared type, extension, and decoded image format; do not trust a filename or MIME header alone;
 - sanitize the display filename and never use it as a filesystem or URL path;
 - decode within bounded dimensions/memory and fail closed on corrupt/polyglot input;
-- verify generated opaque blob keys/checksums and object-URL cleanup in browser automation;
+- retain the implemented case-ID/checksum/MIME/blob-MIME/SHA-256 verification and verify object-URL cleanup in browser automation;
 - keep annotations as normalized numeric data, never embedded markup;
 - do not extract or display EXIF GPS data by default;
-- warn that a complete evidence backup may retain original metadata;
+- warn that a future complete evidence backup may retain original metadata;
 - when producing a report/scene image, render decoded pixels into a new local output so source metadata is not silently propagated;
 - verify through a production Network-panel audit that no blob is transmitted externally.
 
-The hero and four demo evidence images were generated during development with [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2). They use synthetic prompts/assets, are labelled synthetic in evidence views, and create no runtime OpenAI dependency.
+The hero and four active demo evidence images were generated during development with Codex's built-in image-generation mode. The tool did not expose a reliable underlying model identifier, so this repository does not claim one. The assets use synthetic prompts, are labelled synthetic in evidence views, and create no runtime model dependency.
 
 ## XSS, rendering, and export
 
@@ -137,20 +144,21 @@ The hero and four demo evidence images were generated during development with [G
 - Generate PDF/PNG/SVG/JSON locally after an explicit user action.
 - Report generation includes only eligible, existing IDs and labels hypotheses/uncertainty.
 - A failed export leaves the case unchanged and does not create an activity item claiming success.
-- The structured JSON export revalidates on import. It excludes evidence blobs, preserves the case ID, and currently has no collision/re-key prompt before later save-by-ID; treat it as a case-data export rather than a complete or collision-safe backup.
+- The structured JSON export revalidates on import. It excludes evidence blobs and contains the source case ID; the visible import path automatically re-keys the local copy before save. Treat it as a case-data transfer rather than a complete evidence backup.
 
 ## Human confirmation and high-stakes actions
 
 The following actions require the ordinary human interface:
 
 - confirming a claim;
+- adjusting, accepting, or rejecting an agent scene proposal;
 - unlocking protected content where policy permits;
 - acknowledging unresolved questions and limitations;
 - finalizing an immutable report snapshot;
 - downloading any PDF, JSON, SVG, or PNG export;
 - deleting evidence or resetting the deterministic demo.
 
-The visible declarative form is named `finalize_factual_report` and intentionally omits `toolautosubmit`. Its implemented `toolactivated` handler marks the review as Site Tools-prepared and opens the human review; `toolcancel` clears that prepared state. The agent cannot check the three acknowledgements or complete the second confirmation. Only the human UI dispatches `report.finalize`, and the reducer rejects agent/WebMCP finalization. The report states that it is informational and not forensic or legal advice.
+The visible declarative form is named `finalize_factual_report` and intentionally omits `toolautosubmit`. In a compatible declarative client, its implemented `toolactivated` handler marks the review prepared and opens it; `toolcancel` clears that state. OpenAI's built-in Site Tools browser currently does not expose declarative form tools, although ChatGPT Work or Codex may still interact with forms through ordinary browser capabilities. Those interactions are not WebMCP calls and must not operate the three human acknowledgements or second confirmation. Only the human UI dispatches `report.finalize`, and the reducer rejects agent/WebMCP finalization. The report states that it is informational and not forensic or legal advice.
 
 ## Production headers
 
@@ -164,33 +172,35 @@ X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 ```
 
-A CSP baseline, adjusted only as required by the built artifact, is:
+A current header-capable-host contract, matching `public/_headers`, is:
 
 ```http
-Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'
+Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests
 ```
 
 `'unsafe-inline'` above is limited to styles and should be removed if the verified production UI does not need it. Do not add `'unsafe-eval'`, wildcard script/connect sources, or arbitrary external image origins. If hosting, PDF, worker, or development behavior needs a change, document the narrow production exception and retest. CSP `frame-ancestors 'none'` is the primary frame restriction; `X-Frame-Options: DENY` is legacy defense in depth.
 
-The 2026-08-27 GitHub Pages response was checked and does not apply the repository’s `_headers` file. The production document injects restrictive CSP and no-referrer meta policies, but those cannot provide `Permissions-Policy`, origin isolation, `frame-ancestors`, or the other response-only defenses. Use a host that honors `_headers` when the complete contract is required. Local Vite development headers are not proof of production configuration.
+The historical 2026-08-27 GitHub Pages response was checked and did not apply the repository’s `_headers` file. The document injects restrictive CSP and no-referrer meta policies, but those cannot provide `Permissions-Policy`, origin isolation, `frame-ancestors`, or the other response-only defenses. The current app also refuses to render its workspace or register tools while framed, but that runtime defense does not replace response headers. Use a dedicated origin on a host that honors `_headers` when the complete contract is required. Candidate deployment/header verification is pending; local Vite headers are not production proof.
 
 ## Privacy-safe logging and activity
 
-The in-app activity feed stores concise action summaries and affected IDs, not raw evidence bytes or full note contents. Debug WebMCP state should show schemas, registration state, versions, and compact last results without exposing private image contents. Browser console logging must not print complete cases, blobs, report text, or imported JSON.
+The durable activity feed stores concise mutation summaries and affected IDs, not raw evidence bytes or full note contents. A separate capped session audit records noncanonical tool invocations and disappears on reload. Debug WebMCP state should show schemas, registration state, versions, and compact last results without exposing private image contents. Browser console logging must not print complete cases, blobs, report text, or imported JSON.
 
 There is no analytics by default. If diagnostics are ever added, they require a separate opt-in design and privacy review; this challenge build should not silently add them.
 
 ## Verification status and remaining checks
 
-The recorded local snapshot has passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). Deterministic tests cover human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, and pre-command cancellation. Playwright covers manual fallback, blank-case authoring/locks, normalized evidence annotations, and automated axe checks in four principal states.
+The historical `f980d28` snapshot recorded passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). It covered human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, manual fallback, blank-case authoring, normalized evidence annotations, and automated axe checks. It predates the current schema-v2/proposal/security candidate and is not current release proof.
+
+The current repository adds deterministic proposal, migration/recovery/CAS, case/blob round-trip, packaged evidence-asset digest, staged real-adapter persistence/compensation, semantic-intent idempotency, dialog, override/focus, frame-guard, reset, and export regressions. Runtime corrupt-blob rejection is implemented but is not claimed here as a directly exercised database test. A clean final gate, exact candidate counts, and public/browser verification remain pending.
 
 The following are not yet established by that snapshot and remain manual or external gates:
 
 - Prompt-injection behavior with each supported real agent/client, beyond deterministic schema and authorization tests.
-- Cancellation during real post-command IndexedDB persistence and recovery after a storage failure.
-- Cross-origin/frame behavior against the selected production host and current WebMCP browser.
-- File-extension spoofing, polyglot images, corrupt local-record recovery, XSS fixtures, and oversized arrays in real browsers.
-- Object-URL cleanup, physical blob deletion, JSON collision behavior, and downloaded-file inspection.
+- Combined real-adapter + actual-Dexie cancellation/storage-failure/compensation behavior and recovery in a real browser.
+- Dedicated-origin/header/frame behavior against the selected production host and current WebMCP browser.
+- File-extension spoofing, polyglot images, raw-recovery handling, XSS fixtures, and oversized arrays in real browsers.
+- Object-URL cleanup, physical blob deletion, import re-key/reference behavior in a real browser, and downloaded-file inspection.
 - Complete report citation/provenance review, including system-derived structural statements.
 - Full response-policy enforcement remains unavailable on the current GitHub Pages host; verify it if the artifact moves to Cloudflare Pages, Netlify, or another header-capable provider.
 - No unexpected network request occurs during the core demo.
@@ -200,6 +210,7 @@ The following are not yet established by that snapshot and remain manual or exte
 - WebMCP and agent behavior are evolving and probabilistic; feature detection, browser review, deterministic domain rules, and human confirmation reduce but do not eliminate risk.
 - Annotation hints can be ignored or misinterpreted by a client.
 - A compromised same-origin dependency/script or privileged extension can access local case data.
+- Another project on the shared `artem-musii.github.io` public origin is inside the same IndexedDB boundary.
 - Local storage is not encrypted by the app.
 - A person can export or screenshot sensitive information; REPLAY can warn but cannot control a file after export.
 - Synthetic evidence can be misunderstood if labels are removed outside the app; every in-app view/report must retain the synthetic label.
@@ -210,5 +221,4 @@ The following are not yet established by that snapshot and remain manual or exte
 - [Chrome WebMCP overview: origin isolation and permissions](https://developer.chrome.com/docs/ai/webmcp)
 - [Chrome Imperative API: registration, cancellation, and origin exposure](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
 - [Chrome WebMCP tool security, updated 2026-07-01](https://developer.chrome.com/docs/ai/webmcp/secure-tools)
-- [OpenAI Site Tools security and controls, retrieved 2026-08-27](https://learn.chatgpt.com/docs/webmcp)
-- [OpenAI GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)
+- [OpenAI Site Tools security and controls, retrieved 2026-08-28](https://learn.chatgpt.com/docs/webmcp)

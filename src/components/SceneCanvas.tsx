@@ -11,7 +11,7 @@ import {
   Unlock,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   ActorPose,
   DamageRegion,
@@ -42,7 +42,11 @@ interface SceneCanvasProps {
 interface DragState {
   kind: "actor" | "keyframe" | "pan";
   id: string;
+  moved?: boolean;
   trajectoryId?: string;
+  previewPose?: ActorPose;
+  previewX?: number;
+  previewY?: number;
   offsetX?: number;
   offsetY?: number;
   startClientX?: number;
@@ -113,6 +117,7 @@ export function SceneCanvas({
 }: SceneCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<DragState>();
+  const dragRef = useRef<DragState | undefined>(undefined);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [snapToLane, setSnapToLane] = useState(true);
@@ -129,17 +134,23 @@ export function SceneCanvas({
   const displayedTrajectories = replayCase.trajectories.filter(
     (trajectory) => displayedBranchIds.has(trajectory.branchId) && trajectory.visible,
   );
+  const pendingProposalChanges = replayCase.proposals
+    .filter((proposal) => proposal.status === "pending")
+    .flatMap((proposal) => proposal.revisions.at(-1)?.changes ?? []);
 
   const actorPoses = useMemo(() => {
     return Object.fromEntries(
       replayCase.actors.map((actor) => {
+        if (drag?.kind === "actor" && drag.id === actor.id && drag.previewPose) {
+          return [actor.id, drag.previewPose];
+        }
         const trajectory = replayCase.trajectories.find(
           (item) => item.actorId === actor.id && item.branchId === replayCase.activeBranchId,
         );
         return [actor.id, poseAtTime(trajectory, actor.pose, currentTimeMs)];
       }),
     ) as Record<string, ActorPose>;
-  }, [currentTimeMs, replayCase.activeBranchId, replayCase.actors, replayCase.trajectories]);
+  }, [currentTimeMs, drag, replayCase.activeBranchId, replayCase.actors, replayCase.trajectories]);
 
   const impact = replayCase.timelineEvents.find(
     (event) => event.branchId === replayCase.activeBranchId && event.type === "impact",
@@ -161,54 +172,92 @@ export function SceneCanvas({
     return point.matrixTransform(matrix);
   }
 
+  function updateDrag(next: DragState | undefined): void {
+    dragRef.current = next;
+    setDrag(next);
+  }
+
   function startActorDrag(event: React.PointerEvent, actor: SceneActor) {
     if (actor.locked) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = clientToSvg(event.clientX, event.clientY);
     const pose = actorPoses[actor.id] ?? actor.pose;
     const position = toView(pose.x, pose.y);
-    setDrag({
+    updateDrag({
       kind: "actor",
       id: actor.id,
       offsetX: pointer.x - position.x,
       offsetY: pointer.y - position.y,
+      previewPose: pose,
     });
   }
 
   function onPointerMove(event: React.PointerEvent<SVGSVGElement>) {
-    if (!drag) return;
-    if (drag.kind === "pan") {
+    const activeDrag = dragRef.current;
+    if (!activeDrag) return;
+    if (activeDrag.kind === "pan") {
       const factor = 1 / zoom;
       setPan({
-        x: (drag.startPanX ?? 0) + (event.clientX - (drag.startClientX ?? 0)) * factor,
-        y: (drag.startPanY ?? 0) + (event.clientY - (drag.startClientY ?? 0)) * factor,
+        x: (activeDrag.startPanX ?? 0) + (event.clientX - (activeDrag.startClientX ?? 0)) * factor,
+        y: (activeDrag.startPanY ?? 0) + (event.clientY - (activeDrag.startClientY ?? 0)) * factor,
       });
       return;
     }
     const pointer = clientToSvg(event.clientX, event.clientY);
     const normalized = toNormalized(
-      pointer.x - (drag.offsetX ?? 0),
-      pointer.y - (drag.offsetY ?? 0),
+      pointer.x - (activeDrag.offsetX ?? 0),
+      pointer.y - (activeDrag.offsetY ?? 0),
     );
     const position =
       snapToLane && replayCase.environment.sceneType === "roundabout"
         ? snapToRoundabout(normalized.x, normalized.y)
         : normalized;
-    if (drag.kind === "actor") {
-      const actor = replayCase.actors.find((item) => item.id === drag.id);
+    if (activeDrag.kind === "actor") {
+      const actor = replayCase.actors.find((item) => item.id === activeDrag.id);
       if (!actor) return;
       const pose = actorPoses[actor.id] ?? actor.pose;
-      onMoveActor(actor.id, { ...position, rotationDeg: pose.rotationDeg });
-    } else if (drag.trajectoryId) {
-      onMoveKeyframe(drag.trajectoryId, drag.id, position.x, position.y);
+      updateDrag({
+        ...activeDrag,
+        moved: true,
+        previewPose: { ...position, rotationDeg: pose.rotationDeg },
+      });
+    } else if (activeDrag.trajectoryId) {
+      updateDrag({
+        ...activeDrag,
+        moved: true,
+        previewX: position.x,
+        previewY: position.y,
+      });
     }
   }
 
-  function endDrag() {
-    setDrag(undefined);
+  function commitDrag() {
+    const completedDrag = dragRef.current;
+    updateDrag(undefined);
+    if (completedDrag?.kind === "actor" && completedDrag.moved && completedDrag.previewPose) {
+      onMoveActor(completedDrag.id, completedDrag.previewPose);
+    } else if (
+      completedDrag?.kind === "keyframe" &&
+      completedDrag.moved &&
+      completedDrag.trajectoryId &&
+      completedDrag.previewX !== undefined &&
+      completedDrag.previewY !== undefined
+    ) {
+      onMoveKeyframe(
+        completedDrag.trajectoryId,
+        completedDrag.id,
+        completedDrag.previewX,
+        completedDrag.previewY,
+      );
+    }
   }
 
   function moveActorWithKeyboard(event: React.KeyboardEvent, actor: SceneActor) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect("actor", actor.id);
+      return;
+    }
     const step = event.shiftKey ? 2 : 0.5;
     const pose = actorPoses[actor.id] ?? actor.pose;
     let next = { ...pose };
@@ -231,6 +280,19 @@ export function SceneCanvas({
       next = { ...next, ...snapToRoundabout(next.x, next.y) };
     }
     onMoveActor(actor.id, next);
+  }
+
+  function placeImpactByCoordinates(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const x = Number(data.get("impact-x"));
+    const y = Number(data.get("impact-y"));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    onMarkImpact({
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, y)),
+    });
+    setPlacingImpact(false);
   }
 
   const viewBox = `${-pan.x + (VIEW_WIDTH - VIEW_WIDTH / zoom) / 2} ${-pan.y + (VIEW_HEIGHT - VIEW_HEIGHT / zoom) / 2} ${VIEW_WIDTH / zoom} ${VIEW_HEIGHT / zoom}`;
@@ -321,15 +383,15 @@ export function SceneCanvas({
           role="application"
           aria-label="Editable road scene. Use Tab to select a vehicle, arrow keys to move it, and bracket keys to rotate it."
           onPointerMove={onPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
+          onPointerUp={commitDrag}
+          onPointerCancel={() => updateDrag(undefined)}
           onPointerDown={(event) => {
             if (placingImpact) return;
             if (
               event.target === event.currentTarget ||
               (event.target as Element).classList.contains("scene-pan-target")
             ) {
-              setDrag({
+              updateDrag({
                 kind: "pan",
                 id: "canvas",
                 startClientX: event.clientX,
@@ -401,6 +463,7 @@ export function SceneCanvas({
               width={VIEW_WIDTH}
               height={VIEW_HEIGHT}
               fill="url(#wet-texture)"
+              pointerEvents="none"
             />
           )}
           {showGrid && (
@@ -412,13 +475,69 @@ export function SceneCanvas({
             />
           )}
 
+          {pendingProposalChanges.map((change) => {
+            const actor = replayCase.actors.find((candidate) => candidate.id === change.actorId);
+            if (change.kind === "actor-pose") {
+              const point = toView(change.proposedPose.x, change.proposedPose.y);
+              return (
+                <g
+                  key={change.id}
+                  className="proposal-scene-actor"
+                  transform={`translate(${point.x} ${point.y}) rotate(${change.proposedPose.rotationDeg})`}
+                  aria-hidden="true"
+                >
+                  <rect x="-23" y="-48" width="46" height="96" rx="16" />
+                  <path d="M-15-22Q0-33 15-22L14 14Q0 23-14 14Z" />
+                  <text
+                    x="0"
+                    y="66"
+                    textAnchor="middle"
+                    transform={`rotate(${-change.proposedPose.rotationDeg} 0 66)`}
+                  >
+                    Proposed {actor?.label ?? "vehicle"}
+                  </text>
+                </g>
+              );
+            }
+            const path = change.proposedTrajectory.keyframes
+              .map((frame, index) => {
+                const point = toView(frame.x, frame.y);
+                return `${index === 0 ? "M" : "L"}${point.x},${point.y}`;
+              })
+              .join(" ");
+            return (
+              <g key={change.id} className="proposal-scene-path" aria-hidden="true">
+                <path d={path} />
+                {change.proposedTrajectory.keyframes.map((frame) => {
+                  const point = toView(frame.x, frame.y);
+                  return <circle key={frame.id} cx={point.x} cy={point.y} r="5" />;
+                })}
+              </g>
+            );
+          })}
+
           {showPaths &&
             displayedTrajectories.map((trajectory) => {
               const branchIndex = Math.max(
                 0,
                 replayCase.branches.findIndex((branch) => branch.id === trajectory.branchId),
               );
-              const points = trajectory.keyframes.map((frame) => toView(frame.x, frame.y));
+              const points = trajectory.keyframes.map((frame) =>
+                toView(
+                  drag?.kind === "keyframe" &&
+                    drag.trajectoryId === trajectory.id &&
+                    drag.id === frame.id &&
+                    drag.previewX !== undefined
+                    ? drag.previewX
+                    : frame.x,
+                  drag?.kind === "keyframe" &&
+                    drag.trajectoryId === trajectory.id &&
+                    drag.id === frame.id &&
+                    drag.previewY !== undefined
+                    ? drag.previewY
+                    : frame.y,
+                ),
+              );
               const path = points
                 .map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`)
                 .join(" ");
@@ -432,12 +551,22 @@ export function SceneCanvas({
                   <path
                     className="trajectory__hit"
                     d={path}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Select path for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"}`}
+                    aria-pressed={selected}
                     onClick={() => onSelect("trajectory", trajectory.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelect("trajectory", trajectory.id);
+                      }
+                    }}
                   />
                   <path className="trajectory__line" d={path} />
                   {selected &&
                     trajectory.keyframes.map((frame, index) => {
-                      const point = toView(frame.x, frame.y);
+                      const point = points[index] ?? toView(frame.x, frame.y);
                       return (
                         <g key={frame.id} transform={`translate(${point.x} ${point.y})`}>
                           <circle
@@ -450,10 +579,12 @@ export function SceneCanvas({
                               if (trajectory.locked) return;
                               event.stopPropagation();
                               event.currentTarget.setPointerCapture(event.pointerId);
-                              setDrag({
+                              updateDrag({
                                 kind: "keyframe",
                                 id: frame.id,
                                 trajectoryId: trajectory.id,
+                                previewX: frame.x,
+                                previewY: frame.y,
                               });
                             }}
                             onKeyDown={(event) => {
@@ -535,6 +666,11 @@ export function SceneCanvas({
               <i className="legend-line legend-line--dashed" /> Compared branch
             </span>
           )}
+          {pendingProposalChanges.length > 0 && (
+            <span>
+              <i className="legend-line legend-line--proposal" /> Agent proposal
+            </span>
+          )}
           <span>
             <i className="legend-dot legend-dot--impact" /> Approx. impact
           </span>
@@ -543,9 +679,44 @@ export function SceneCanvas({
           <Move size={13} /> Drag background to pan. Select a vehicle for precise controls.
         </div>
         {placingImpact && (
-          <div className="scene-placement-prompt" role="status">
-            <Crosshair size={14} /> Click the scene at the approximate point of contact. The marker
-            remains uncertain until evidence supports it.
+          <div className="scene-placement-prompt">
+            <p role="status">
+              <Crosshair size={14} /> Click the scene or enter exact coordinates. The marker remains
+              uncertain until evidence supports it.
+            </p>
+            <form
+              aria-label="Place approximate impact by coordinates"
+              onSubmit={placeImpactByCoordinates}
+            >
+              <label>
+                <span>X</span>
+                <input
+                  name="impact-x"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  defaultValue={impact?.location?.x ?? 50}
+                  required
+                />
+              </label>
+              <label>
+                <span>Y</span>
+                <input
+                  name="impact-y"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  defaultValue={impact?.location?.y ?? 50}
+                  required
+                />
+              </label>
+              <button className="button button--primary">Place</button>
+              <button type="button" className="text-button" onClick={() => setPlacingImpact(false)}>
+                Cancel
+              </button>
+            </form>
           </div>
         )}
       </div>

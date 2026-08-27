@@ -1,11 +1,11 @@
 # REPLAY canonical data model
 
-Status: implemented model snapshot aligned to `src/domain/models.ts`, `src/domain/schema.ts`, `src/domain/importExport.ts`, and the `ReplayEngine` command layer as inspected on 2026-08-27. Known persistence and migration limits are recorded below.
+Status: implemented model snapshot aligned to `src/domain/models.ts`, `src/domain/schema.ts`, `src/domain/importExport.ts`, and the `ReplayEngine` command layer as inspected on 2026-08-28. Known persistence and migration limits are recorded below.
 
 ## Two independent versions
 
-- `schemaVersion` identifies the persisted JSON shape and drives migrations. The initial constant is `REPLAY_SCHEMA_VERSION = 1`.
-- `seedVersion` identifies the deterministic demo fixture independently from user-case migrations. The initial constant is `REPLAY_SEED_VERSION = 1`.
+- `schemaVersion` identifies the persisted JSON shape and drives migrations. The current constant is `REPLAY_SCHEMA_VERSION = 2`; v1 is migrated on import/load.
+- `seedVersion` identifies the deterministic demo fixture independently from user-case migrations. The current constant is `REPLAY_SEED_VERSION = 2`. Schema v2 accepts historical positive seed versions through 2 so a saved seed-v1 demo can resume until the person explicitly resets it.
 - `caseVersion` is the monotonically increasing optimistic-concurrency revision. The current engine increments it once for every successful command, including persisted `workspace.focus` and `case.validate` commands. Hover, playback time, menus, and other React-only presentation state do not change it.
 
 Keeping these numbers separate prevents a demo refresh, data migration, and concurrent edit from being mistaken for one another.
@@ -31,8 +31,9 @@ ReplayCase
 ├── claims[] <──────────────────┘
 ├── evidence[] <── links from claims/events/branches/annotations
 ├── questions[] <── related claims, scene objects, branches
+├── proposals[] <── immutable revisions + human decision record
 ├── consistencyIssues[] <── affected IDs
-├── activity[] <── version, author, origin, affected IDs, request ID
+├── activity[] <── durable version, author/origin, override correlation, request ID + semantic fingerprint
 ├── reportNotes[] <── supporting claim/evidence IDs
 └── reportSnapshots[] <── immutable versioned preview + included IDs
 ```
@@ -45,8 +46,8 @@ The implemented TypeScript contract is conceptually:
 
 ```ts
 interface ReplayCase {
-  schemaVersion: 1;
-  seedVersion?: 1;
+  schemaVersion: 2;
+  seedVersion?: number; // positive integer <= REPLAY_SEED_VERSION (currently 2)
   id: string;
   title: string;
   createdAt: string;
@@ -65,6 +66,7 @@ interface ReplayCase {
   claims: Claim[];
   evidence: EvidenceAsset[];
   questions: OpenQuestion[];
+  proposals: AgentProposal[];
   activity: ActivityEvent[];
   consistencyIssues: ConsistencyIssue[];
   reportNotes: ReportNote[];
@@ -170,8 +172,9 @@ Important fields:
 - `notes` and `name` are untrusted text;
 - tags and point/rectangle annotations remain structured;
 - annotation coordinates are normalized to `0..1`;
-- claim, event, scene-object, and branch links are explicit;
-- deletion is soft (`deleted` plus `deletedAt`) so dangling citations can be detected before permanent cleanup.
+- asset-level claim/event/scene-object/branch links are explicit;
+- `annotationLinks[]` can bind a specific annotation to a claim, timeline event, actor, trajectory, damage marker, hypothesis, or assumption; an assumption link also records the asset as supporting evidence; and
+- deletion scrubs active metadata/links and leaves a minimal `deleted`/`deletedAt` tombstone so historical attribution survives without retaining the original blob details.
 
 Object URLs, decoded image elements, and thumbnails are presentation cache, not canonical data. The application must never store an object URL as evidence identity.
 
@@ -192,6 +195,24 @@ Branch invariants:
 
 `HypothesisComparison` is a derived projection containing changed actor trajectories/events, assumptions, supporting/conflicting evidence, unresolved questions, issues, and neutral summaries by branch.
 
+## Coordinated scene proposals
+
+`AgentProposal` is a durable, reviewable ledger entry with title, rationale, `pending | accepted | rejected` status, immutable revisions, and an optional human decision. It is intentionally separate from actors and trajectories: creating or revising a proposal does not apply its geometry.
+
+Each `AgentProposalRevision` records a revision number, summary, agent/human author, WebMCP/UI origin, trust marker, timestamp, and one or more changes:
+
+- `actor-pose` stores the actor’s base pose and proposed pose;
+- `trajectory-set` stores actor/branch/trajectory identity, whether the trajectory would be created, base actor pose, optional base trajectory, and proposed keyframes/visibility.
+
+Required invariants:
+
+- only agent/WebMCP origin can create a proposal;
+- only human/UI origin can adjust, accept, or reject it;
+- only the latest pending revision can be decided;
+- acceptance checks every actor/trajectory baseline and lock before applying any change, so a stale or locked target rejects the whole decision without a partial scene update;
+- accepted/rejected proposals require a human decision record tied to the exact revision; and
+- unsigned import preserves proposal and decision history but sets revision authorship and human-attestation trust markers to false until reviewed locally.
+
 ## Questions and deterministic issues
 
 An `OpenQuestion` has importance (`blocking | high | medium | low`) and one or more ranking reasons:
@@ -207,21 +228,23 @@ A `ConsistencyIssue` records stable `ruleId`, scope, severity, explanation, affe
 
 ## Activity, change history, and idempotency
 
-`ActivityEvent` records resulting `caseVersion`, author (`human | agent | system`), origin (`ui | webmcp | system`), action type, concise summary, affected IDs, optional request/correlation ID, undo eligibility, and timestamp.
+`ActivityEvent` records resulting `caseVersion`, author (`human | agent | system`), origin (`ui | webmcp | system`), action type, concise summary, affected IDs, optional request ID and `requestIntentFingerprint`, undo eligibility, and timestamp. The fingerprint binds a WebMCP request ID to the validated caller intent—tool type, actor/origin, and full semantic payload, excluding `requestId` and `expectedVersion`; revert intent includes its requested activity target. A human UI correction that directly overrides an eligible agent mutation may additionally set `classification: "human-override"` and `overridesActivityId`; both fields must appear together and must reference an earlier agent/WebMCP activity.
 
 Entity `ChangeRecord[]` provides local history for trajectories, events, claims, and branches. The visible activity log remains append-only: undo adds a new activity event rather than erasing the original.
 
-The engine keeps exact completed-request receipts in memory. Request IDs are also written to `ActivityEvent` records inside the persisted case. After a reload, the activity match prevents the same request ID from applying the mutation again and yields a synthesized idempotent result. There is no separate durable receipt table containing the exact original result payload, and the in-memory receipt/history bounds reset with the engine.
+The engine keeps exact completed-request receipts in memory. Repeating a request with the same fingerprint returns that exact receipt with `idempotent: true` and its original `caseVersion`, even if the supplied `expectedVersion` is now stale; it performs no new save or activity. Persisted `ActivityEvent` records let a reload synthesize the same safety outcome using the original activity version, ID, summary, and affected IDs. Reusing the request ID for different semantic intent returns `IDEMPOTENCY_CONFLICT`. Legacy activity without a fingerprint retains action-type-only compatibility. There is no separate durable receipt table containing the exact original result payload, and the in-memory receipt/history bounds reset with the engine.
+
+The workspace also maintains up to 100 session-only Site Tools invocation entries outside `ReplayCase` for successful/rejected reads and UI-only calls that have no canonical activity ID. `get_recent_activity` merges that session view with durable case activity and filters by author before limiting. Session audit does not increment `caseVersion`, affect report eligibility, or persist across reload. A WebMCP mutation canceled before primary persistence records neither canonical nor session activity; a failed post-save compensation is session-audited with `PERSISTENCE_FAILED`.
 
 ## Reports
 
-A `ReportPreview` is a projection tied to `caseId` and `caseVersion`. It contains ordered sections and statements. Each statement has a certainty class and citations split into claim IDs and evidence IDs.
+A `ReportPreview` is a projection tied to `caseId` and `caseVersion`. It contains ordered sections and statements. Each statement has a certainty class and citations split into claim IDs, evidence IDs, and validated `workspacePaths`.
 
 Rules:
 
 - confirmed-section statements cite only human-confirmed claims;
 - reported/uncertain/hypothesis content retains its class;
-- claim-derived factual statements cite valid, non-deleted support; structural scene, method, and table statements can be system-derived without a claim citation;
+- claim-derived substantive factual statements cite valid, non-deleted support; structural scene, method, and table statements may instead cite allowlisted workspace paths such as case metadata, environment, actor poses, trajectories, events, damage, branches, questions, and deterministic issues;
 - hypotheses stay in a labeled appendix;
 - missing requirements and unresolved questions remain visible;
 - the disclaimer states that the report is not forensic or legal advice.
@@ -238,18 +261,21 @@ Validation occurs at four boundaries:
 
 1. deterministic seed creation;
 2. IndexedDB load (plus the implemented Dexie table/index upgrade);
-3. JSON import/backup restore;
+3. structured JSON import/transfer;
 4. every UI and WebMCP command payload.
 
 Shape validation is necessary but insufficient. The implemented reference and command passes verify ID uniqueness, typed references, active branch, trajectory ownership, report citations, author permissions, locks, normalized scene values, and request/version semantics.
 
-## Current migration and recovery behavior
+## Current migration, import, and recovery behavior
 
-- `ReplayCase.schemaVersion` is currently 1. Import accepts that version and rejects unsupported versions; there is no older case-shape migration pipeline yet.
-- Dexie has database versions 1 and 2. Version 2 changes the evidence checksum index from globally unique to non-unique so different cases may store identical bytes.
-- A failed parse of the most recent persisted case currently deletes that case record and returns to an empty landing state. Raw-record quarantine/export recovery is not implemented.
-- JSON import is strict and size/reference validated, but it carries only structured `ReplayCase` data, not evidence blobs. Imported IDs are not re-keyed, and later save-by-ID can replace an existing local record with the same ID.
-- A demo reset recreates the deterministic demo case ID; the database helper used by that path does not clear unrelated case records.
+- `ReplayCase.schemaVersion` is 2. The v1→v2 migration adds empty `proposals`/`annotationLinks` and empty report `workspacePaths`, then applies strict current-schema and cross-reference validation. Other unsupported versions are not guessed into shape.
+- Current cases live in origin-local `replay-local-vault-v2`; the legacy vault remains readable for migration/recovery. Dexie table version 2 changes the evidence checksum index from globally unique to non-unique so different cases may store identical bytes.
+- Invalid/unsupported local records are skipped without deletion and retained for explicit raw-recovery download. A raw copy is not validated, repaired, or safe merely because it was retained.
+- Local evidence blobs are checked against case ID, checksum, metadata MIME, blob MIME, and SHA-256 bytes before display.
+- Case saves use compare-and-swap inside a Dexie transaction. Ordinary UI commands commit live before their queued save and pause for retry/recovery on failure. WebMCP reduces on an isolated engine copy, saves the staged case first, then adopts/notifies; a rejected primary save leaves live state untouched, while post-save cancellation/live conflict compensates and a failed compensation returns/audits `PERSISTENCE_FAILED`. A best-effort exclusive Web Locks lease and BroadcastChannel notices pause competing tabs where supported; none of these controls creates one physical engine/Dexie/browser-paint transaction.
+- Structured JSON carries only `ReplayCase`, not evidence blobs, and contains the source case ID. The visible import flow supplies a fresh `case-import-*` root ID and rewrites root-case references before save; stable entity IDs inside the new local copy remain unchanged.
+- An unsigned external import is intentionally untrusted: confirmed claims/events are demoted, answered questions reopen, reviewed notes become unreviewed, finalized snapshots are removed, activity is relabelled system/unverified and loses request/override attestations, proposal trust markers are cleared, and missing local blobs are tombstoned. Trusted local-vault migration does not perform this trust reset.
+- A demo reset deletes/recreates only the deterministic demo case ID at current seed version 2; opening `/#demo` alone resumes a valid saved seed-v1/v2 demo and does not clear unrelated cases.
 
 ## Safety interpretation
 
@@ -259,4 +285,4 @@ This model preserves what was stated, observed, linked, disputed, unknown, or hy
 
 - [WebMCP Draft Community Group Report, 2026-08-26](https://webmachinelearning.github.io/webmcp/)
 - [Chrome WebMCP tool security, updated 2026-07-01](https://developer.chrome.com/docs/ai/webmcp/secure-tools)
-- [OpenAI Site Tools, retrieved 2026-08-27](https://learn.chatgpt.com/docs/webmcp)
+- [OpenAI Site Tools, retrieved 2026-08-28](https://learn.chatgpt.com/docs/webmcp)

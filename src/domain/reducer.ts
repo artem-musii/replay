@@ -3,6 +3,11 @@ import { validateConsistency } from "./consistency";
 import { buildReportPreview } from "./report";
 import type {
   ActionAuthor,
+  AgentProposal,
+  AgentProposalChange,
+  AgentProposalRevision,
+  ActorKeyframe,
+  ActorPose,
   ChangeRecord,
   Claim,
   EvidenceAsset,
@@ -13,6 +18,7 @@ import type {
   TimelineEvent,
   Trajectory,
 } from "./models";
+import { containsLiabilityConclusion } from "./languageSafety";
 
 export class DomainCommandError extends Error {
   readonly code: ReplayCommandErrorCode;
@@ -87,7 +93,7 @@ function assertNotConfirmedByAgent(command: ReplayMutationCommand, status: strin
 }
 
 function requireNeutralHypothesis(text: string): void {
-  if (/\b(?:true|correct|at fault|liable|liability|caused the collision)\b/i.test(text)) {
+  if (/\b(?:true|correct)\b/i.test(text) || containsLiabilityConclusion(text)) {
     fail(
       "FORBIDDEN_ACTION",
       "Hypotheses must use neutral alternative language and cannot determine truth, fault, or liability.",
@@ -96,16 +102,12 @@ function requireNeutralHypothesis(text: string): void {
 }
 
 function requireNeutralReportText(text: string): void {
-  if (/\b(?:at fault|liable|liability conclusion|caused the collision)\b/i.test(text)) {
+  if (containsLiabilityConclusion(text)) {
     fail(
       "FORBIDDEN_ACTION",
       "Report wording must be neutral and cannot determine fault or legal liability.",
     );
   }
-}
-
-function containsLiabilityConclusion(text: string): boolean {
-  return /\b(?:at fault|liable|liability conclusion|caused the collision)\b/i.test(text);
 }
 
 function changeRecord(
@@ -175,6 +177,13 @@ function allObjectIds(replayCase: ReplayCase): Set<string> {
       ...asset.annotations.map((annotation) => annotation.id),
     ]),
     ...replayCase.questions.map((question) => question.id),
+    ...replayCase.proposals.flatMap((proposal) => [
+      proposal.id,
+      ...proposal.revisions.flatMap((revision) => [
+        revision.id,
+        ...revision.changes.map((change) => change.id),
+      ]),
+    ]),
     ...replayCase.activity.map((activity) => activity.id),
     ...replayCase.reportNotes.map((note) => note.id),
     ...replayCase.reportSnapshots.map((snapshot) => snapshot.id),
@@ -244,6 +253,23 @@ function requireQuestion(replayCase: ReplayCase, questionId: string): OpenQuesti
   return question;
 }
 
+function requireProposal(replayCase: ReplayCase, proposalId: string): AgentProposal {
+  const proposal = replayCase.proposals.find((candidate) => candidate.id === proposalId);
+  if (!proposal) fail("NOT_FOUND", `Agent proposal ${proposalId} does not exist`, { proposalId });
+  return proposal;
+}
+
+function requirePendingProposal(replayCase: ReplayCase, proposalId: string): AgentProposal {
+  const proposal = requireProposal(replayCase, proposalId);
+  if (proposal.status !== "pending") {
+    fail("INVALID_STATE", `Agent proposal ${proposalId} has already been ${proposal.status}`, {
+      proposalId,
+      status: proposal.status,
+    });
+  }
+  return proposal;
+}
+
 function assertBranchEditable(replayCase: ReplayCase, branchId: string) {
   const branch = requireBranch(replayCase, branchId);
   if (branch.status === "archived")
@@ -254,22 +280,26 @@ function assertBranchEditable(replayCase: ReplayCase, branchId: string) {
 function assertReferences(
   replayCase: ReplayCase,
   ids: string[],
-  kind: "claim" | "evidence" | "event" | "scene" | "branch",
+  kind: "claim" | "evidence" | "event" | "scene" | "branch" | "source",
 ): void {
   const known = new Set(
-    kind === "claim"
-      ? replayCase.claims.map((item) => item.id)
-      : kind === "evidence"
-        ? replayCase.evidence.filter((item) => !item.deleted).map((item) => item.id)
-        : kind === "event"
-          ? replayCase.timelineEvents.map((item) => item.id)
-          : kind === "branch"
-            ? replayCase.branches.map((item) => item.id)
-            : [
-                ...replayCase.actors.map((item) => item.id),
-                ...replayCase.trajectories.map((item) => item.id),
-                ...replayCase.actors.flatMap((actor) => actor.damageMarkers.map((item) => item.id)),
-              ],
+    kind === "source"
+      ? allObjectIds(replayCase)
+      : kind === "claim"
+        ? replayCase.claims.map((item) => item.id)
+        : kind === "evidence"
+          ? replayCase.evidence.filter((item) => !item.deleted).map((item) => item.id)
+          : kind === "event"
+            ? replayCase.timelineEvents.map((item) => item.id)
+            : kind === "branch"
+              ? replayCase.branches.map((item) => item.id)
+              : [
+                  ...replayCase.actors.map((item) => item.id),
+                  ...replayCase.trajectories.map((item) => item.id),
+                  ...replayCase.actors.flatMap((actor) =>
+                    actor.damageMarkers.map((item) => item.id),
+                  ),
+                ],
   );
   const missing = ids.filter((item) => !known.has(item));
   if (missing.length > 0)
@@ -490,6 +520,426 @@ function applyTrajectorySet(
   };
 }
 
+type ProposalChangeInput = Extract<
+  ReplayMutationCommand,
+  { type: "proposal.create" }
+>["changes"][number];
+
+function posesEqual(left: ActorPose, right: ActorPose): boolean {
+  return left.x === right.x && left.y === right.y && left.rotationDeg === right.rotationDeg;
+}
+
+function keyframesEqual(left: ActorKeyframe[], right: ActorKeyframe[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((keyframe, index) => {
+      const candidate = right[index];
+      if (!candidate) return false;
+      return (
+        keyframe.id === candidate.id &&
+        keyframe.actorId === candidate.actorId &&
+        keyframe.timeMs === candidate.timeMs &&
+        keyframe.x === candidate.x &&
+        keyframe.y === candidate.y &&
+        keyframe.rotationDeg === candidate.rotationDeg
+      );
+    })
+  );
+}
+
+function allocateProposalScopedId(
+  state: ReplayCase,
+  context: CommandExecutionContext,
+  prefix: string,
+  reservedIds: Set<string>,
+): string {
+  const knownIds = allObjectIds(state);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const candidate = context.makeId(prefix);
+    if (!knownIds.has(candidate) && !reservedIds.has(candidate)) {
+      reservedIds.add(candidate);
+      return candidate;
+    }
+  }
+  return fail("INVALID_STATE", `Unable to allocate a unique ${prefix} ID`);
+}
+
+function canonicalizeProposalKeyframes(
+  state: ReplayCase,
+  actorId: string,
+  inputKeyframes: Extract<ProposalChangeInput, { kind: "trajectory-set" }>["keyframes"],
+  allowedExistingIds: Set<string>,
+  reservedIds: Set<string>,
+  context: CommandExecutionContext,
+): ActorKeyframe[] {
+  const knownIds = allObjectIds(state);
+  let previousTime = -Infinity;
+  return inputKeyframes.map((keyframe) => {
+    if (keyframe.timeMs <= previousTime) {
+      fail("INVALID_COMMAND", "Proposal trajectory keyframe times must be strictly increasing");
+    }
+    previousTime = keyframe.timeMs;
+    let keyframeId = keyframe.id;
+    if (keyframeId) {
+      if (
+        reservedIds.has(keyframeId) ||
+        (knownIds.has(keyframeId) && !allowedExistingIds.has(keyframeId))
+      ) {
+        fail("DUPLICATE_ID", `Proposal keyframe ID ${keyframeId} is already in use`, {
+          id: keyframeId,
+        });
+      }
+      reservedIds.add(keyframeId);
+    } else {
+      keyframeId = allocateProposalScopedId(state, context, "keyframe", reservedIds);
+    }
+    return {
+      id: keyframeId,
+      actorId,
+      timeMs: keyframe.timeMs,
+      x: keyframe.x,
+      y: keyframe.y,
+      rotationDeg: keyframe.rotationDeg,
+    };
+  });
+}
+
+function canonicalizeProposalChanges(
+  state: ReplayCase,
+  inputs: ProposalChangeInput[],
+  context: CommandExecutionContext,
+  reservedIds: Set<string>,
+): AgentProposalChange[] {
+  const actorTargets = new Set<string>();
+  return inputs.map((input) => {
+    if (actorTargets.has(input.actorId)) {
+      fail("INVALID_COMMAND", `Proposal contains more than one change for actor ${input.actorId}`, {
+        actorId: input.actorId,
+      });
+    }
+    actorTargets.add(input.actorId);
+    const actor = requireActor(state, input.actorId);
+    ensureUnlocked(actor, "actor");
+    const changeId = allocateProposalScopedId(state, context, "proposal-change", reservedIds);
+    if (input.kind === "actor-pose") {
+      if (posesEqual(actor.pose, input.proposedPose)) {
+        fail("INVALID_COMMAND", `Proposed pose for ${actor.label} does not change its position`);
+      }
+      return {
+        id: changeId,
+        kind: "actor-pose" as const,
+        actorId: actor.id,
+        basePose: structuredClone(actor.pose),
+        proposedPose: structuredClone(input.proposedPose),
+      };
+    }
+
+    const branch = assertBranchEditable(state, input.branchId);
+    const trajectory = input.trajectoryId
+      ? state.trajectories.find((candidate) => candidate.id === input.trajectoryId)
+      : state.trajectories.find(
+          (candidate) => candidate.actorId === actor.id && candidate.branchId === branch.id,
+        );
+    if (trajectory) {
+      ensureUnlocked(trajectory, "trajectory");
+      if (trajectory.actorId !== actor.id || trajectory.branchId !== branch.id) {
+        fail(
+          "INVALID_COMMAND",
+          "A proposed trajectory update cannot reassign its actor or hypothesis branch",
+        );
+      }
+    } else if (input.trajectoryId && allObjectIds(state).has(input.trajectoryId)) {
+      fail("DUPLICATE_ID", `Object ID ${input.trajectoryId} already exists`, {
+        id: input.trajectoryId,
+      });
+    }
+
+    const trajectoryId =
+      trajectory?.id ??
+      (input.trajectoryId
+        ? (() => {
+            if (reservedIds.has(input.trajectoryId)) {
+              return fail("DUPLICATE_ID", `Proposal target ID ${input.trajectoryId} is duplicated`);
+            }
+            reservedIds.add(input.trajectoryId);
+            return input.trajectoryId;
+          })()
+        : allocateProposalScopedId(state, context, "trajectory", reservedIds));
+    const allowedExistingKeyframeIds = new Set(
+      trajectory?.keyframes.map((keyframe) => keyframe.id) ?? [],
+    );
+    const keyframes = canonicalizeProposalKeyframes(
+      state,
+      actor.id,
+      input.keyframes,
+      allowedExistingKeyframeIds,
+      reservedIds,
+      context,
+    );
+    const visible = input.visible ?? trajectory?.visible ?? true;
+    if (trajectory?.visible === visible && keyframesEqual(trajectory.keyframes, keyframes)) {
+      fail("INVALID_COMMAND", `Proposed trajectory for ${actor.label} contains no changes`);
+    }
+    return {
+      id: changeId,
+      kind: "trajectory-set" as const,
+      actorId: actor.id,
+      branchId: branch.id,
+      trajectoryId,
+      createsTrajectory: trajectory === undefined,
+      baseActorPose: structuredClone(actor.pose),
+      ...(trajectory
+        ? {
+            baseTrajectory: {
+              keyframes: structuredClone(trajectory.keyframes),
+              visible: trajectory.visible,
+            },
+          }
+        : {}),
+      proposedTrajectory: {
+        keyframes,
+        visible,
+      },
+    };
+  });
+}
+
+function proposalAffectedIds(proposal: AgentProposal): string[] {
+  const latestRevision = proposal.revisions.at(-1);
+  return unique([
+    proposal.id,
+    ...(latestRevision?.changes.flatMap((change) =>
+      change.kind === "trajectory-set"
+        ? [change.actorId, change.trajectoryId, change.branchId]
+        : [change.actorId],
+    ) ?? []),
+  ]);
+}
+
+function applyProposalCreate(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "proposal.create" }>,
+  context: CommandExecutionContext,
+): MutationOutcome {
+  if (command.actor !== "agent" || command.origin !== "webmcp") {
+    fail("FORBIDDEN_ACTION", "Only a WebMCP agent may create an agent proposal");
+  }
+  requireNeutralReportText(command.title);
+  requireNeutralReportText(command.rationale);
+  if (command.revisionSummary) requireNeutralReportText(command.revisionSummary);
+  const proposalId = reserveId(state, context, "proposal", command.proposalId);
+  const reservedIds = new Set<string>([proposalId]);
+  const revisionId = allocateProposalScopedId(state, context, "proposal-revision", reservedIds);
+  const changes = canonicalizeProposalChanges(state, command.changes, context, reservedIds);
+  const proposal: AgentProposal = {
+    id: proposalId,
+    title: command.title,
+    rationale: command.rationale,
+    status: "pending",
+    createdBy: "agent",
+    origin: "webmcp",
+    createdAt: context.now,
+    updatedAt: context.now,
+    revisions: [
+      {
+        id: revisionId,
+        revisionNumber: 1,
+        summary: command.revisionSummary ?? "Initial agent proposal.",
+        createdBy: "agent",
+        origin: "webmcp",
+        authorshipTrusted: true,
+        createdAt: context.now,
+        changes,
+      },
+    ],
+  };
+  state.proposals.push(proposal);
+  return {
+    nextState: state,
+    affectedIds: proposalAffectedIds(proposal),
+    summary: `Agent proposed ${changes.length} reversible scene change${changes.length === 1 ? "" : "s"} for human review.`,
+    undoable: true,
+  };
+}
+
+function applyProposalAdjust(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "proposal.adjust" }>,
+  context: CommandExecutionContext,
+): MutationOutcome {
+  requireHumanUi(
+    command,
+    "FORBIDDEN_ACTION",
+    "Only a human using the interface may manually adjust an agent proposal",
+  );
+  requireNeutralReportText(command.summary);
+  const proposal = requirePendingProposal(state, command.proposalId);
+  const reservedIds = new Set<string>([proposal.id]);
+  const revisionId = allocateProposalScopedId(state, context, "proposal-revision", reservedIds);
+  const changes = canonicalizeProposalChanges(state, command.changes, context, reservedIds);
+  const revision: AgentProposalRevision = {
+    id: revisionId,
+    revisionNumber: proposal.revisions.length + 1,
+    summary: command.summary,
+    createdBy: "human",
+    origin: "ui",
+    authorshipTrusted: true,
+    createdAt: context.now,
+    changes,
+  };
+  proposal.revisions.push(revision);
+  proposal.updatedAt = context.now;
+  return {
+    nextState: state,
+    affectedIds: proposalAffectedIds(proposal),
+    summary: `Human manually adjusted agent proposal: ${proposal.title}.`,
+    undoable: true,
+  };
+}
+
+function assertProposalRevisionIsCurrent(
+  state: ReplayCase,
+  proposal: AgentProposal,
+  revision: AgentProposalRevision,
+): void {
+  for (const change of revision.changes) {
+    const actor = requireActor(state, change.actorId);
+    ensureUnlocked(actor, "actor");
+    const expectedActorPose = change.kind === "actor-pose" ? change.basePose : change.baseActorPose;
+    if (!posesEqual(actor.pose, expectedActorPose)) {
+      fail(
+        "VERSION_CONFLICT",
+        `Cannot accept ${proposal.title}; ${actor.label} changed after this proposal revision`,
+        { proposalId: proposal.id, changeId: change.id, actorId: actor.id },
+      );
+    }
+    if (change.kind !== "trajectory-set") continue;
+    assertBranchEditable(state, change.branchId);
+    const trajectory = state.trajectories.find((candidate) => candidate.id === change.trajectoryId);
+    if (change.createsTrajectory) {
+      if (trajectory) {
+        fail(
+          "VERSION_CONFLICT",
+          `Cannot accept ${proposal.title}; trajectory ${change.trajectoryId} now exists`,
+          { proposalId: proposal.id, changeId: change.id, trajectoryId: change.trajectoryId },
+        );
+      }
+      continue;
+    }
+    if (!trajectory || !change.baseTrajectory) {
+      fail(
+        "VERSION_CONFLICT",
+        `Cannot accept ${proposal.title}; its trajectory baseline is no longer available`,
+        { proposalId: proposal.id, changeId: change.id, trajectoryId: change.trajectoryId },
+      );
+    }
+    ensureUnlocked(trajectory, "trajectory");
+    if (
+      trajectory.actorId !== change.actorId ||
+      trajectory.branchId !== change.branchId ||
+      trajectory.visible !== change.baseTrajectory.visible ||
+      !keyframesEqual(trajectory.keyframes, change.baseTrajectory.keyframes)
+    ) {
+      fail(
+        "VERSION_CONFLICT",
+        `Cannot accept ${proposal.title}; trajectory ${trajectory.id} changed after review began`,
+        { proposalId: proposal.id, changeId: change.id, trajectoryId: trajectory.id },
+      );
+    }
+  }
+}
+
+function applyProposalAccept(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "proposal.accept" }>,
+  context: CommandExecutionContext,
+): MutationOutcome {
+  requireHumanUi(
+    command,
+    "FORBIDDEN_ACTION",
+    "Only a human using the interface may accept an agent proposal",
+  );
+  if (command.note) requireNeutralReportText(command.note);
+  const proposal = requirePendingProposal(state, command.proposalId);
+  const revision = proposal.revisions.at(-1);
+  if (!revision) fail("INVALID_STATE", `Agent proposal ${proposal.id} has no revision`);
+
+  // Validate every baseline and lock before applying any target mutation.
+  assertProposalRevisionIsCurrent(state, proposal, revision);
+  for (const change of revision.changes) {
+    if (change.kind === "actor-pose") {
+      const actor = requireActor(state, change.actorId);
+      actor.pose = structuredClone(change.proposedPose);
+      continue;
+    }
+    applyTrajectorySet(
+      state,
+      {
+        type: "trajectory.set",
+        actor: "human",
+        origin: "ui",
+        ...(command.requestId ? { requestId: command.requestId } : {}),
+        trajectoryId: change.trajectoryId,
+        actorId: change.actorId,
+        branchId: change.branchId,
+        keyframes: structuredClone(change.proposedTrajectory.keyframes),
+        visible: change.proposedTrajectory.visible,
+      },
+      context,
+    );
+  }
+  proposal.status = "accepted";
+  proposal.updatedAt = context.now;
+  proposal.decision = {
+    outcome: "accepted",
+    revisionId: revision.id,
+    decidedBy: "human",
+    origin: "ui",
+    decidedAt: context.now,
+    ...(command.note ? { note: command.note } : {}),
+    humanAttestationTrusted: true,
+  };
+  return {
+    nextState: state,
+    affectedIds: proposalAffectedIds(proposal),
+    summary: `Human accepted agent proposal: ${proposal.title}.`,
+    undoable: true,
+  };
+}
+
+function applyProposalReject(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "proposal.reject" }>,
+  context: CommandExecutionContext,
+): MutationOutcome {
+  requireHumanUi(
+    command,
+    "FORBIDDEN_ACTION",
+    "Only a human using the interface may reject an agent proposal",
+  );
+  if (command.note) requireNeutralReportText(command.note);
+  const proposal = requirePendingProposal(state, command.proposalId);
+  const revision = proposal.revisions.at(-1);
+  if (!revision) fail("INVALID_STATE", `Agent proposal ${proposal.id} has no revision`);
+  proposal.status = "rejected";
+  proposal.updatedAt = context.now;
+  proposal.decision = {
+    outcome: "rejected",
+    revisionId: revision.id,
+    decidedBy: "human",
+    origin: "ui",
+    decidedAt: context.now,
+    ...(command.note ? { note: command.note } : {}),
+    humanAttestationTrusted: true,
+  };
+  return {
+    nextState: state,
+    affectedIds: proposalAffectedIds(proposal),
+    summary: `Human rejected agent proposal: ${proposal.title}.`,
+    undoable: true,
+  };
+}
+
 function applyTimelineUpsert(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "timeline.upsert" }>,
@@ -635,6 +1085,7 @@ function applyClaimAdd(
   assertReferences(state, command.linkedEvidenceIds ?? [], "evidence");
   assertReferences(state, command.linkedEventIds ?? [], "event");
   assertReferences(state, command.linkedSceneObjectIds ?? [], "scene");
+  assertReferences(state, command.sourceIds ?? [], "source");
   const branch = command.branchId ? assertBranchEditable(state, command.branchId) : undefined;
   if (branch && command.sharedAcrossBranches)
     fail("INVALID_COMMAND", "A branch-specific claim cannot be shared across all branches");
@@ -700,6 +1151,7 @@ function applyClaimUpdate(
   assertReferences(state, command.linkedEvidenceIds ?? [], "evidence");
   assertReferences(state, command.linkedEventIds ?? [], "event");
   assertReferences(state, command.linkedSceneObjectIds ?? [], "scene");
+  assertReferences(state, command.sourceIds ?? [], "source");
   if (command.statement !== undefined) claim.statement = command.statement;
   if (command.status !== undefined) {
     claim.status = command.status;
@@ -825,6 +1277,7 @@ function applyEvidenceAdd(
     ...(command.notes !== undefined ? { notes: command.notes } : {}),
     tags: unique(command.tags ?? []),
     annotations: structuredClone(command.annotations ?? []),
+    annotationLinks: [],
     linkedClaimIds: [],
     linkedEventIds: [],
     linkedSceneObjectIds: [],
@@ -855,7 +1308,13 @@ function applyEvidenceUpdate(
     else asset.notes = command.notes;
   }
   if (command.tags !== undefined) asset.tags = unique(command.tags);
-  if (command.annotations !== undefined) asset.annotations = structuredClone(command.annotations);
+  if (command.annotations !== undefined) {
+    asset.annotations = structuredClone(command.annotations);
+    const retainedAnnotationIds = new Set(asset.annotations.map((annotation) => annotation.id));
+    asset.annotationLinks = asset.annotationLinks.filter((link) =>
+      retainedAnnotationIds.has(link.annotationId),
+    );
+  }
   return {
     nextState: state,
     affectedIds: [asset.id, ...asset.annotations.map((annotation) => annotation.id)],
@@ -867,9 +1326,19 @@ function applyEvidenceUpdate(
 function applyEvidenceLink(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "evidence.link" }>,
+  context: CommandExecutionContext,
 ): MutationOutcome {
   const asset = requireEvidence(state, command.evidenceId);
-  const affectedIds = [asset.id, command.targetId];
+  const annotation = command.annotationId
+    ? asset.annotations.find((candidate) => candidate.id === command.annotationId)
+    : undefined;
+  if (command.annotationId && !annotation) {
+    fail(
+      "NOT_FOUND",
+      `Annotation ${command.annotationId} does not exist on evidence ${command.evidenceId}`,
+    );
+  }
+  const affectedIds = [asset.id, ...(annotation ? [annotation.id] : []), command.targetId];
   if (command.targetType === "claim") {
     const claim = requireClaim(state, command.targetId);
     ensureUnlocked(claim, "claim");
@@ -900,14 +1369,56 @@ function applyEvidenceLink(
     marker.linkedEvidenceIds = unique([...marker.linkedEvidenceIds, asset.id]);
     asset.linkedSceneObjectIds = unique([...asset.linkedSceneObjectIds, marker.id]);
     asset.linkedClaimIds = unique([...asset.linkedClaimIds, ...marker.linkedClaimIds]);
-  } else {
+  } else if (command.targetType === "hypothesis") {
     const branch = assertBranchEditable(state, command.targetId);
     asset.linkedBranchIds = unique([...asset.linkedBranchIds, branch.id]);
+  } else {
+    const owner = state.branches.find((branch) =>
+      branch.assumptions.some((assumption) => assumption.id === command.targetId),
+    );
+    if (!owner) fail("NOT_FOUND", `Assumption ${command.targetId} does not exist`);
+    const branch = assertBranchEditable(state, owner.id);
+    const assumption = branch.assumptions.find((candidate) => candidate.id === command.targetId);
+    if (!assumption) fail("NOT_FOUND", `Assumption ${command.targetId} does not exist`);
+    assumption.supportingEvidenceIds = unique([...assumption.supportingEvidenceIds, asset.id]);
+    assumption.updatedAt = context.now;
+    asset.linkedBranchIds = unique([...asset.linkedBranchIds, branch.id]);
+    affectedIds.push(branch.id);
+    appendBranchChange(
+      branch,
+      context,
+      command,
+      `Linked supporting evidence to assumption ${assumption.id}.`,
+    );
+  }
+  if (annotation) {
+    const link = {
+      annotationId: annotation.id,
+      targetType: command.targetType,
+      targetId: command.targetId,
+    };
+    if (
+      !asset.annotationLinks.some(
+        (candidate) =>
+          candidate.annotationId === link.annotationId &&
+          candidate.targetType === link.targetType &&
+          candidate.targetId === link.targetId,
+      )
+    ) {
+      asset.annotationLinks.push(link);
+    }
   }
   return {
     nextState: state,
     affectedIds,
-    summary: `Linked evidence ${asset.name}.`,
+    summary:
+      command.targetType === "assumption"
+        ? annotation
+          ? `Linked annotation ${annotation.id} as supporting evidence for assumption ${command.targetId}.`
+          : `Linked evidence ${asset.name} as support for assumption ${command.targetId}.`
+        : annotation
+          ? `Linked annotation ${annotation.id} from evidence ${asset.name}.`
+          : `Linked evidence ${asset.name}.`,
     undoable: true,
   };
 }
@@ -923,12 +1434,68 @@ function applyEvidenceDelete(
     "Evidence deletion requires an explicit human confirmation",
   );
   const asset = requireEvidence(state, command.evidenceId);
+  const affectedIds = unique([
+    asset.id,
+    ...asset.annotations.map((annotation) => annotation.id),
+    ...asset.linkedClaimIds,
+    ...asset.linkedEventIds,
+    ...asset.linkedSceneObjectIds,
+    ...asset.linkedBranchIds,
+    ...asset.annotationLinks.map((link) => link.targetId),
+  ]);
+  state.claims.forEach((claim) => {
+    claim.sourceIds = claim.sourceIds.filter((id) => id !== asset.id);
+    claim.linkedEvidenceIds = claim.linkedEvidenceIds.filter((id) => id !== asset.id);
+  });
+  state.timelineEvents.forEach((event) => {
+    event.linkedEvidenceIds = event.linkedEvidenceIds.filter((id) => id !== asset.id);
+  });
+  state.actors.forEach((actor) => {
+    actor.damageMarkers.forEach((marker) => {
+      marker.linkedEvidenceIds = marker.linkedEvidenceIds.filter((id) => id !== asset.id);
+    });
+  });
+  state.branches.forEach((branch) => {
+    branch.assumptions.forEach((assumption) => {
+      assumption.supportingEvidenceIds = assumption.supportingEvidenceIds.filter(
+        (id) => id !== asset.id,
+      );
+      assumption.conflictingEvidenceIds = assumption.conflictingEvidenceIds.filter(
+        (id) => id !== asset.id,
+      );
+    });
+  });
+  state.reportNotes.forEach((note) => {
+    note.evidenceIds = note.evidenceIds.filter((id) => id !== asset.id);
+    if (note.claimIds.length === 0 && note.evidenceIds.length === 0) note.reviewedByHuman = false;
+  });
+  state.activity.forEach((activity) => {
+    if (activity.affectedIds.includes(asset.id)) {
+      activity.summary = "Historical evidence activity (details removed after human deletion).";
+    }
+  });
+  asset.name = "Deleted evidence";
+  asset.mimeType = "image/png";
+  asset.sizeBytes = 1;
+  asset.localBlobKey = `deleted:${asset.id}`;
+  asset.checksum = `deleted-${asset.id}`;
+  asset.syntheticDemoAsset = false;
+  asset.source = "import";
+  delete asset.capturedAt;
+  delete asset.notes;
+  asset.tags = [];
+  asset.annotations = [];
+  asset.annotationLinks = [];
+  asset.linkedClaimIds = [];
+  asset.linkedEventIds = [];
+  asset.linkedSceneObjectIds = [];
+  asset.linkedBranchIds = [];
   asset.deleted = true;
   asset.deletedAt = context.now;
   return {
     nextState: state,
-    affectedIds: [asset.id],
-    summary: `Human deleted evidence: ${asset.name}.`,
+    affectedIds,
+    summary: "Human deleted evidence and scrubbed its active metadata.",
     undoable: false,
   };
 }
@@ -1261,11 +1828,19 @@ function applyHypothesisUpdateAssumption(
     assertReferences(state, command.conflictingEvidenceIds, "evidence");
     assumption.conflictingEvidenceIds = unique(command.conflictingEvidenceIds);
   }
+  const linkedEvidenceIds = unique([
+    ...assumption.supportingEvidenceIds,
+    ...assumption.conflictingEvidenceIds,
+  ]);
+  for (const evidenceId of linkedEvidenceIds) {
+    const asset = requireEvidence(state, evidenceId);
+    asset.linkedBranchIds = unique([...asset.linkedBranchIds, branch.id]);
+  }
   assumption.updatedAt = context.now;
   appendBranchChange(branch, context, command, "Updated branch-specific assumption.");
   return {
     nextState: state,
-    affectedIds: [branch.id, assumption.id],
+    affectedIds: [branch.id, assumption.id, ...linkedEvidenceIds],
     summary: `Updated an assumption in ${branch.name}.`,
     undoable: true,
   };
@@ -1487,7 +2062,7 @@ function applyWorkspaceFocus(
     nextState: state,
     affectedIds: [command.itemId],
     summary: `Focused ${command.itemType} ${command.itemId}.`,
-    undoable: true,
+    undoable: false,
   };
 }
 
@@ -1506,6 +2081,14 @@ export function applyReplayMutation(
       return applyActorPose(state, command);
     case "trajectory.set":
       return applyTrajectorySet(state, command, context);
+    case "proposal.create":
+      return applyProposalCreate(state, command, context);
+    case "proposal.adjust":
+      return applyProposalAdjust(state, command, context);
+    case "proposal.accept":
+      return applyProposalAccept(state, command, context);
+    case "proposal.reject":
+      return applyProposalReject(state, command, context);
     case "timeline.upsert":
       return applyTimelineUpsert(state, command, context);
     case "damage.mark":
@@ -1523,7 +2106,7 @@ export function applyReplayMutation(
     case "evidence.update":
       return applyEvidenceUpdate(state, command);
     case "evidence.link":
-      return applyEvidenceLink(state, command);
+      return applyEvidenceLink(state, command, context);
     case "evidence.delete":
       return applyEvidenceDelete(state, command, context);
     case "question.add":

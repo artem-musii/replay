@@ -174,6 +174,218 @@ export const TrajectorySchema = z
     });
   });
 
+export const AgentProposalChangeSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      id,
+      kind: z.literal("actor-pose"),
+      actorId: id,
+      basePose: ActorPoseSchema,
+      proposedPose: ActorPoseSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id,
+      kind: z.literal("trajectory-set"),
+      actorId: id,
+      branchId: id,
+      trajectoryId: id,
+      createsTrajectory: z.boolean(),
+      baseActorPose: ActorPoseSchema,
+      baseTrajectory: z
+        .object({
+          keyframes: z.array(ActorKeyframeSchema).min(1).max(2_000),
+          visible: z.boolean(),
+        })
+        .strict()
+        .optional(),
+      proposedTrajectory: z
+        .object({
+          keyframes: z.array(ActorKeyframeSchema).min(1).max(2_000),
+          visible: z.boolean(),
+        })
+        .strict(),
+    })
+    .strict()
+    .superRefine((change, ctx) => {
+      if (change.createsTrajectory === Boolean(change.baseTrajectory)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["baseTrajectory"],
+          message:
+            "New trajectory proposals cannot have a base trajectory, and updates require one",
+        });
+      }
+      const validateKeyframes = (
+        keyframes: (typeof change.proposedTrajectory)["keyframes"],
+        path: string,
+      ) => {
+        const ids = new Set<string>();
+        let previousTime = -Infinity;
+        keyframes.forEach((keyframe, index) => {
+          if (keyframe.actorId !== change.actorId) {
+            ctx.addIssue({
+              code: "custom",
+              path: [path, "keyframes", index, "actorId"],
+              message: "Proposal keyframe actor must match the changed actor",
+            });
+          }
+          if (ids.has(keyframe.id)) {
+            ctx.addIssue({
+              code: "custom",
+              path: [path, "keyframes", index, "id"],
+              message: "Proposal keyframe IDs must be unique",
+            });
+          }
+          ids.add(keyframe.id);
+          if (keyframe.timeMs <= previousTime) {
+            ctx.addIssue({
+              code: "custom",
+              path: [path, "keyframes", index, "timeMs"],
+              message: "Proposal keyframe times must be strictly increasing",
+            });
+          }
+          previousTime = keyframe.timeMs;
+        });
+      };
+      validateKeyframes(change.proposedTrajectory.keyframes, "proposedTrajectory");
+      if (change.baseTrajectory)
+        validateKeyframes(change.baseTrajectory.keyframes, "baseTrajectory");
+    }),
+]);
+
+export const AgentProposalRevisionSchema = z
+  .object({
+    id,
+    revisionNumber: z.number().int().positive().max(100),
+    summary: shortText,
+    createdBy: z.enum(["agent", "human"]),
+    origin: z.enum(["webmcp", "ui"]),
+    authorshipTrusted: z.boolean(),
+    createdAt: isoDateTime,
+    changes: z.array(AgentProposalChangeSchema).min(1).max(25),
+  })
+  .strict()
+  .superRefine((revision, ctx) => {
+    if (
+      (revision.createdBy === "agent" && revision.origin !== "webmcp") ||
+      (revision.createdBy === "human" && revision.origin !== "ui")
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["origin"],
+        message: "Proposal revision authorship must match its origin",
+      });
+    }
+    const changeIds = new Set<string>();
+    const actorIds = new Set<string>();
+    revision.changes.forEach((change, index) => {
+      if (changeIds.has(change.id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["changes", index, "id"],
+          message: "Proposal change IDs must be unique within a revision",
+        });
+      }
+      changeIds.add(change.id);
+      if (actorIds.has(change.actorId)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["changes", index, "actorId"],
+          message: "A proposal revision cannot contain ambiguous changes for the same actor",
+        });
+      }
+      actorIds.add(change.actorId);
+    });
+  });
+
+export const AgentProposalDecisionSchema = z
+  .object({
+    outcome: z.enum(["accepted", "rejected"]),
+    revisionId: id,
+    decidedBy: z.literal("human"),
+    origin: z.literal("ui"),
+    decidedAt: isoDateTime,
+    note: longText.optional(),
+    humanAttestationTrusted: z.boolean(),
+  })
+  .strict();
+
+export const AgentProposalSchema = z
+  .object({
+    id,
+    title: shortText,
+    rationale: longText,
+    status: z.enum(["pending", "accepted", "rejected"]),
+    createdBy: z.literal("agent"),
+    origin: z.literal("webmcp"),
+    createdAt: isoDateTime,
+    updatedAt: isoDateTime,
+    revisions: z.array(AgentProposalRevisionSchema).min(1).max(100),
+    decision: AgentProposalDecisionSchema.optional(),
+  })
+  .strict()
+  .superRefine((proposal, ctx) => {
+    const revisionIds = new Set<string>();
+    proposal.revisions.forEach((revision, index) => {
+      if (revisionIds.has(revision.id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["revisions", index, "id"],
+          message: "Proposal revision IDs must be unique",
+        });
+      }
+      revisionIds.add(revision.id);
+      if (revision.revisionNumber !== index + 1) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["revisions", index, "revisionNumber"],
+          message: "Proposal revision numbers must be contiguous and ordered",
+        });
+      }
+      if (index === 0 && (revision.createdBy !== "agent" || revision.origin !== "webmcp")) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["revisions", index, "createdBy"],
+          message: "The initial proposal revision must come from a WebMCP agent",
+        });
+      }
+    });
+    const latestRevision = proposal.revisions.at(-1);
+    if (proposal.status === "pending" && proposal.decision) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["decision"],
+        message: "Pending proposals cannot have a decision",
+      });
+    }
+    if (proposal.status !== "pending") {
+      if (!proposal.decision) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["decision"],
+          message: "Accepted and rejected proposals require a human decision record",
+        });
+      } else {
+        if (proposal.decision.outcome !== proposal.status) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["decision", "outcome"],
+            message: "Proposal decision outcome must match proposal status",
+          });
+        }
+        if (latestRevision && proposal.decision.revisionId !== latestRevision.id) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["decision", "revisionId"],
+            message: "A proposal decision must identify the reviewed latest revision",
+          });
+        }
+      }
+    }
+  });
+
 export const TimelineEventSchema = z
   .object({
     id,
@@ -267,6 +479,22 @@ export const EvidenceAnnotationSchema = z.discriminatedUnion("kind", [
   }).strict(),
 ]);
 
+export const EvidenceAnnotationLinkSchema = z
+  .object({
+    annotationId: id,
+    targetType: z.enum([
+      "claim",
+      "timeline-event",
+      "actor",
+      "trajectory",
+      "damage",
+      "hypothesis",
+      "assumption",
+    ]),
+    targetId: id,
+  })
+  .strict();
+
 export const EvidenceAssetSchema = z
   .object({
     id,
@@ -286,6 +514,7 @@ export const EvidenceAssetSchema = z
     notes: z.string().max(10_000).optional(),
     tags: z.array(z.string().trim().min(1).max(100)).max(100),
     annotations: z.array(EvidenceAnnotationSchema).max(1_000),
+    annotationLinks: z.array(EvidenceAnnotationLinkSchema).max(10_000),
     linkedClaimIds: z.array(id).max(500),
     linkedEventIds: z.array(id).max(500),
     linkedSceneObjectIds: z.array(id).max(500),
@@ -381,13 +610,45 @@ export const ActivityEventSchema = z
     author: ActionAuthorSchema,
     origin: ActionOriginSchema,
     actionType: z.string().trim().min(1).max(200),
+    classification: z.literal("human-override").optional(),
+    overridesActivityId: id.optional(),
     summary: shortText,
     affectedIds: z.array(id).max(5_000),
     requestId: id.optional(),
+    requestIntentFingerprint: z
+      .string()
+      .regex(/^intent-v1-[a-f0-9]{32}$/)
+      .optional(),
     undoable: z.boolean(),
     createdAt: isoDateTime,
   })
-  .strict();
+  .strict()
+  .superRefine((activity, ctx) => {
+    if (activity.classification === "human-override" && !activity.overridesActivityId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["overridesActivityId"],
+        message: "Human override activity must identify the overridden agent activity",
+      });
+    }
+    if (
+      activity.classification === "human-override" &&
+      (activity.author !== "human" || activity.origin !== "ui")
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["classification"],
+        message: "Human override activity must be authored by a human through the UI",
+      });
+    }
+    if (activity.overridesActivityId && activity.classification !== "human-override") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["classification"],
+        message: "An overridden activity ID requires human-override classification",
+      });
+    }
+  });
 
 export const ConsistencyIssueSchema = z
   .object({
@@ -403,7 +664,11 @@ export const ConsistencyIssueSchema = z
   .strict();
 
 export const ReportCitationSchema = z
-  .object({ claimIds: z.array(id).max(5_000), evidenceIds: z.array(id).max(5_000) })
+  .object({
+    claimIds: z.array(id).max(5_000),
+    evidenceIds: z.array(id).max(5_000),
+    workspacePaths: z.array(z.string().trim().min(1).max(500)).max(10_000),
+  })
   .strict();
 
 export const ReportStatementSchema = z
@@ -489,7 +754,9 @@ export const WorkspaceSelectionSchema = z
 export const ReplayCaseSchema = z
   .object({
     schemaVersion: z.literal(REPLAY_SCHEMA_VERSION),
-    seedVersion: z.literal(REPLAY_SEED_VERSION).optional(),
+    // Historical deterministic demo seeds remain loadable so a saved local
+    // account is never discarded merely because the bundled demo improved.
+    seedVersion: z.number().int().positive().max(REPLAY_SEED_VERSION).optional(),
     id,
     title: shortText,
     createdAt: isoDateTime,
@@ -514,6 +781,10 @@ export const ReplayCaseSchema = z
     claims: z.array(ClaimSchema).max(10_000),
     evidence: z.array(EvidenceAssetSchema).max(10_000),
     questions: z.array(OpenQuestionSchema).max(10_000),
+    proposals: z
+      .array(AgentProposalSchema)
+      .max(500)
+      .default(() => []),
     activity: z.array(ActivityEventSchema).max(100_000),
     consistencyIssues: z.array(ConsistencyIssueSchema).max(100_000),
     reportNotes: z.array(ReportNoteSchema).max(10_000),

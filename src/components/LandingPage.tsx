@@ -48,8 +48,9 @@ export function LandingPage({
   onOpenCollaboration,
   onResumeCase,
 }: LandingPageProps) {
+  const isSharedGitHubPagesOrigin = window.location.hostname.endsWith(".github.io");
   return (
-    <main className="landing" id="main-content">
+    <main className="landing">
       <nav className="landing-nav" aria-label="Primary navigation">
         <a href="#top" className="landing-nav__brand">
           <BrandMark />
@@ -66,7 +67,7 @@ export function LandingPage({
         </div>
       </nav>
 
-      <section className="landing-hero" id="top">
+      <section className="landing-hero" id="main-content" tabIndex={-1}>
         <div className="landing-hero__copy">
           <p className="eyebrow">
             <span /> Shared incident reconstruction
@@ -189,14 +190,30 @@ export function LandingPage({
       <section className="privacy-section" id="privacy" aria-labelledby="privacy-title">
         <div>
           <p className="section-kicker">Private by default</p>
-          <h2 id="privacy-title">Your case stays in this browser.</h2>
+          <h2 id="privacy-title">Local by default, explicit when shared.</h2>
         </div>
         <div className="privacy-section__body">
           <p>
-            REPLAY stores cases and uploaded evidence locally. There is no account, analytics, or
-            external evidence upload in the core product. Demo photographs are original synthetic
-            assets and never represent a real incident.
+            REPLAY stores cases and uploaded evidence locally. There is no REPLAY account,
+            analytics, app-owned model API, or external evidence upload. Demo photographs are
+            original synthetic assets and never represent a real incident.
           </p>
+          <p>
+            If you use Site Tools, the structured case fields returned by a tool can be processed by
+            the connected ChatGPT, Codex, or model service. REPLAY tools never return uploaded image
+            bytes. Manual mode sends no case data to an agent.
+          </p>
+          <p>
+            Browser storage is best-effort and is not encrypted by REPLAY. A structured JSON export
+            excludes evidence bytes, and importing it resets human attestations for fresh review.
+          </p>
+          {isSharedGitHubPagesOrigin && (
+            <p className="safety-copy">
+              This public GitHub Pages demo shares a web origin with the owner’s other project
+              sites. Use synthetic or non-sensitive data here; deploy REPLAY on a dedicated origin
+              before handling private evidence.
+            </p>
+          )}
           <p className="safety-copy">
             REPLAY helps organize and visualize a factual account. Its consistency checks are
             informational and are not a forensic or legal determination.

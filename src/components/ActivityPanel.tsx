@@ -8,6 +8,7 @@ export interface ActivityPanelProps {
   activities: ActivityEvent[];
   activeAgentAction?: string;
   revertingActivityId?: string;
+  revertibleActivityIds?: readonly string[];
   maxItems?: number;
   onRevert?: (activityId: string) => void;
   onSelectActivity?: (activity: ActivityEvent) => void;
@@ -53,6 +54,7 @@ export function ActivityPanel({
   activities,
   activeAgentAction,
   revertingActivityId,
+  revertibleActivityIds = [],
   maxItems = 30,
   onRevert,
   onSelectActivity,
@@ -60,6 +62,7 @@ export function ActivityPanel({
   const visibleActivities = [...activities]
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     .slice(0, maxItems);
+  const revertibleActivityIdSet = new Set(revertibleActivityIds);
 
   return (
     <aside className="activity-panel" aria-label="Case activity">
@@ -96,7 +99,11 @@ export function ActivityPanel({
         <ol className="activity-list">
           {visibleActivities.map((activity) => {
             const identity = activityIdentity(activity);
-            const canRevert = activity.author === "agent" && activity.undoable && Boolean(onRevert);
+            const canRevert =
+              activity.author === "agent" &&
+              activity.undoable &&
+              revertibleActivityIdSet.has(activity.id) &&
+              Boolean(onRevert);
             const isReverting = revertingActivityId === activity.id;
             return (
               <li className={`activity-item activity-item--${activity.author}`} key={activity.id}>
@@ -113,12 +120,21 @@ export function ActivityPanel({
                     <span className="activity-item__meta">
                       <strong>{identity.name}</strong>
                       <span>{identity.detail}</span>
+                      {activity.classification === "human-override" && (
+                        <span className="activity-item__classification">Human override</span>
+                      )}
                       <time dateTime={activity.createdAt}>
                         {formatActivityTime(activity.createdAt)}
                       </time>
                     </span>
                     <span className="activity-item__summary">{activity.summary}</span>
-                    <span className="activity-item__version">Case v{activity.caseVersion}</span>
+                    <span className="activity-item__trace">
+                      <span>Case v{activity.caseVersion}</span>
+                      {activity.requestId && <code>Request {activity.requestId}</code>}
+                      {activity.overridesActivityId && (
+                        <code>Overrides {activity.overridesActivityId}</code>
+                      )}
+                    </span>
                   </span>
                 </button>
                 {canRevert && (

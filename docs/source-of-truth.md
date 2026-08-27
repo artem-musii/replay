@@ -1,6 +1,6 @@
 # REPLAY source of truth
 
-Last verified: **2026-08-27** (Europe/Madrid). This file records external facts, resulting REPLAY decisions, and the current implementation caveats that materially affect those decisions. Detailed verification status remains in `IMPLEMENTATION_STATUS.md` and `docs/testing.md`.
+External-source register last verified: **2026-08-27** (Europe/Madrid); the OpenAI Site Tools page was rechecked and implementation consequences were reconciled on **2026-08-28**. This file records external facts, resulting REPLAY decisions, and the current implementation caveats that materially affect those decisions. Detailed verification status remains in `IMPLEMENTATION_STATUS.md` and `docs/testing.md`.
 
 ## Authority order
 
@@ -55,9 +55,9 @@ Do not use older examples centered on `navigator.modelContext.provideContext(...
 Current implications:
 
 - A registration `AbortSignal` unregisters that tool when aborted.
-- The `execute(input, { signal })` callback receives a separate cancellation signal for that invocation. The current registry/adapter/engine checks it before command execution; Dexie persistence is a later non-cancellable save and is not part of one rollback transaction.
+- The `execute(input, { signal })` callback receives a separate cancellation signal for that invocation. The current registry/adapter checks it before adapter work, staging, persistence, and staged commit. Dexie does not consume this signal, so cancellation while a primary save is pending waits for that save's outcome.
 - Chrome documents that, as of Chrome 153, unregistering a tool does not cancel an already in-flight execution. REPLAY must therefore handle invocation cancellation and lifecycle cleanup separately.
-- A call aborted before the synchronous engine commit produces no domain change or activity and returns/throws cancellation. Once the engine commits, later cancellation or persistence failure does not roll back the in-memory command; cross-layer transactional cancellation remains a known gap.
+- A WebMCP mutation is reduced on an isolated complete engine copy, compare-and-swap saved, then committed/notified only while the live baseline still matches. Cancellation before primary persistence begins changes neither live nor durable state or audit. If cancellation or a live conflict follows a resolved save, the adapter performs an explicit compensating save before settling; failed compensation returns/audits `PERSISTENCE_FAILED`. This is reconciliation across two operations, not one physical Dexie/engine/browser-paint transaction. The ordinary human UI still commits live before its queued save and uses pause/retry/recovery on failure.
 - `document.modelContext.getTools()` and `executeTool()` are useful for the debug/evaluation surface where supported; they are not needed for normal application behavior.
 
 ### Tool annotations
@@ -94,7 +94,7 @@ Chrome’s Declarative API derives a tool from an ordinary visible HTML form:
 </form>
 ```
 
-REPLAY's implemented form uses `toolname="finalize_factual_report"`, includes `tooldescription`, and omits `toolautosubmit`. Its `toolactivated` listener marks the review as Site Tools-prepared and opens the visible review; `toolcancel` clears the prepared state. A person must complete three acknowledgements, continue to a second confirmation, and click the final control. The reducer independently rejects agent/WebMCP finalization. Browser-native active-state styling and event behavior still require verification in a current compatible browser.
+REPLAY's implemented form uses `toolname="finalize_factual_report"`, includes `tooldescription`, and omits `toolautosubmit`. In a compatible declarative client, its `toolactivated` listener marks the review prepared and opens the visible review; `toolcancel` clears the prepared state. A person must complete three acknowledgements, continue to a second confirmation, and click the final control. The reducer independently rejects agent/WebMCP finalization. Browser-native active-state styling and event behavior still require verification in a current compatible browser.
 
 ### Registration strategy
 
@@ -106,7 +106,7 @@ REPLAY's implemented form uses `toolname="finalize_factual_report"`, includes `t
 - Prefer static registration; change the set only at meaningful application-state boundaries.
 - Use narrow, non-overlapping schemas. Do not expose a generic command executor.
 - Reuse the same validated domain commands as the human UI.
-- Return compact results after the canonical command and post-command save. React receives the engine notification immediately, but actual browser paint is not transactionally coupled to the tool promise and remains a live-browser verification point.
+- Return compact results after a changed WebMCP command has been staged, compare-and-swap saved, and committed/notified. A rejected primary save leaves the live engine untouched; post-save cancellation/live conflict is compensated when possible. Actual browser paint is not transactionally coupled to the tool promise and remains a live-browser verification point.
 
 ### Origin and permissions boundary
 
@@ -122,17 +122,18 @@ Chrome lists the origin trial from Chrome 149 and the local flag `chrome://flags
 
 ## OpenAI Site Tools facts
 
-The live [Site Tools page](https://learn.chatgpt.com/docs/webmcp), retrieved 2026-08-27, says:
+The live [Site Tools page](https://learn.chatgpt.com/docs/webmcp), rechecked 2026-08-28, says:
 
 - Site Tools are ChatGPT’s implementation of the proposed WebMCP standard.
 - ChatGPT Work and Codex can discover tools from the page open in the desktop app’s built-in browser; human and agent share the same live page and signed-in session.
+- The current built-in browser discovers top-level imperative JavaScript tools. It does not expose declarative HTML form tools as Site Tools or discover tools inside iframes. ChatGPT Work and Codex may still interact with forms using ordinary browser capabilities, but those interactions are not WebMCP tool calls.
 - Tools belong to their originating page and may disappear after navigation or page closure.
 - GPT-5.6 Sol and GPT-5.6 Terra support Site Tools; GPT-5.6 Luna currently has WebMCP disabled.
 - Site Tools are not currently available in Enterprise or Edu workspaces, and rollout/page availability still applies.
 - Each call receives browser safety review, remains tied to its originating page and registration, and does not make the site or result trustworthy.
 - OpenAI recommends narrow inputs, explicit side effects, existing app authentication/authorization/validation, enough output to verify a result, and preserving the ordinary UI as fallback.
 
-REPLAY consequently treats ChatGPT/Codex testing as a compatibility target, not an availability guarantee.
+REPLAY consequently treats ChatGPT/Codex testing as a compatibility target, not an availability guarantee. Its declarative `finalize_factual_report` form remains a standards/Chrome-compatible human gate; OpenAI Site Tools flows use the imperative preview tool and manual report UI rather than claiming that form is tool-discoverable. Any ordinary browser interaction is a separate capability and must not be presented as a declarative/WebMCP call or as authorization to operate the human confirmation controls.
 
 ## Chrome engineering guidance adopted by REPLAY
 
@@ -178,11 +179,11 @@ Stage one is a pass/fail viability and required-API fit check. Stage two uses fo
 
 Tie-breaking compares the criteria in listed order, so WebMCP Leverage is the first tie-breaker.
 
-## GPT Image 2 decision
+## Image-generation provenance
 
 The [GPT Image 2 model page](https://developers.openai.com/api/docs/models/gpt-image-2), retrieved 2026-08-27, identifies `gpt-image-2` as OpenAI’s current state-of-the-art image generation and editing model with text input plus image input/output. The dated snapshot listed is `gpt-image-2-2026-04-21`. The [image generation guide](https://developers.openai.com/api/docs/guides/image-generation) documents current generation/editing use.
 
-REPLAY used GPT Image 2 during development to create the hero and four clearly labelled synthetic demo evidence images. The runtime application does not call an OpenAI image API, require an API key, or send user evidence to OpenAI.
+Those pages are background research, not proof of which model generated REPLAY’s assets. REPLAY used Codex's built-in image-generation mode, whose returned artifacts did not expose a reliable underlying model identifier. The repository therefore does not claim a specific generation model or snapshot. The runtime application does not call an image API, require an API key, or send user evidence to an image service.
 
 ## Product safety facts that must remain visible
 
@@ -199,8 +200,8 @@ REPLAY organizes and visualizes an account; it does not determine legal liabilit
 | [Chrome best practices](https://developer.chrome.com/docs/ai/webmcp/best-practices)             | Published 2026-05-18       | 2026-08-27 | tool strategy, schemas, reliability, eval-driven development             |
 | [Chrome tool security](https://developer.chrome.com/docs/ai/webmcp/secure-tools)                | Updated 2026-07-01         | 2026-08-27 | prompt injection, annotations, exposure, output budgets                  |
 | [Chrome WebMCP evals](https://developer.chrome.com/docs/ai/webmcp/evals)                        | Header updated 2026-05-28  | 2026-08-27 | deterministic tests, probabilistic evals, direct/ambiguous datasets      |
-| [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)                                      | Live page                  | 2026-08-27 | ChatGPT/Codex behavior and model/workspace availability                  |
+| [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)                                      | Live page                  | 2026-08-28 | ChatGPT/Codex behavior and model/workspace availability                  |
 | [WebMCP Challenge](https://webmcp.devpost.com/)                                                 | Live challenge             | 2026-08-27 | requirements, deadline, judging summary                                  |
 | [Official challenge rules](https://webmcp.devpost.com/rules)                                    | 2026 challenge rules       | 2026-08-27 | dates, eligibility, submission requirements, judging/tie-breaks          |
-| [OpenAI image generation guide](https://developers.openai.com/api/docs/guides/image-generation) | Live API docs              | 2026-08-27 | current generation/editing guidance                                      |
-| [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)                        | Snapshot 2026-04-21 listed | 2026-08-27 | current model identifier and capabilities                                |
+| [OpenAI image generation guide](https://developers.openai.com/api/docs/guides/image-generation) | Live API docs              | 2026-08-27 | background generation/editing guidance; not REPLAY asset provenance      |
+| [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)                        | Snapshot 2026-04-21 listed | 2026-08-27 | background model reference; not proof of the built-in tool's model       |

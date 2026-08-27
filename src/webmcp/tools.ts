@@ -1,9 +1,11 @@
 import type { z } from "zod";
 
 import { toJSONSchema, webMCPInputSchemas } from "./schemas";
+import { ReplayWebMCPContractError } from "./types";
 import type {
   ReplayAdapterResult,
   ReplayInvocationContext,
+  ReplayToolInvocationAudit,
   ReplayVisibleState,
   ReplayWebMCPAdapter,
   ReplayWebMCPCommand,
@@ -29,8 +31,6 @@ interface ToolMetadata {
 }
 
 const READ_UNTRUSTED = { readOnlyHint: true, untrustedContentHint: true } as const;
-const READ_DETERMINISTIC = { readOnlyHint: true, untrustedContentHint: false } as const;
-const WRITE_TRUSTED = { readOnlyHint: false, untrustedContentHint: false } as const;
 const WRITE_UNTRUSTED = { readOnlyHint: false, untrustedContentHint: true } as const;
 
 const metadata = {
@@ -56,19 +56,19 @@ const metadata = {
     title: "Validate case consistency",
     description:
       "Runs deterministic consistency rules for a branch and scope and returns structured issues rather than speculation. Use after reconstruction changes or before report review. It does not mutate factual case content or navigate the workspace. An open case is required.",
-    annotations: READ_DETERMINISTIC,
+    annotations: READ_UNTRUSTED,
   },
   focus_workspace_item: {
     title: "Focus workspace item",
     description:
       "Selects and visibly reveals one existing actor, trajectory, event, claim, evidence item, question, hypothesis, or issue so the human and agent can discuss the same object. Use after identifying a specific item. It changes UI focus only and does not alter factual case content. The item must exist.",
-    annotations: WRITE_TRUSTED,
+    annotations: WRITE_UNTRUSTED,
   },
   revert_agent_action: {
     title: "Revert agent action",
     description:
       "Reverses one identified agent activity when the canonical command layer still considers it safely undoable. Use to honor a human correction or retract an agent change. It visibly restores the prior case state and appends activity, so it mutates the case. The activity must be agent-authored, undoable, and at the expected case version.",
-    annotations: WRITE_TRUSTED,
+    annotations: WRITE_UNTRUSTED,
   },
   upsert_scene_actor: {
     title: "Add or update scene actor",
@@ -80,6 +80,12 @@ const metadata = {
     title: "Set actor trajectory",
     description:
       "Sets ordered normalized keyframes for one existing actor in one existing hypothesis branch. Use to make a proposed movement path visible on the scene and timeline. It mutates canonical case content and activity, and requires an unlocked trajectory, valid actor and branch, and the current case version.",
+    annotations: WRITE_UNTRUSTED,
+  },
+  propose_scene_changes: {
+    title: "Propose coordinated scene changes",
+    description:
+      "Creates a visible, reversible preview of coordinated position or trajectory changes for two or more actors without applying them. Use for major multi-object reconstruction changes that need human review. It mutates only the proposal ledger and activity feed; the human must explicitly accept, reject, or adjust the proposal in REPLAY before scene geometry changes. Existing unlocked actors and branches plus the current case version are required.",
     annotations: WRITE_UNTRUSTED,
   },
   mark_impact_event: {
@@ -103,7 +109,7 @@ const metadata = {
   link_evidence: {
     title: "Link evidence",
     description:
-      "Links one existing evidence asset or annotation to one existing claim, scene item, event, damage marker, or hypothesis. Use to make provenance inspectable. It visibly updates both evidence and target plus activity and mutates relationships. All referenced IDs and the current case version are required.",
+      "Links one existing evidence asset or annotation to one existing claim, scene item, event, damage marker, hypothesis, or hypothesis assumption. An assumption link records the asset as supporting evidence. Use to make provenance inspectable. It visibly updates both evidence and target plus activity and mutates relationships. All referenced IDs and the current case version are required.",
     annotations: WRITE_UNTRUSTED,
   },
   create_open_question: {
@@ -127,8 +133,8 @@ const metadata = {
   compare_hypotheses: {
     title: "Compare hypotheses",
     description:
-      "Reads deterministic differences across two or more branches, including assumptions, geometry, timing, evidence relationships, issue counts, and unresolved questions. Use before asking the human to choose or refine an explanation. It does not mutate or navigate case state. Existing distinct branches are required.",
-    annotations: READ_UNTRUSTED,
+      "Compares deterministic differences across two or more branches, including assumptions, geometry, timing, evidence relationships, issue counts, and unresolved questions, and visibly opens the comparison. Use before asking the human to choose or refine an explanation. It changes UI comparison state but does not alter factual case content. Existing distinct branches are required.",
+    annotations: WRITE_UNTRUSTED,
   },
   build_report_preview: {
     title: "Build report preview",
@@ -202,6 +208,7 @@ function adapterResult(adapter: ReplayWebMCPAdapter, result: ReplayAdapterResult
     message: result.message,
     caseVersion: result.caseVersion,
     ...(result.activityId === undefined ? {} : { activityId: result.activityId }),
+    ...(result.idempotent ? { idempotent: true } : {}),
     affectedIds: [...(result.affectedIds ?? [])],
     issues: [...(result.issues ?? [])],
     visibleState: visibleState(adapter),
@@ -248,6 +255,28 @@ function withFreshVisibleState(adapter: ReplayWebMCPAdapter, result: WebMCPResul
   return { ...result, visibleState: visibleState(adapter) };
 }
 
+async function recordInvocationWithoutCanonicalActivity(
+  adapter: ReplayWebMCPAdapter,
+  toolName: WebMCPToolName,
+  result: WebMCPResult,
+  requestId?: string,
+): Promise<void> {
+  if (result.activityId !== undefined || adapter.recordToolInvocation === undefined) return;
+  const audit: ReplayToolInvocationAudit = {
+    toolName,
+    ok: result.ok,
+    message: result.message,
+    caseVersion: result.caseVersion,
+    affectedIds: result.affectedIds,
+    ...(requestId === undefined ? {} : { requestId }),
+  };
+  try {
+    await adapter.recordToolInvocation(audit);
+  } catch {
+    // A transient audit presentation failure must not replace the tool result.
+  }
+}
+
 function defineTool<TSchema extends z.ZodType>(
   adapter: ReplayWebMCPAdapter,
   instrumentation: WebMCPToolInstrumentation,
@@ -272,16 +301,18 @@ function defineTool<TSchema extends z.ZodType>(
       const signal = options.signal;
       instrumentation.onStart?.(name, rawInput);
       let workingStarted = false;
+      let requestId: string | undefined;
       try {
         throwIfAborted(signal);
         const parsed = schema.safeParse(rawInput);
         if (!parsed.success) {
           const result = failureResult(adapter, validationMessage(parsed.error), "INVALID_INPUT");
+          await recordInvocationWithoutCanonicalActivity(adapter, name, result);
           instrumentation.onFinish?.(name, result);
           return result;
         }
 
-        const requestId = requestIdFromInput(parsed.data);
+        requestId = requestIdFromInput(parsed.data);
         workingStarted = true;
         await adapter.setAgentWorking?.({
           active: true,
@@ -299,6 +330,7 @@ function defineTool<TSchema extends z.ZodType>(
           }
         }
         result = withFreshVisibleState(adapter, result);
+        await recordInvocationWithoutCanonicalActivity(adapter, name, result, requestId);
         instrumentation.onFinish?.(name, result);
         return result;
       } catch (error) {
@@ -306,7 +338,12 @@ function defineTool<TSchema extends z.ZodType>(
           instrumentation.onCancel?.(name, error);
           throw error;
         }
-        const result = failureResult(adapter, errorMessage(error), "EXECUTION_FAILED");
+        const result = failureResult(
+          adapter,
+          errorMessage(error),
+          error instanceof ReplayWebMCPContractError ? error.code : "EXECUTION_FAILED",
+        );
+        await recordInvocationWithoutCanonicalActivity(adapter, name, result, requestId);
         instrumentation.onFinish?.(name, result);
         return result;
       } finally {
@@ -475,6 +512,14 @@ export function createReplayWebMCPTools(
     defineTool(
       adapter,
       instrumentation,
+      "propose_scene_changes",
+      "scene",
+      webMCPInputSchemas.propose_scene_changes,
+      (input, context) => executeMutation(adapter, "propose_scene_changes", input, context),
+    ),
+    defineTool(
+      adapter,
+      instrumentation,
       "mark_impact_event",
       "scene",
       webMCPInputSchemas.mark_impact_event,
@@ -538,14 +583,11 @@ export function createReplayWebMCPTools(
       webMCPInputSchemas.compare_hypotheses,
       async (input, context) => {
         const branchIds = [...new Set(input.branchIds)];
-        const data = await adapter.compareHypotheses(
-          { branchIds, comparisonMode: input.comparisonMode },
-          context,
-        );
+        const data = await adapter.compareHypotheses({ branchIds }, context);
         throwIfAborted(context.signal);
         return readResult(
           adapter,
-          `Compared ${String(branchIds.length)} hypotheses without changing case state.`,
+          `Compared ${String(branchIds.length)} hypotheses and opened the visible comparison.`,
           data,
         );
       },
@@ -563,7 +605,6 @@ export function createReplayWebMCPTools(
           {
             ...(input.branchId === undefined ? {} : { branchId: input.branchId }),
             expectedVersion: input.expectedVersion,
-            requestId: input.requestId,
           },
           context,
         );

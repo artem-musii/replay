@@ -1,4 +1,5 @@
 import type { Claim, ReplayCase, ReportPreview, ReportSection, ReportStatement } from "./models";
+import { evidenceBoundText } from "./languageSafety";
 
 export const REPORT_DISCLAIMER =
   "REPLAY helps organize and visualize a factual account. Its consistency checks are informational and are not a forensic or legal determination. This report is not forensic analysis or legal advice and does not determine fault or liability.";
@@ -29,6 +30,7 @@ function statement(
   certainty: ReportStatement["certainty"],
   claimIds: string[] = [],
   evidenceIds: string[] = [],
+  workspacePaths: string[] = [],
 ): ReportStatement {
   return {
     id,
@@ -37,6 +39,7 @@ function statement(
     citations: {
       claimIds: [...new Set(claimIds)].sort(),
       evidenceIds: [...new Set(evidenceIds)].sort(),
+      workspacePaths: [...new Set(workspacePaths)].sort(),
     },
   };
 }
@@ -65,18 +68,36 @@ function isUnconfirmedFactualClaim(claim: Claim): boolean {
   return !claim.branchId && claim.status !== "confirmed" && claim.status !== "agent-hypothesis";
 }
 
-function evidenceBoundText(text: string): string {
-  if (/\b(?:at fault|liable|liability conclusion|caused the collision)\b/i.test(text)) {
-    return "A source supplied a fault or liability allegation. It remains source-attributed and REPLAY does not adopt it as a conclusion.";
-  }
-  return text;
-}
-
 function linkedAvailableEvidence(replayCase: ReplayCase, ids: string[]): string[] {
   const available = new Set(
     replayCase.evidence.filter((asset) => !asset.deleted).map((asset) => asset.id),
   );
   return ids.filter((id) => available.has(id));
+}
+
+export function validWorkspaceCitationPaths(replayCase: ReplayCase): Set<string> {
+  return new Set([
+    "case.title",
+    "case.incidentDate",
+    "case.approximateTime",
+    "case.sceneTemplateId",
+    "case.activeBranchId",
+    "case.environment",
+    "system.report-generator",
+    "system.human-review",
+    ...replayCase.actors.flatMap((actor) => [
+      `actors.${actor.id}`,
+      ...actor.damageMarkers.map((marker) => `actors.${actor.id}.damageMarkers.${marker.id}`),
+    ]),
+    ...replayCase.timelineEvents.map((event) => `timelineEvents.${event.id}`),
+    ...replayCase.questions.map((question) => `questions.${question.id}`),
+    ...replayCase.branches.flatMap((branch) => [
+      `branches.${branch.id}`,
+      ...branch.assumptions.map(
+        (assumption) => `branches.${branch.id}.assumptions.${assumption.id}`,
+      ),
+    ]),
+  ]);
 }
 
 /**
@@ -127,6 +148,9 @@ export function buildReportPreview(
         "report-overview",
         `${evidenceBoundText(replayCase.title)}. Incident date: ${replayCase.incidentDate ?? "unknown"}; approximate time: ${replayCase.approximateTime ?? "unknown"}.`,
         "system",
+        [],
+        [],
+        ["case.title", "case.incidentDate", "case.approximateTime"],
       ),
     ]),
   );
@@ -140,6 +164,9 @@ export function buildReportPreview(
           reportStatementId("actor", actor.id),
           `${evidenceBoundText(actor.label)} is represented as an anonymous vehicle (${actor.dimensions.length.toFixed(1)} m × ${actor.dimensions.width.toFixed(1)} m).`,
           "system",
+          [],
+          [],
+          [`actors.${actor.id}`],
         ),
       ),
     ),
@@ -151,6 +178,9 @@ export function buildReportPreview(
         "report-environment",
         `Scene: ${replayCase.environment.sceneType}; road condition: ${replayCase.environment.roadCondition}; weather: ${replayCase.environment.weather}; lighting: ${replayCase.environment.lighting}.`,
         "system",
+        [],
+        [],
+        ["case.environment"],
       ),
     ]),
   );
@@ -215,13 +245,16 @@ export function buildReportPreview(
       return statement(
         reportStatementId("event", event.id),
         `T+${(event.timeMs / 1_000).toFixed(1)} s — ${evidenceBoundText(event.title)}.`,
-        citedClaims.length > 0 || citedEvidence.length > 0
-          ? confirmed
-            ? "confirmed"
-            : "reported"
-          : "system",
+        confirmed
+          ? "confirmed"
+          : event.certainty === "agent-hypothesis"
+            ? "hypothesis"
+            : event.certainty === "reported"
+              ? "reported"
+              : "uncertain",
         citedClaims,
         citedEvidence,
+        [`timelineEvents.${event.id}`],
       );
     });
   sections.push(section("timeline", "Timeline", timelineStatements));
@@ -232,6 +265,9 @@ export function buildReportPreview(
         "report-scene-diagram",
         `The accompanying ${replayCase.environment.sceneType} diagram is a structured visualization of the active reconstruction and should be read with its certainty and branch labels.`,
         "system",
+        [],
+        [],
+        ["case.sceneTemplateId", "case.activeBranchId"],
       ),
     ]),
   );
@@ -252,6 +288,7 @@ export function buildReportPreview(
                 : "reported",
             marker.linkedClaimIds.filter((id) => claimsById.has(id)),
             linkedAvailableEvidence(replayCase, marker.linkedEvidenceIds),
+            [`actors.${actor.id}.damageMarkers.${marker.id}`],
           ),
         ),
       ),
@@ -287,6 +324,8 @@ export function buildReportPreview(
           `${evidenceBoundText(question.question)} (${question.status}; ${question.importance}).`,
           "system",
           question.relatedClaimIds.filter((id) => claimsById.has(id)),
+          [],
+          [`questions.${question.id}`],
         ),
       ),
     ),
@@ -301,6 +340,9 @@ export function buildReportPreview(
           reportStatementId("branch-label", branch.id),
           `Hypothesis — ${evidenceBoundText(branch.name)}: ${evidenceBoundText(branch.description)}`,
           "system",
+          [],
+          [],
+          [`branches.${branch.id}`],
         ),
       );
       for (const assumption of branch.assumptions.filter((item) => item.status === "active")) {
@@ -319,6 +361,7 @@ export function buildReportPreview(
             "hypothesis",
             relatedClaimIds,
             evidenceIds,
+            [`branches.${branch.id}.assumptions.${assumption.id}`],
           ),
         );
       }
@@ -356,11 +399,14 @@ export function buildReportPreview(
 
   sections.push(
     section("method-limitations", "Method and limitations", [
-      statement("report-method", REPORT_DISCLAIMER, "system"),
+      statement("report-method", REPORT_DISCLAIMER, "system", [], [], ["system.report-generator"]),
       statement(
         "report-method-version",
         `Generated from structured local case data at case version ${String(replayCase.caseVersion)}. Geometry and damage checks are informational consistency hints only.`,
         "system",
+        [],
+        [],
+        ["system.report-generator"],
       ),
     ]),
   );
@@ -371,9 +417,24 @@ export function buildReportPreview(
         "report-human-review",
         "This preview is not finalized. A human must review unresolved questions, acknowledge the limitations, confirm review of confirmed facts, and manually finalize the factual report.",
         "system",
+        [],
+        [],
+        ["system.human-review"],
       ),
     ]),
   );
+
+  for (const reportSection of sections) {
+    for (const reportStatement of reportSection.statements) {
+      if (
+        reportStatement.certainty !== "system" &&
+        reportStatement.citations.claimIds.length === 0 &&
+        reportStatement.citations.evidenceIds.length === 0
+      ) {
+        missingRequirements.push(`Claim or evidence provenance for ${reportStatement.id}`);
+      }
+    }
+  }
 
   const includedClaimIds = [
     ...new Set(

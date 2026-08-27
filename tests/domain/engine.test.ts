@@ -31,6 +31,105 @@ describe("ReplayEngine command guarantees", () => {
     expect(
       engine.state.activity.filter((event) => event.requestId === "request-move-a"),
     ).toHaveLength(1);
+
+    expect(
+      engine.execute({
+        type: "actor.update-pose",
+        actor: "human",
+        origin: "ui",
+        actorId: "actor-vehicle-b",
+        pose: { x: 58, y: 62, rotationDeg: 88 },
+      }),
+    ).toMatchObject({ ok: true, caseVersion: 3 });
+    const lateRetry = engine.execute({ ...command, expectedVersion: 0 });
+    expect(lateRetry).toMatchObject({
+      ok: true,
+      caseVersion: 2,
+      activityId: first.ok ? first.activityId : undefined,
+      message: first.message,
+      idempotent: true,
+    });
+  });
+
+  it("binds a request ID to the validated command intent across retries and reloads", () => {
+    const engine = createEngine();
+    const command = {
+      type: "actor.update-pose",
+      actor: "agent",
+      origin: "webmcp",
+      expectedVersion: 1,
+      requestId: "request-bound-intent",
+      actorId: "actor-vehicle-a",
+      pose: { x: 65, y: 49, rotationDeg: 6 },
+    } as const;
+
+    expect(engine.execute(command)).toMatchObject({ ok: true, caseVersion: 2 });
+    expect(
+      engine.execute({
+        ...command,
+        expectedVersion: 2,
+        pose: { x: 25, y: 35, rotationDeg: 90 },
+      }),
+    ).toMatchObject({
+      ok: false,
+      caseVersion: 2,
+      error: { code: "IDEMPOTENCY_CONFLICT" },
+    });
+    expect(engine.state.actors.find((actor) => actor.id === command.actorId)?.pose).toEqual(
+      command.pose,
+    );
+
+    const activity = engine.state.activity.find((event) => event.requestId === command.requestId);
+    expect(activity?.requestIntentFingerprint).toMatch(/^intent-v1-[a-f0-9]{32}$/);
+
+    const rehydrated = new ReplayEngine(engine.state);
+    expect(rehydrated.execute({ ...command, expectedVersion: 0 })).toMatchObject({
+      ok: true,
+      caseVersion: 2,
+      idempotent: true,
+    });
+    expect(
+      rehydrated.execute({
+        ...command,
+        expectedVersion: 2,
+        pose: { x: 25, y: 35, rotationDeg: 90 },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_CONFLICT" } });
+  });
+
+  it("keeps action-type idempotency compatibility for legacy activity without a fingerprint", () => {
+    const engine = createEngine();
+    const command = {
+      type: "actor.update-pose",
+      actor: "agent",
+      origin: "webmcp",
+      expectedVersion: 1,
+      requestId: "request-legacy-receipt",
+      actorId: "actor-vehicle-a",
+      pose: { x: 65, y: 49, rotationDeg: 6 },
+    } as const;
+    expect(engine.execute(command).ok).toBe(true);
+    const legacyState = engine.state;
+    const activity = legacyState.activity.find((event) => event.requestId === command.requestId);
+    if (!activity) throw new Error("Expected request activity");
+    delete activity.requestIntentFingerprint;
+
+    const rehydrated = new ReplayEngine(legacyState);
+    expect(rehydrated.execute({ ...command, expectedVersion: 0 })).toMatchObject({
+      ok: true,
+      idempotent: true,
+    });
+    expect(
+      rehydrated.execute({
+        type: "workspace.focus",
+        actor: "agent",
+        origin: "webmcp",
+        requestId: command.requestId,
+        itemType: "actor",
+        itemId: command.actorId,
+        workspaceMode: "scene",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_CONFLICT" } });
   });
 
   it("rejects stale versions without changing state", () => {
@@ -49,7 +148,7 @@ describe("ReplayEngine command guarantees", () => {
       caseVersion: 1,
       error: { code: "VERSION_CONFLICT" },
     });
-    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(64);
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(74);
   });
 
   it("returns a structured lock error and leaves locked geometry untouched", () => {
@@ -89,7 +188,7 @@ describe("ReplayEngine command guarantees", () => {
     });
     expect(engine.state.caseVersion).toBe(2);
     expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-b")?.pose).toMatchObject(
-      { x: 57, y: 62 },
+      { x: 60, y: 70 },
     );
   });
 
@@ -218,6 +317,123 @@ describe("ReplayEngine command guarantees", () => {
     });
     expect(systemActivity?.summary).toContain("detected");
   });
+
+  it("classifies a human edit of the latest agent-edited object as an explicit override", () => {
+    const engine = createEngine();
+    const agentResult = engine.execute({
+      type: "actor.update-pose",
+      actor: "agent",
+      origin: "webmcp",
+      requestId: "agent-position-a",
+      actorId: "actor-vehicle-a",
+      pose: { x: 67, y: 50, rotationDeg: 5 },
+    });
+    expect(agentResult.ok).toBe(true);
+    if (!agentResult.ok) throw new Error("Agent pose update failed");
+
+    expect(
+      engine.execute({
+        type: "workspace.focus",
+        actor: "human",
+        origin: "ui",
+        itemType: "actor",
+        itemId: "actor-vehicle-a",
+        workspaceMode: "scene",
+      }).ok,
+    ).toBe(true);
+
+    const focusActivity = engine.state.activity.find(
+      (activity) => activity.actionType === "workspace.focus" && activity.caseVersion === 3,
+    );
+    expect(focusActivity?.classification).toBeUndefined();
+
+    const humanResult = engine.execute({
+      type: "actor.update-pose",
+      actor: "human",
+      origin: "ui",
+      actorId: "actor-vehicle-a",
+      pose: { x: 61, y: 53, rotationDeg: 12 },
+    });
+    expect(humanResult.ok).toBe(true);
+    if (!humanResult.ok) throw new Error("Human pose update failed");
+
+    const activities = engine.state.activity;
+    const agentActivity = activities.find((activity) => activity.id === agentResult.activityId);
+    const humanActivity = activities.find((activity) => activity.id === humanResult.activityId);
+    expect(agentActivity).toMatchObject({
+      author: "agent",
+      origin: "webmcp",
+      actionType: "actor.update-pose",
+      affectedIds: expect.arrayContaining(["actor-vehicle-a"]),
+    });
+    expect(humanActivity).toMatchObject({
+      author: "human",
+      origin: "ui",
+      actionType: "actor.update-pose",
+      classification: "human-override",
+      overridesActivityId: agentResult.activityId,
+      affectedIds: expect.arrayContaining(["actor-vehicle-a"]),
+    });
+    expect(humanActivity?.summary).toMatch(/^Human override:/);
+  });
+
+  it("does not misclassify ordinary human edits or validation as overrides", () => {
+    const engine = createEngine();
+    expect(
+      engine.execute({
+        type: "actor.update-pose",
+        actor: "agent",
+        origin: "webmcp",
+        requestId: "agent-position-a",
+        actorId: "actor-vehicle-a",
+        pose: { x: 67, y: 50, rotationDeg: 5 },
+      }).ok,
+    ).toBe(true);
+
+    const unrelatedHumanResult = engine.execute({
+      type: "actor.update-pose",
+      actor: "human",
+      origin: "ui",
+      actorId: "actor-vehicle-b",
+      pose: { x: 58, y: 62, rotationDeg: 88 },
+    });
+    expect(unrelatedHumanResult.ok).toBe(true);
+    if (!unrelatedHumanResult.ok) throw new Error("Unrelated human pose update failed");
+    expect(
+      engine.state.activity.find((activity) => activity.id === unrelatedHumanResult.activityId)
+        ?.classification,
+    ).toBeUndefined();
+
+    const validationResult = engine.execute({
+      type: "case.validate",
+      actor: "human",
+      origin: "ui",
+      scope: "all",
+    });
+    expect(validationResult.ok).toBe(true);
+    if (!validationResult.ok) throw new Error("Consistency validation failed");
+    expect(
+      engine.state.activity.find((activity) => activity.id === validationResult.activityId),
+    ).toMatchObject({ author: "system", actionType: "case.validate" });
+    expect(
+      engine.state.activity.find((activity) => activity.id === validationResult.activityId)
+        ?.classification,
+    ).toBeUndefined();
+
+    const secondHumanResult = engine.execute({
+      type: "actor.update-pose",
+      actor: "human",
+      origin: "ui",
+      actorId: "actor-vehicle-b",
+      pose: { x: 59, y: 62, rotationDeg: 89 },
+    });
+    expect(secondHumanResult.ok).toBe(true);
+    if (!secondHumanResult.ok) throw new Error("Second human pose update failed");
+    expect(
+      engine.state.activity.find((activity) => activity.id === secondHumanResult.activityId)
+        ?.classification,
+    ).toBeUndefined();
+  });
 });
 
 describe("command history", () => {
@@ -234,13 +450,56 @@ describe("command history", () => {
 
     const undo = engine.undo();
     expect(undo).toMatchObject({ ok: true, caseVersion: 3 });
-    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(64);
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(74);
     expect(engine.state.activity.some((event) => event.actionType === "history.undo")).toBe(true);
 
     const redo = engine.redo();
     expect(redo).toMatchObject({ ok: true, caseVersion: 4 });
     expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(70);
     expect(engine.state.activity.some((event) => event.actionType === "history.redo")).toBe(true);
+  });
+
+  it("keeps workspace focus out of history and exposes live revert availability", () => {
+    const engine = createEngine();
+    const mutation = engine.execute({
+      type: "actor.update-pose",
+      actor: "agent",
+      origin: "webmcp",
+      requestId: "agent-action-before-focus",
+      actorId: "actor-vehicle-a",
+      pose: { x: 66, y: 50, rotationDeg: 5 },
+    });
+    expect(mutation).toMatchObject({ ok: true, caseVersion: 2 });
+    expect(engine.canRevertAgentAction("agent-action-before-focus")).toBe(true);
+
+    const focus = engine.execute({
+      type: "workspace.focus",
+      actor: "agent",
+      origin: "webmcp",
+      itemType: "evidence",
+      itemId: "evidence-overview",
+      workspaceMode: "evidence",
+    });
+    expect(focus).toMatchObject({ ok: true, caseVersion: 3 });
+    if (!focus.ok) throw new Error("Workspace focus failed");
+    expect(
+      engine.state.activity.find((activity) => activity.id === focus.activityId)?.undoable,
+    ).toBe(false);
+    expect(engine.canUndo).toBe(true);
+    expect(engine.canRevertAgentAction("agent-action-before-focus")).toBe(true);
+
+    const rehydrated = new ReplayEngine(engine.state);
+    expect(rehydrated.canRevertAgentAction("agent-action-before-focus")).toBe(false);
+
+    expect(
+      engine.revertAgentAction("agent-action-before-focus", {
+        actor: "human",
+        origin: "ui",
+        requestId: "human-revert-after-focus",
+      }),
+    ).toMatchObject({ ok: true, caseVersion: 4 });
+    expect(engine.state.workspaceMode).toBe("evidence");
+    expect(engine.state.selectedItem).toEqual({ type: "evidence", id: "evidence-overview" });
   });
 
   it("reverts an agent request only while it is the latest safe action", () => {
@@ -257,9 +516,44 @@ describe("command history", () => {
       engine.revertAgentAction("agent-action-1", {
         actor: "agent",
         origin: "webmcp",
+        requestId: "agent-action-1",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_CONFLICT" } });
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(66);
+
+    const firstRevert = engine.revertAgentAction("agent-action-1", {
+      actor: "agent",
+      origin: "webmcp",
+      requestId: "agent-revert-1",
+    });
+    expect(firstRevert.ok).toBe(true);
+    const retriedRevert = engine.revertAgentAction("agent-action-1", {
+      actor: "agent",
+      origin: "webmcp",
+      requestId: "agent-revert-1",
+    });
+    expect(retriedRevert).toMatchObject({
+      ok: true,
+      idempotent: true,
+      activityId: firstRevert.ok ? firstRevert.activityId : undefined,
+      message: firstRevert.message,
+    });
+    expect(
+      engine.state.activity.filter((activity) => activity.requestId === "agent-revert-1"),
+    ).toHaveLength(1);
+    const rehydrated = new ReplayEngine(engine.state);
+    expect(
+      rehydrated.revertAgentAction("agent-action-1", {
+        actor: "agent",
+        origin: "webmcp",
         requestId: "agent-revert-1",
-      }).ok,
-    ).toBe(true);
+      }),
+    ).toMatchObject({
+      ok: true,
+      idempotent: true,
+      activityId: firstRevert.ok ? firstRevert.activityId : undefined,
+      message: firstRevert.message,
+    });
 
     engine.execute({
       type: "actor.update-pose",
@@ -269,6 +563,14 @@ describe("command history", () => {
       actorId: "actor-vehicle-a",
       pose: { x: 67, y: 50, rotationDeg: 5 },
     });
+    expect(
+      engine.revertAgentAction("agent-action-2", {
+        actor: "agent",
+        origin: "webmcp",
+        requestId: "agent-revert-1",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "IDEMPOTENCY_CONFLICT" } });
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(67);
     engine.execute({
       type: "actor.update-pose",
       actor: "human",

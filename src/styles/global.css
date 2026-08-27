@@ -22,7 +22,7 @@
   --field-hover: oklch(0.33 0.05 185);
   --confirmed: oklch(0.55 0.095 180);
   --uncertain: oklch(0.72 0.13 80);
-  --conflict: oklch(0.63 0.14 30);
+  --conflict: oklch(0.47 0.14 30);
   --agent: oklch(0.57 0.105 275);
   --selection: oklch(0.58 0.13 240);
   --focus: oklch(0.53 0.17 245);
@@ -181,7 +181,7 @@ img {
 .section-kicker {
   text-transform: uppercase;
   letter-spacing: 0.13em;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 760;
   color: var(--muted);
   margin: 0 0 18px;
@@ -276,6 +276,11 @@ img {
   color: var(--muted);
   line-height: 1.7;
 }
+.fatal-state > [role="alert"] p {
+  max-width: 65ch;
+  color: var(--muted);
+  line-height: 1.7;
+}
 .fatal-state__actions {
   display: flex;
   gap: 10px;
@@ -305,7 +310,62 @@ img {
 }
 .app-loading p {
   margin: 0;
-  font-size: 0.67rem;
+  font-size: 0.75rem;
+}
+.frame-guard {
+  width: min(560px, calc(100% - 32px));
+  min-height: 100vh;
+  margin: 0 auto;
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  gap: 14px;
+}
+.frame-guard h1,
+.frame-guard p {
+  margin: 0;
+}
+.frame-guard h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 8vw, 3.4rem);
+  line-height: 0.98;
+}
+.frame-guard > p:not(.section-kicker) {
+  max-width: 52ch;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.vault-recovery-notice {
+  position: fixed;
+  z-index: 1500;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 24px));
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--uncertain);
+  border-radius: 10px;
+  background: var(--paper-raised);
+  box-shadow: var(--shadow-soft);
+}
+.vault-recovery-notice div {
+  display: grid;
+  gap: 3px;
+}
+.vault-recovery-notice strong,
+.vault-recovery-notice span {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.vault-recovery-notice > button:last-child {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
 }
 @keyframes loading-spin {
   to {

@@ -155,6 +155,7 @@ export function createBlankCase(
     claims,
     evidence: [],
     questions: [],
+    proposals: [],
     activity: [
       {
         id: "activity-case-created",

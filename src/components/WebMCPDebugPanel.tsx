@@ -1,7 +1,8 @@
 import { Braces, Check, ChevronDown, CircleOff, Copy, Play, Shield, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { WebMCPDebugState, WebMCPToolName } from "../webmcp";
+import { useDialogFocus } from "./useDialogFocus";
 
 interface WebMCPDebugPanelProps {
   state: WebMCPDebugState;
@@ -28,6 +29,11 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
   const [error, setError] = useState<string>();
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>({
+    initialFocusRef: closeButtonRef,
+    onEscape: onClose,
+  });
   const selectedTool = useMemo(
     () => state.tools.find((tool) => tool.name === selected),
     [selected, state.tools],
@@ -65,17 +71,24 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
       }}
     >
       <section
+        ref={dialogRef}
         className="debug-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="webmcp-debug-title"
+        tabIndex={-1}
       >
         <header>
           <div>
             <p>Development inspector</p>
             <h2 id="webmcp-debug-title">WebMCP Site Tools</h2>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close WebMCP inspector">
+          <button
+            ref={closeButtonRef}
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close WebMCP inspector"
+          >
             <X size={18} />
           </button>
         </header>
@@ -95,24 +108,24 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
         <div className="debug-layout">
           <div className="debug-tool-list" role="list" aria-label="Site Tools">
             {state.tools.map((tool) => (
-              <button
-                key={tool.name}
-                className={selected === tool.name ? "is-selected" : ""}
-                onClick={() => {
-                  setSelected(tool.name);
-                  setInput(JSON.stringify(samples[tool.name] ?? {}, null, 2));
-                  setResult(undefined);
-                  setError(undefined);
-                }}
-                role="listitem"
-              >
-                <span className={`tool-state is-${tool.registrationState}`} />
-                <span>
-                  <strong>{tool.title}</strong>
-                  <small>{tool.name}</small>
-                </span>
-                <ChevronDown size={12} />
-              </button>
+              <div key={tool.name} role="listitem">
+                <button
+                  className={selected === tool.name ? "is-selected" : ""}
+                  onClick={() => {
+                    setSelected(tool.name);
+                    setInput(JSON.stringify(samples[tool.name] ?? {}, null, 2));
+                    setResult(undefined);
+                    setError(undefined);
+                  }}
+                >
+                  <span className={`tool-state is-${tool.registrationState}`} />
+                  <span>
+                    <strong>{tool.title}</strong>
+                    <small>{tool.name}</small>
+                  </span>
+                  <ChevronDown size={12} />
+                </button>
+              </div>
             ))}
           </div>
           <div className="debug-detail">

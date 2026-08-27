@@ -40,7 +40,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <button
             className="button button--secondary"
             onClick={() => {
-              window.location.href = "/";
+              window.location.assign(new URL(import.meta.env.BASE_URL, window.location.origin));
             }}
           >
             Return home

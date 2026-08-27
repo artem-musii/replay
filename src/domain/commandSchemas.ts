@@ -71,6 +71,50 @@ export const TrajectorySetCommandSchema = createCommandSchema("trajectory.set", 
   visible: z.boolean().optional(),
 });
 
+const ProposalChangeInputSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("actor-pose"),
+      actorId: id,
+      proposedPose: ActorPoseSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("trajectory-set"),
+      trajectoryId: id.optional(),
+      actorId: id,
+      branchId: id,
+      keyframes: z.array(KeyframeInputSchema).min(1).max(2_000),
+      visible: z.boolean().optional(),
+    })
+    .strict(),
+]);
+
+export const ProposalCreateCommandSchema = createCommandSchema("proposal.create", {
+  proposalId: id.optional(),
+  title: shortText,
+  rationale: longText,
+  revisionSummary: shortText.optional(),
+  changes: z.array(ProposalChangeInputSchema).min(1).max(25),
+});
+
+export const ProposalAdjustCommandSchema = createCommandSchema("proposal.adjust", {
+  proposalId: id,
+  summary: shortText,
+  changes: z.array(ProposalChangeInputSchema).min(1).max(25),
+});
+
+export const ProposalAcceptCommandSchema = createCommandSchema("proposal.accept", {
+  proposalId: id,
+  note: longText.optional(),
+});
+
+export const ProposalRejectCommandSchema = createCommandSchema("proposal.reject", {
+  proposalId: id,
+  note: longText.optional(),
+});
+
 export const TimelineUpsertCommandSchema = createCommandSchema("timeline.upsert", {
   eventId: id.optional(),
   branchId: id,
@@ -171,7 +215,16 @@ export const EvidenceUpdateCommandSchema = createCommandSchema("evidence.update"
 
 export const EvidenceLinkCommandSchema = createCommandSchema("evidence.link", {
   evidenceId: id,
-  targetType: z.enum(["claim", "timeline-event", "actor", "trajectory", "damage", "hypothesis"]),
+  annotationId: id.optional(),
+  targetType: z.enum([
+    "claim",
+    "timeline-event",
+    "actor",
+    "trajectory",
+    "damage",
+    "hypothesis",
+    "assumption",
+  ]),
   targetId: id,
 });
 
@@ -337,6 +390,10 @@ export const ReplayMutationCommandSchema = z.discriminatedUnion("type", [
   ActorUpsertCommandSchema,
   ActorUpdatePoseCommandSchema,
   TrajectorySetCommandSchema,
+  ProposalCreateCommandSchema,
+  ProposalAdjustCommandSchema,
+  ProposalAcceptCommandSchema,
+  ProposalRejectCommandSchema,
   TimelineUpsertCommandSchema,
   DamageMarkCommandSchema,
   ClaimAddCommandSchema,
@@ -376,6 +433,7 @@ export type ReplayCommandErrorCode =
   | "INVALID_COMMAND"
   | "CANCELLED"
   | "VERSION_CONFLICT"
+  | "IDEMPOTENCY_CONFLICT"
   | "NOT_FOUND"
   | "DUPLICATE_ID"
   | "DUPLICATE_EVIDENCE"

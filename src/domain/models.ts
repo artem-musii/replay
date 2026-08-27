@@ -1,5 +1,5 @@
-export const REPLAY_SCHEMA_VERSION = 1 as const;
-export const REPLAY_SEED_VERSION = 1 as const;
+export const REPLAY_SCHEMA_VERSION = 2 as const;
+export const REPLAY_SEED_VERSION = 2 as const;
 
 export type ActorKind = "vehicle";
 
@@ -184,6 +184,13 @@ export type EvidenceAnnotation =
       label?: string | undefined;
     };
 
+export interface EvidenceAnnotationLink {
+  annotationId: string;
+  targetType:
+    "claim" | "timeline-event" | "actor" | "trajectory" | "damage" | "hypothesis" | "assumption";
+  targetId: string;
+}
+
 export interface EvidenceAsset {
   id: string;
   name: string;
@@ -198,6 +205,7 @@ export interface EvidenceAsset {
   notes?: string | undefined;
   tags: string[];
   annotations: EvidenceAnnotation[];
+  annotationLinks: EvidenceAnnotationLink[];
   linkedClaimIds: string[];
   linkedEventIds: string[];
   linkedSceneObjectIds: string[];
@@ -263,11 +271,80 @@ export interface ActivityEvent {
   author: ActionAuthor;
   origin: ActionOrigin;
   actionType: string;
+  classification?: "human-override" | undefined;
+  overridesActivityId?: string | undefined;
   summary: string;
   affectedIds: string[];
   requestId?: string | undefined;
+  requestIntentFingerprint?: string | undefined;
   undoable: boolean;
   createdAt: string;
+}
+
+export interface AgentProposalActorPoseChange {
+  id: string;
+  kind: "actor-pose";
+  actorId: string;
+  basePose: ActorPose;
+  proposedPose: ActorPose;
+}
+
+export interface AgentProposalTrajectoryChange {
+  id: string;
+  kind: "trajectory-set";
+  actorId: string;
+  branchId: string;
+  trajectoryId: string;
+  createsTrajectory: boolean;
+  baseActorPose: ActorPose;
+  baseTrajectory?:
+    | {
+        keyframes: ActorKeyframe[];
+        visible: boolean;
+      }
+    | undefined;
+  proposedTrajectory: {
+    keyframes: ActorKeyframe[];
+    visible: boolean;
+  };
+}
+
+export type AgentProposalChange = AgentProposalActorPoseChange | AgentProposalTrajectoryChange;
+
+export interface AgentProposalRevision {
+  id: string;
+  revisionNumber: number;
+  summary: string;
+  createdBy: "agent" | "human";
+  origin: "webmcp" | "ui";
+  /** False after an unsigned import until the history is reviewed locally. */
+  authorshipTrusted: boolean;
+  createdAt: string;
+  changes: AgentProposalChange[];
+}
+
+export interface AgentProposalDecision {
+  outcome: "accepted" | "rejected";
+  revisionId: string;
+  decidedBy: "human";
+  origin: "ui";
+  decidedAt: string;
+  note?: string | undefined;
+  /** Unsigned imports preserve the decision as history without treating it as a local attestation. */
+  humanAttestationTrusted: boolean;
+}
+
+export interface AgentProposal {
+  id: string;
+  title: string;
+  rationale: string;
+  status: "pending" | "accepted" | "rejected";
+  createdBy: "agent";
+  origin: "webmcp";
+  createdAt: string;
+  updatedAt: string;
+  revisions: AgentProposalRevision[];
+  decision?: AgentProposalDecision | undefined;
 }
 
 export type ConsistencyScope =
@@ -288,6 +365,7 @@ export interface ConsistencyIssue {
 export interface ReportCitation {
   claimIds: string[];
   evidenceIds: string[];
+  workspacePaths: string[];
 }
 
 export interface ReportStatement {
@@ -346,7 +424,7 @@ export interface WorkspaceSelection {
 
 export interface ReplayCase {
   schemaVersion: typeof REPLAY_SCHEMA_VERSION;
-  seedVersion?: typeof REPLAY_SEED_VERSION | undefined;
+  seedVersion?: number | undefined;
   id: string;
   title: string;
   createdAt: string;
@@ -365,6 +443,7 @@ export interface ReplayCase {
   claims: Claim[];
   evidence: EvidenceAsset[];
   questions: OpenQuestion[];
+  proposals: AgentProposal[];
   activity: ActivityEvent[];
   consistencyIssues: ConsistencyIssue[];
   reportNotes: ReportNote[];

@@ -8,6 +8,7 @@ import type {
 
 import type { SceneActor, TimelineEvent, Trajectory } from "../domain/models";
 import "../styles/timeline.css";
+import { useDialogFocus } from "./useDialogFocus";
 
 export interface TimelineComparison {
   /** Branches shown in addition to the active branch. */
@@ -48,6 +49,12 @@ export interface TimelineProps {
 type DragTarget =
   | { kind: "event"; eventId: string }
   | { kind: "keyframe"; trajectoryId: string; keyframeId: string };
+
+interface DragState {
+  target: DragTarget;
+  pointerId: number;
+  previewTimeMs?: number;
+}
 
 const SPEED_OPTIONS = [0.5, 1, 2] as const;
 
@@ -104,6 +111,17 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
+function isSameDragTarget(left: DragTarget, right: DragTarget): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "event" && right.kind === "event") return left.eventId === right.eventId;
+  return (
+    left.kind === "keyframe" &&
+    right.kind === "keyframe" &&
+    left.trajectoryId === right.trajectoryId &&
+    left.keyframeId === right.keyframeId
+  );
+}
+
 /**
  * A synchronized, domain-agnostic timeline. Every edit is surfaced through a
  * callback so the app shell can route it through the canonical command layer.
@@ -130,7 +148,8 @@ export function Timeline({
   onAddEvent,
 }: TimelineProps) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragTarget, setDragTarget] = useState<DragTarget>();
+  const dragStateRef = useRef<DragState | undefined>(undefined);
+  const [dragState, setDragState] = useState<DragState>();
   const [eventEditorOpen, setEventEditorOpen] = useState(false);
   const [eventTitle, setEventTitle] = useState("");
   const [eventType, setEventType] = useState<
@@ -140,6 +159,12 @@ export function Timeline({
     "reported" | "likely" | "uncertain" | "disputed" | "unknown"
   >("reported");
   const [eventActorId, setEventActorId] = useState("all");
+  const eventTitleRef = useRef<HTMLInputElement>(null);
+  const eventDialogRef = useDialogFocus<HTMLElement>({
+    active: eventEditorOpen,
+    initialFocusRef: eventTitleRef,
+    onEscape: () => setEventEditorOpen(false),
+  });
   const visibleBranchIds = useMemo(
     () => new Set([activeBranchId, ...(comparison?.branchIds ?? [])]),
     [activeBranchId, comparison?.branchIds],
@@ -190,12 +215,48 @@ export function Timeline({
     else onMoveKeyframe?.(target.trajectoryId, target.keyframeId, timeMs);
   }
 
+  function startDrag(target: DragTarget, pointerId: number): void {
+    const nextState: DragState = { target, pointerId };
+    dragStateRef.current = nextState;
+    setDragState(nextState);
+  }
+
+  function clearDrag(): void {
+    dragStateRef.current = undefined;
+    setDragState(undefined);
+  }
+
   function handleTrackPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (!dragTarget) return;
+    const activeDrag = dragStateRef.current;
+    if (activeDrag?.pointerId !== event.pointerId) return;
     const timeMs = timeFromPointer(event.clientX);
     if (timeMs === undefined) return;
-    moveDragTarget(dragTarget, timeMs);
+    event.preventDefault();
+    const nextState = { ...activeDrag, previewTimeMs: timeMs };
+    dragStateRef.current = nextState;
+    setDragState(nextState);
     onTimeChange(timeMs);
+  }
+
+  function handleTrackPointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
+    const activeDrag = dragStateRef.current;
+    if (activeDrag?.pointerId !== event.pointerId) return;
+    if (activeDrag.previewTimeMs !== undefined) {
+      moveDragTarget(activeDrag.target, activeDrag.previewTimeMs);
+    }
+    clearDrag();
+  }
+
+  function handleTrackPointerCancel(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (dragStateRef.current?.pointerId !== event.pointerId) return;
+    clearDrag();
+  }
+
+  function previewTimeFor(target: DragTarget, committedTimeMs: number): number {
+    if (dragState?.previewTimeMs !== undefined && isSameDragTarget(dragState.target, target)) {
+      return dragState.previewTimeMs;
+    }
+    return committedTimeMs;
   }
 
   function handleHandleKeyDown(
@@ -250,7 +311,7 @@ export function Timeline({
 
   return (
     <section
-      className="timeline"
+      className={`timeline${comparison && comparison.branchIds.length > 0 ? " is-comparing" : ""}`}
       aria-label="Incident timeline"
       tabIndex={0}
       onKeyDown={handleTimelineKeyboard}
@@ -359,10 +420,10 @@ export function Timeline({
           className="timeline__tracks"
           ref={trackRef}
           onPointerMove={handleTrackPointerMove}
-          onPointerUp={() => setDragTarget(undefined)}
-          onPointerCancel={() => setDragTarget(undefined)}
+          onPointerUp={handleTrackPointerUp}
+          onPointerCancel={handleTrackPointerCancel}
           onPointerLeave={(event) => {
-            if (event.buttons === 0) setDragTarget(undefined);
+            if (event.buttons === 0) clearDrag();
           }}
         >
           <div className="timeline__ruler" aria-hidden="true">
@@ -381,17 +442,18 @@ export function Timeline({
             {visibleEvents.map((timelineEvent, index) => {
               const target: DragTarget = { kind: "event", eventId: timelineEvent.id };
               const editable = Boolean(onMoveEvent) && !timelineEvent.locked;
+              const displayTimeMs = previewTimeFor(target, timelineEvent.timeMs);
               return (
                 <button
                   className={`timeline-event timeline-event--${timelineEvent.type} certainty--${timelineEvent.certainty}${selectedId === timelineEvent.id ? " is-selected" : ""}${timelineEvent.branchId !== activeBranchId ? " is-comparison" : ""}${editable ? " is-editable" : ""}`}
                   key={timelineEvent.id}
                   type="button"
                   style={{
-                    left: `${String(timeToPercent(timelineEvent.timeMs, timeRangeMs))}%`,
+                    left: `${String(timeToPercent(displayTimeMs, timeRangeMs))}%`,
                     top: `${String(6 + (index % 3) * 18)}px`,
                   }}
-                  title={`${timelineEvent.title}, ${formatTime(timelineEvent.timeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
-                  aria-label={`${timelineEvent.title} at ${formatTime(timelineEvent.timeMs, true)}. ${timelineEvent.certainty}.`}
+                  title={`${timelineEvent.title}, ${formatTime(displayTimeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
+                  aria-label={`${timelineEvent.title} at ${formatTime(displayTimeMs, true)}. ${timelineEvent.certainty}.`}
                   aria-pressed={selectedId === timelineEvent.id}
                   onClick={() => {
                     onSelectEvent?.(timelineEvent.id);
@@ -401,7 +463,7 @@ export function Timeline({
                     if (!editable) return;
                     event.preventDefault();
                     event.currentTarget.setPointerCapture(event.pointerId);
-                    setDragTarget(target);
+                    startDrag(target, event.pointerId);
                   }}
                   onKeyDown={(event) => {
                     if (editable) handleHandleKeyDown(event, target, timelineEvent.timeMs);
@@ -429,16 +491,17 @@ export function Timeline({
                   keyframeId: keyframe.id,
                 };
                 const editable = Boolean(onMoveKeyframe) && !trajectory.locked;
+                const displayTimeMs = previewTimeFor(target, keyframe.timeMs);
                 return (
                   <button
                     className={`timeline-keyframe${selectedId === keyframe.id ? " is-selected" : ""}${editable ? " is-editable" : ""}`}
                     key={keyframe.id}
                     type="button"
                     style={{
-                      left: `${String(timeToPercent(keyframe.timeMs, timeRangeMs))}%`,
+                      left: `${String(timeToPercent(displayTimeMs, timeRangeMs))}%`,
                     }}
-                    title={`${actorName(actors, trajectory.actorId)} keyframe at ${formatTime(keyframe.timeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
-                    aria-label={`${actorName(actors, trajectory.actorId)} path keyframe at ${formatTime(keyframe.timeMs, true)}`}
+                    title={`${actorName(actors, trajectory.actorId)} keyframe at ${formatTime(displayTimeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
+                    aria-label={`${actorName(actors, trajectory.actorId)} path keyframe at ${formatTime(displayTimeMs, true)}`}
                     aria-pressed={selectedId === keyframe.id}
                     onClick={() => {
                       onSelectKeyframe?.(trajectory.id, keyframe.id);
@@ -448,7 +511,7 @@ export function Timeline({
                       if (!editable) return;
                       event.preventDefault();
                       event.currentTarget.setPointerCapture(event.pointerId);
-                      setDragTarget(target);
+                      startDrag(target, event.pointerId);
                     }}
                     onKeyDown={(event) => {
                       if (editable) handleHandleKeyDown(event, target, keyframe.timeMs);
@@ -508,10 +571,12 @@ export function Timeline({
           }}
         >
           <section
+            ref={eventDialogRef}
             className="dialog timeline-event-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="timeline-event-title"
+            tabIndex={-1}
           >
             <header>
               <div>
@@ -531,11 +596,11 @@ export function Timeline({
               <label>
                 <span>Event title</span>
                 <input
+                  ref={eventTitleRef}
                   value={eventTitle}
                   onChange={(event) => setEventTitle(event.target.value)}
                   placeholder="Describe only what is known"
                   required
-                  autoFocus
                 />
               </label>
               <div className="inline-form__row">

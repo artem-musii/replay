@@ -38,31 +38,131 @@ import { createReplayWebMCPAdapter } from "../integration/replayWebMCPAdapter";
 import {
   deleteEvidenceBlob,
   loadEvidenceBlob,
+  LocalVaultConflictError,
   saveCase,
   saveEvidenceBlob,
+  type SaveCaseOptions,
 } from "../persistence/database";
-import { ReplayWebMCPRegistry, type WebMCPDebugState, type WebMCPToolName } from "../webmcp";
+import {
+  ReplayWebMCPRegistry,
+  type ReplayToolInvocationAudit,
+  type WebMCPDebugState,
+  type WebMCPToolName,
+} from "../webmcp";
 import { ActivityPanel } from "./ActivityPanel";
 import { BrandMark } from "./BrandMark";
 import { type EvidenceUploadInput, InspectorPanel, type InspectorTab } from "./InspectorPanel";
 import { SceneCanvas } from "./SceneCanvas";
 import { Timeline } from "./Timeline";
+import { useDialogFocus } from "./useDialogFocus";
 import { WebMCPDebugPanel } from "./WebMCPDebugPanel";
 
 interface WorkspaceProps {
   initialCase: ReplayCase;
   isDemo: boolean;
   onHome: (latestCase: ReplayCase) => void;
-  onResetDemo: () => void;
+  onResetDemo: () => Promise<boolean>;
   onImportCase: (replayCase: ReplayCase) => void;
 }
 
 type SaveState = "saving" | "saved" | "error";
+type WriteAccess = "checking" | "writable" | "blocked";
+
+function getLockManager(): LockManager | undefined {
+  const candidate: unknown = Reflect.get(navigator, "locks");
+  return typeof candidate === "object" && candidate !== null && "request" in candidate
+    ? (candidate as LockManager)
+    : undefined;
+}
 
 interface ToastState {
   kind: "success" | "error" | "info";
   message: string;
   detail?: string;
+}
+
+interface SaveFailure {
+  caseVersion: number;
+  message: string;
+}
+
+class SaveCoordinator {
+  private failure: SaveFailure | undefined;
+  private conflictSource: "broadcast" | "lease" | "save" | undefined;
+  private durableCaseVersion: number | undefined;
+  private currentCaseVersion: number;
+  private recoveryResumeFromVersion: number | undefined;
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(initialCaseVersion: number) {
+    this.currentCaseVersion = initialCaseVersion;
+  }
+
+  getFailure(): SaveFailure | undefined {
+    return this.failure;
+  }
+
+  setFailure(failure: SaveFailure | undefined): void {
+    this.failure = failure;
+  }
+
+  getConflictSource(): "broadcast" | "lease" | "save" | undefined {
+    return this.conflictSource;
+  }
+
+  setConflictSource(source: "broadcast" | "lease" | "save" | undefined): void {
+    this.conflictSource = source;
+  }
+
+  getDurableCaseVersion(): number | undefined {
+    return this.durableCaseVersion;
+  }
+
+  recordDurableCaseVersion(caseVersion: number): void {
+    this.durableCaseVersion = caseVersion;
+    if (
+      this.recoveryResumeFromVersion !== undefined &&
+      caseVersion >= this.recoveryResumeFromVersion
+    ) {
+      this.recoveryResumeFromVersion = undefined;
+    }
+  }
+
+  allowRecoveryResumeFrom(caseVersion: number): void {
+    this.recoveryResumeFromVersion = caseVersion;
+  }
+
+  expectedVersionFor(
+    stateCaseVersion: number,
+    requestedExpectedVersion: number | undefined,
+  ): number | undefined {
+    if (
+      this.recoveryResumeFromVersion !== undefined &&
+      stateCaseVersion > this.recoveryResumeFromVersion &&
+      this.durableCaseVersion !== undefined
+    ) {
+      return this.durableCaseVersion;
+    }
+    return requestedExpectedVersion;
+  }
+
+  getCurrentCaseVersion(): number {
+    return this.currentCaseVersion;
+  }
+
+  setCurrentCaseVersion(caseVersion: number): void {
+    this.currentCaseVersion = caseVersion;
+  }
+
+  enqueue(operation: () => Promise<void>): Promise<void> {
+    const attempt = this.queue.then(operation);
+    this.queue = attempt.catch(() => undefined);
+    return attempt;
+  }
+
+  whenIdle(): Promise<void> {
+    return this.queue;
+  }
 }
 
 const inspectorModes = new Set<InspectorTab>([
@@ -129,37 +229,209 @@ export function Workspace({
   const [compareBranchIds, setCompareBranchIds] = useState<string[]>([]);
   const [reportPreview, setReportPreview] = useState<ReportPreview>();
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [saveFailure, setSaveFailure] = useState<SaveFailure>();
+  const [recoveryBackupVersion, setRecoveryBackupVersion] = useState<number>();
+  const [saveCoordinator] = useState(() => new SaveCoordinator(initialCase.caseVersion));
   const [toast, setToast] = useState<ToastState>();
   const [agentAction, setAgentAction] = useState<string>();
+  const [toolInvocationActivity, setToolInvocationActivity] = useState<ActivityEvent[]>([]);
+  const [toolActivityStore] = useState<{ items: ActivityEvent[] }>(() => ({ items: [] }));
   const [activeAgentIds, setActiveAgentIds] = useState<string[]>([]);
+  const [focusedIssueId, setFocusedIssueId] = useState<string>();
   const [revertingActivityId, setRevertingActivityId] = useState<string>();
   const [showDebug, setShowDebug] = useState(false);
+  const [confirmingDemoReset, setConfirmingDemoReset] = useState(false);
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const evidenceUrlsRef = useRef<Record<string, string>>({});
+  const pendingEvidenceBlobDeletionsRef = useRef(
+    new Map<string, { evidenceId: string; blobKey: string }>(),
+  );
   const importInputRef = useRef<HTMLInputElement>(null);
   const registryRef = useRef<ReplayWebMCPRegistry | undefined>(undefined);
+  const [writerId] = useState(() => `writer-${crypto.randomUUID()}`);
+  const [writeAccess, setWriteAccess] = useState<WriteAccess>(() =>
+    getLockManager() ? "checking" : "writable",
+  );
+  const [externalConflict, setExternalConflict] = useState<string>();
+  const saveFailureIsBlocking = Boolean(
+    saveFailure && (recoveryBackupVersion ?? -1) < replayCase.caseVersion,
+  );
+  const mutationBlockReason =
+    externalConflict ??
+    (writeAccess === "checking"
+      ? "REPLAY is acquiring the local editing lease. Try again in a moment."
+      : writeAccess === "blocked"
+        ? "Another tab is editing this case. Reload after closing the other editor."
+        : saveFailureIsBlocking
+          ? `Local saving failed at case version ${saveFailure?.caseVersion}. Editing and Site Tools are paused until you retry the save or download a recovery backup.`
+          : undefined);
+
+  const recordSaveSuccess = useCallback(
+    (caseVersion: number) => {
+      saveCoordinator.recordDurableCaseVersion(caseVersion);
+      const activeFailure = saveCoordinator.getFailure();
+      const resolvesFailure = (failure: SaveFailure) =>
+        caseVersion >= failure.caseVersion ||
+        caseVersion === saveCoordinator.getCurrentCaseVersion();
+      if (activeFailure && resolvesFailure(activeFailure)) {
+        saveCoordinator.setFailure(undefined);
+      }
+      setSaveFailure((current) => (current && resolvesFailure(current) ? undefined : current));
+      if (saveCoordinator.getCurrentCaseVersion() <= caseVersion) setSaveState("saved");
+    },
+    [saveCoordinator],
+  );
+
+  const recordSaveFailure = useCallback(
+    (error: unknown, caseVersion: number) => {
+      if (saveCoordinator.getDurableCaseVersion() === caseVersion) return;
+      setSaveState("error");
+      if (error instanceof LocalVaultConflictError) {
+        saveCoordinator.setConflictSource("save");
+        setExternalConflict(error.message);
+        setWriteAccess("blocked");
+        return;
+      }
+      const detail =
+        error instanceof Error ? error.message : "The browser did not provide a failure reason.";
+      const failure = {
+        caseVersion,
+        message: `Browser storage is not confirmed for the current case at version ${caseVersion}. ${detail}`,
+      };
+      saveCoordinator.setFailure(failure);
+      setSaveFailure(failure);
+    },
+    [saveCoordinator],
+  );
+
+  const enqueueCaseSave = useCallback(
+    (
+      state: ReplayCase,
+      options: SaveCaseOptions,
+      { allowWhilePaused = false }: { allowWhilePaused?: boolean } = {},
+    ): Promise<void> => {
+      return saveCoordinator.enqueue(async () => {
+        const activeFailure = saveCoordinator.getFailure();
+        if (activeFailure && !allowWhilePaused) {
+          throw new Error(
+            `Local saving is paused after case version ${activeFailure.caseVersion} failed.`,
+          );
+        }
+        setSaveState("saving");
+        try {
+          const expectedCaseVersion = saveCoordinator.expectedVersionFor(
+            state.caseVersion,
+            options.expectedCaseVersion,
+          );
+          await saveCase(state, {
+            ...options,
+            ...(expectedCaseVersion === undefined ? {} : { expectedCaseVersion }),
+          });
+          recordSaveSuccess(state.caseVersion);
+        } catch (error) {
+          recordSaveFailure(error, state.caseVersion);
+          throw error;
+        }
+      });
+    },
+    [recordSaveFailure, recordSaveSuccess, saveCoordinator],
+  );
 
   useEffect(() => {
-    void saveCase(engine.getState()).then(
-      () => setSaveState("saved"),
-      () => setSaveState("error"),
-    );
+    const locks = getLockManager();
+    if (!locks) return;
+    let disposed = false;
+    let releaseLease: (() => void) | undefined;
+    const acquisition = new AbortController();
+    const acquisitionTimeout = window.setTimeout(() => acquisition.abort(), 500);
+    void locks
+      .request(
+        `replay-case-writer:${initialCase.id}`,
+        { mode: "exclusive", signal: acquisition.signal },
+        async (lock) => {
+          window.clearTimeout(acquisitionTimeout);
+          if (disposed) return;
+          if (!lock) {
+            const message =
+              "Another tab is editing this case. This copy is read-only until you reload.";
+            saveCoordinator.setConflictSource("lease");
+            setExternalConflict(message);
+            setWriteAccess("blocked");
+            return;
+          }
+          setWriteAccess("writable");
+          await new Promise<void>((resolve) => {
+            releaseLease = resolve;
+          });
+        },
+      )
+      .catch((error: unknown) => {
+        window.clearTimeout(acquisitionTimeout);
+        if (disposed) return;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          const message =
+            "Another tab is editing this case. This copy is read-only until you reload.";
+          saveCoordinator.setConflictSource("lease");
+          setExternalConflict(message);
+          setWriteAccess("blocked");
+          return;
+        }
+        // A browser implementation failure must not make the complete manual
+        // workspace unusable; CAS persistence remains the fallback guard.
+        setWriteAccess("writable");
+      });
+    return () => {
+      disposed = true;
+      window.clearTimeout(acquisitionTimeout);
+      acquisition.abort();
+      releaseLease?.();
+    };
+  }, [initialCase.id, saveCoordinator]);
+
+  useEffect(() => {
+    if (writeAccess !== "writable") return;
+    void enqueueCaseSave(engine.getState(), { writerId }).catch(() => undefined);
     return engine.subscribe((state, result) => {
+      saveCoordinator.setCurrentCaseVersion(state.caseVersion);
       replayCaseRef.current = state;
       setReplayCase(state);
-      setSaveState("saving");
       if (inspectorModes.has(state.workspaceMode as InspectorTab))
         setActiveTab(state.workspaceMode as InspectorTab);
       const activity = state.activity.find((item) => item.id === result.activityId);
       if (activity?.actionType !== "workspace.focus") setReportPreview(undefined);
-      void saveCase(state).then(
-        () => {
-          if (replayCaseRef.current.caseVersion === state.caseVersion) setSaveState("saved");
-        },
-        () => setSaveState("error"),
-      );
+      void enqueueCaseSave(state, {
+        expectedCaseVersion: state.caseVersion - 1,
+        writerId,
+      }).catch(() => undefined);
     });
-  }, [engine]);
+  }, [engine, enqueueCaseSave, saveCoordinator, writeAccess, writerId]);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel("replay-local-vault-updates");
+    channel.addEventListener("message", (event: MessageEvent<unknown>) => {
+      const update = event.data as
+        | {
+            caseId?: unknown;
+            caseVersion?: unknown;
+            updatedAt?: unknown;
+            writerId?: unknown;
+          }
+        | undefined;
+      if (
+        update?.caseId !== initialCase.id ||
+        update.writerId === writerId ||
+        (update.caseVersion === replayCaseRef.current.caseVersion &&
+          update.updatedAt === replayCaseRef.current.updatedAt)
+      )
+        return;
+      const message = `Another tab saved case version ${String(update.caseVersion)}. Reload before editing so no human or agent work is overwritten.`;
+      saveCoordinator.setConflictSource("broadcast");
+      setExternalConflict(message);
+      setWriteAccess("blocked");
+    });
+    return () => channel.close();
+  }, [initialCase.id, saveCoordinator, writerId]);
 
   useEffect(() => {
     let disposed = false;
@@ -168,15 +440,28 @@ export function Workspace({
       initialCase.evidence
         .filter((asset) => !asset.deleted && asset.localBlobKey.startsWith("evidence:"))
         .map(async (asset) => {
-          const blob = await loadEvidenceBlob(asset.localBlobKey);
-          if (!blob || disposed) return;
-          const url = URL.createObjectURL(blob);
-          createdUrls.push(url);
-          setEvidenceUrls((current) => {
-            const next = { ...current, [asset.id]: url };
-            evidenceUrlsRef.current = next;
-            return next;
-          });
+          try {
+            const blob = await loadEvidenceBlob(asset.localBlobKey, {
+              caseId: initialCase.id,
+              checksum: asset.checksum,
+              mimeType: asset.mimeType,
+            });
+            if (!blob || disposed) return;
+            const url = URL.createObjectURL(blob);
+            createdUrls.push(url);
+            setEvidenceUrls((current) => {
+              const next = { ...current, [asset.id]: url };
+              evidenceUrlsRef.current = next;
+              return next;
+            });
+          } catch {
+            if (!disposed) {
+              setToast({
+                kind: "error",
+                message: `Evidence integrity check failed for ${asset.name}. The image was not displayed.`,
+              });
+            }
+          }
         }),
     );
     return () => {
@@ -227,12 +512,61 @@ export function Workspace({
     );
   }, []);
 
+  const focusConsistencyIssue = useCallback(
+    (issueId: string, affectedIds: readonly string[]) => {
+      setFocusedIssueId(issueId);
+      setActiveTab("report");
+      revealAffected(affectedIds);
+    },
+    [revealAffected],
+  );
+
+  const recordToolInvocation = useCallback(
+    (audit: ReplayToolInvocationAudit) => {
+      const label = audit.toolName.replaceAll("_", " ");
+      const activity: ActivityEvent = {
+        id: `activity-tool-${crypto.randomUUID()}`,
+        caseVersion: audit.caseVersion,
+        author: "agent",
+        origin: "webmcp",
+        actionType: `webmcp.${audit.toolName}`,
+        summary: `${audit.ok ? "Ran" : "Failed"} ${label}: ${audit.message}`,
+        affectedIds: [...audit.affectedIds],
+        ...(audit.requestId === undefined ? {} : { requestId: audit.requestId }),
+        undoable: false,
+        createdAt: new Date().toISOString(),
+      };
+      setToolInvocationActivity((current) => {
+        const next = [...current, activity].slice(-100);
+        toolActivityStore.items = next;
+        return next;
+      });
+    },
+    [toolActivityStore],
+  );
+
   const adapter = useMemo(
     () =>
       createReplayWebMCPAdapter(engine, {
         getCase: () => engine.getState(),
         hasReportPreview: () => Boolean(reportPreview),
-        persistCase: saveCase,
+        persistCase: async (state, options) => {
+          await enqueueCaseSave(
+            state,
+            {
+              writerId,
+              expectedCaseVersion: options.expectedCaseVersion,
+            },
+            {
+              allowWhilePaused: options.compensation === true,
+            },
+          );
+          if (options.compensation && saveCoordinator.getConflictSource() === "save") {
+            saveCoordinator.setConflictSource(undefined);
+            setExternalConflict(undefined);
+            setWriteAccess("writable");
+          }
+        },
         setReportPreview: (preview) => {
           setReportPreview(preview);
           setActiveTab("report");
@@ -240,9 +574,24 @@ export function Workspace({
         setAgentWorking: (active, toolName) =>
           setAgentAction(active ? toolName?.replaceAll("_", " ") : undefined),
         revealAffected,
+        focusIssue: focusConsistencyIssue,
         setComparison: setCompareBranchIds,
+        getVisibleActivity: () => [...engine.getState().activity, ...toolActivityStore.items],
+        recordToolInvocation,
+        getMutationBlockReason: () => mutationBlockReason,
       }),
-    [engine, reportPreview, revealAffected],
+    [
+      engine,
+      enqueueCaseSave,
+      focusConsistencyIssue,
+      mutationBlockReason,
+      recordToolInvocation,
+      reportPreview,
+      revealAffected,
+      saveCoordinator,
+      toolActivityStore,
+      writerId,
+    ],
   );
   const [debugState, setDebugState] = useState<WebMCPDebugState>({
     supported: false,
@@ -267,6 +616,18 @@ export function Workspace({
 
   const runCommand = useCallback(
     (command: Record<string, unknown>, quiet = false): ReplayCommandResult => {
+      const blockedReason = mutationBlockReason;
+      if (blockedReason) {
+        setToast({ kind: "error", message: blockedReason });
+        return {
+          ok: false,
+          caseVersion: replayCaseRef.current.caseVersion,
+          affectedIds: [],
+          issues: replayCaseRef.current.consistencyIssues,
+          message: blockedReason,
+          error: { code: "VERSION_CONFLICT", message: blockedReason },
+        };
+      }
       const result = engine.execute({ ...humanMeta(), ...command });
       if (!result.ok) {
         const detail = commandFailureDetail(result);
@@ -274,8 +635,90 @@ export function Workspace({
       } else if (!quiet) setToast({ kind: "success", message: result.message });
       return result;
     },
-    [engine],
+    [engine, mutationBlockReason],
   );
+
+  function removeEvidenceUrl(evidenceId: string): void {
+    setEvidenceUrls((current) => {
+      const url = current[evidenceId];
+      if (url) URL.revokeObjectURL(url);
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => id !== evidenceId));
+      evidenceUrlsRef.current = next;
+      return next;
+    });
+  }
+
+  async function flushPendingEvidenceBlobDeletions(): Promise<boolean> {
+    let complete = true;
+    for (const pending of [...pendingEvidenceBlobDeletionsRef.current.values()]) {
+      const tombstone = replayCaseRef.current.evidence.find(
+        (asset) => asset.id === pending.evidenceId,
+      );
+      if (!tombstone?.deleted) continue;
+      try {
+        await deleteEvidenceBlob(pending.blobKey);
+        pendingEvidenceBlobDeletionsRef.current.delete(pending.blobKey);
+        removeEvidenceUrl(pending.evidenceId);
+      } catch {
+        complete = false;
+      }
+    }
+    return complete;
+  }
+
+  async function retryLocalSave(): Promise<void> {
+    try {
+      await enqueueCaseSave(replayCaseRef.current, { writerId }, { allowWhilePaused: true });
+      const evidenceCleanupComplete = await flushPendingEvidenceBlobDeletions();
+      setToast(
+        evidenceCleanupComplete
+          ? { kind: "success", message: "The current case is saved in the local vault." }
+          : {
+              kind: "error",
+              message: "The case is saved, but some deleted evidence bytes remain in storage.",
+              detail: "Retry once more or clear this site's data before leaving the device.",
+            },
+      );
+    } catch (error) {
+      setToast({
+        kind: "error",
+        message:
+          error instanceof LocalVaultConflictError
+            ? error.message
+            : "The local save still cannot be completed. Your in-tab case remains available.",
+      });
+    }
+  }
+
+  function downloadSaveRecoveryBackup(): void {
+    try {
+      const state = replayCaseRef.current;
+      exportCaseJson(state);
+      setRecoveryBackupVersion(state.caseVersion);
+      // This exact in-memory version is now recoverable outside IndexedDB. Let
+      // the next mutation try browser persistence again; a new failure creates
+      // a fresh block for any changes not covered by this backup.
+      saveCoordinator.setFailure(undefined);
+      saveCoordinator.allowRecoveryResumeFrom(state.caseVersion);
+      setToast({
+        kind: "info",
+        message: `Downloaded a recovery backup for case version ${state.caseVersion}.`,
+        detail:
+          "Editing can continue, but retry local saving before relying on browser storage again.",
+      });
+    } catch (error) {
+      setToast({ kind: "error", message: downloadErrorMessage(error) });
+    }
+  }
+
+  function runHistoryAction(direction: "undo" | "redo"): void {
+    if (mutationBlockReason) {
+      setToast({ kind: "error", message: mutationBlockReason });
+      return;
+    }
+    const result = direction === "undo" ? engine.undo() : engine.redo();
+    if (!result.ok) setToast({ kind: "error", message: result.message });
+  }
 
   function selectItem(type: WorkspaceItemType, itemId: string): void {
     runCommand(
@@ -462,6 +905,56 @@ export function Workspace({
     );
   }
 
+  function updateTrajectoryKeyframeExact(
+    trajectoryId: string,
+    keyframeId: string,
+    update: { timeMs: number; x: number; y: number; rotationDeg: number },
+  ): void {
+    const state = engine.getState();
+    const trajectory = state.trajectories.find((item) => item.id === trajectoryId);
+    if (!trajectory) return;
+    const index = trajectory.keyframes.findIndex((frame) => frame.id === keyframeId);
+    if (index < 0) return;
+    const previous = trajectory.keyframes[index - 1];
+    const next = trajectory.keyframes[index + 1];
+    const safeTime = Math.max(
+      previous ? previous.timeMs + 1 : state.timeRangeMs.start,
+      Math.min(next ? next.timeMs - 1 : state.timeRangeMs.end, update.timeMs),
+    );
+    runCommand({
+      type: "trajectory.set",
+      trajectoryId,
+      actorId: trajectory.actorId,
+      branchId: trajectory.branchId,
+      keyframes: trajectory.keyframes.map((frame) => {
+        const input = toTrajectoryKeyframeInput(frame);
+        return frame.id === keyframeId
+          ? {
+              ...input,
+              timeMs: safeTime,
+              x: Math.max(0, Math.min(100, update.x)),
+              y: Math.max(0, Math.min(100, update.y)),
+              rotationDeg: update.rotationDeg,
+            }
+          : input;
+      }),
+      visible: trajectory.visible,
+    });
+  }
+
+  function setTrajectoryVisible(trajectoryId: string, visible: boolean): void {
+    const trajectory = engine.getState().trajectories.find((item) => item.id === trajectoryId);
+    if (!trajectory) return;
+    runCommand({
+      type: "trajectory.set",
+      trajectoryId,
+      actorId: trajectory.actorId,
+      branchId: trajectory.branchId,
+      keyframes: trajectory.keyframes.map(toTrajectoryKeyframeInput),
+      visible,
+    });
+  }
+
   function moveTimelineEvent(eventId: string, timeMs: number): void {
     const timelineEvent = engine.getState().timelineEvents.find((item) => item.id === eventId);
     if (!timelineEvent) return;
@@ -481,6 +974,58 @@ export function Workspace({
       },
       true,
     );
+  }
+
+  function updateTimelineEventExact(
+    eventId: string,
+    update: {
+      timeMs: number;
+      certainty: "reported" | "likely" | "uncertain" | "disputed" | "unknown";
+      location?: { x: number; y: number };
+    },
+  ): void {
+    const state = engine.getState();
+    const timelineEvent = state.timelineEvents.find((item) => item.id === eventId);
+    if (!timelineEvent) return;
+    const location = update.location
+      ? {
+          x: Math.max(0, Math.min(100, update.location.x)),
+          y: Math.max(0, Math.min(100, update.location.y)),
+        }
+      : timelineEvent.location;
+    runCommand({
+      type: "timeline.upsert",
+      eventId,
+      branchId: timelineEvent.branchId,
+      timeMs: Math.max(state.timeRangeMs.start, Math.min(state.timeRangeMs.end, update.timeMs)),
+      eventType: timelineEvent.type,
+      title: timelineEvent.title,
+      certainty: update.certainty,
+      linkedActorIds: timelineEvent.linkedActorIds,
+      linkedClaimIds: timelineEvent.linkedClaimIds,
+      linkedEvidenceIds: timelineEvent.linkedEvidenceIds,
+      ...(location ? { location } : {}),
+    });
+  }
+
+  function toggleSceneItemLock(
+    targetType: "actor" | "trajectory" | "timeline-event",
+    targetId: string,
+    locked: boolean,
+  ): void {
+    const label =
+      targetType === "actor"
+        ? "scene position"
+        : targetType === "trajectory"
+          ? "reconstructed path"
+          : "event time and location";
+    runCommand({
+      type: "lock.set",
+      targetType,
+      targetId,
+      locked,
+      ...(locked ? { reason: `Human protected this ${label}.` } : {}),
+    });
   }
 
   async function uploadEvidence(input: EvidenceUploadInput): Promise<void> {
@@ -523,8 +1068,8 @@ export function Workspace({
       setToast({ kind: "error", message: "This image is already in the evidence tray." });
       return;
     }
-    const evidenceId = `evidence-${checksum.slice(0, 16)}`;
-    const blobKey = `evidence:${replayCaseRef.current.id}:${checksum}`;
+    const evidenceId = `evidence-${crypto.randomUUID()}`;
+    const blobKey = `evidence:${crypto.randomUUID()}`;
     try {
       await saveEvidenceBlob({
         key: blobKey,
@@ -568,18 +1113,52 @@ export function Workspace({
     selectItem("evidence", evidenceId);
   }
 
-  function deleteEvidence(evidenceId: string): void {
+  async function deleteEvidence(evidenceId: string): Promise<void> {
     const asset = replayCaseRef.current.evidence.find((item) => item.id === evidenceId);
-    const result = runCommand({ type: "evidence.delete", evidenceId, confirmed: true });
+    const previousCaseVersion = replayCaseRef.current.caseVersion;
+    const result = runCommand({ type: "evidence.delete", evidenceId, confirmed: true }, true);
     if (!result.ok || !asset) return;
-    if (asset.localBlobKey.startsWith("evidence:")) void deleteEvidenceBlob(asset.localBlobKey);
-    setEvidenceUrls((current) => {
-      const url = current[evidenceId];
-      if (url) URL.revokeObjectURL(url);
-      const next = Object.fromEntries(Object.entries(current).filter(([id]) => id !== evidenceId));
-      evidenceUrlsRef.current = next;
-      return next;
-    });
+    const deletedCaseVersion = engine.getState().caseVersion;
+    try {
+      await enqueueCaseSave(
+        engine.getState(),
+        { expectedCaseVersion: previousCaseVersion, writerId },
+        { allowWhilePaused: false },
+      );
+    } catch {
+      if (saveCoordinator.getDurableCaseVersion() !== deletedCaseVersion) {
+        if (asset.localBlobKey.startsWith("evidence:")) {
+          pendingEvidenceBlobDeletionsRef.current.set(asset.localBlobKey, {
+            evidenceId,
+            blobKey: asset.localBlobKey,
+          });
+        }
+        setToast({
+          kind: "error",
+          message: "Evidence deletion was not saved. The image bytes remain in the local vault.",
+          detail: "Retry the local case save or download a recovery backup before editing again.",
+        });
+        return;
+      }
+    }
+    if (asset.localBlobKey.startsWith("evidence:")) {
+      try {
+        await deleteEvidenceBlob(asset.localBlobKey);
+      } catch {
+        pendingEvidenceBlobDeletionsRef.current.set(asset.localBlobKey, {
+          evidenceId,
+          blobKey: asset.localBlobKey,
+        });
+        setToast({
+          kind: "error",
+          message:
+            "Evidence metadata and links were scrubbed, but browser storage could not remove the image bytes. Clear this site's data before leaving the device.",
+        });
+        return;
+      }
+    }
+    removeEvidenceUrl(evidenceId);
+    setToast({ kind: "success", message: "Evidence and its local image bytes were deleted." });
   }
 
   function updateQuestion(
@@ -610,16 +1189,20 @@ export function Workspace({
 
   async function importFile(file: File | undefined): Promise<void> {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setToast({ kind: "error", message: "Case imports must be 5 MB or smaller." });
+    if (file.size > 20 * 1024 * 1024) {
+      setToast({ kind: "error", message: "Structured case imports must be 20 MB or smaller." });
       return;
     }
     try {
-      onImportCase(importReplayCase(await file.text()));
+      onImportCase(
+        importReplayCase(await file.text(), {
+          rekeyCaseId: `case-import-${crypto.randomUUID()}`,
+        }),
+      );
     } catch (error) {
       setToast({
         kind: "error",
-        message: error instanceof Error ? error.message : "The case backup is invalid.",
+        message: error instanceof Error ? error.message : "The structured case export is invalid.",
       });
     }
   }
@@ -676,6 +1259,10 @@ export function Workspace({
   }
 
   function revertActivity(activityId: string): void {
+    if (mutationBlockReason) {
+      setToast({ kind: "error", message: mutationBlockReason });
+      return;
+    }
     const activity = replayCaseRef.current.activity.find((item) => item.id === activityId);
     if (!activity?.requestId) return;
     setRevertingActivityId(activityId);
@@ -686,16 +1273,22 @@ export function Workspace({
   }
 
   const selectedId = replayCase.selectedItem?.id;
+  const revertibleActivityIds = mutationBlockReason
+    ? []
+    : replayCase.activity.flatMap((activity) =>
+        activity.requestId && engine.canRevertAgentAction(activity.requestId) ? [activity.id] : [],
+      );
   const branchNames = Object.fromEntries(
     replayCase.branches.map((branch) => [branch.id, branch.name]),
   );
 
   return (
-    <main className="workspace" id="main-content">
+    <main className="workspace">
       <input
         ref={importInputRef}
         className="visually-hidden"
         type="file"
+        tabIndex={-1}
         accept="application/json,.json"
         aria-label="Import case JSON"
         onChange={(event) => void importFile(event.target.files?.[0])}
@@ -704,26 +1297,73 @@ export function Workspace({
         replayCase={replayCase}
         isDemo={isDemo}
         saveState={saveState}
-        canUndo={engine.canUndo}
-        canRedo={engine.canRedo}
+        canUndo={engine.canUndo && !mutationBlockReason}
+        canRedo={engine.canRedo && !mutationBlockReason}
         webMcpSupported={debugState.supported}
         registeredTools={debugState.registeredToolNames.length}
         agentWorking={Boolean(agentAction)}
         onHome={() => onHome(replayCaseRef.current)}
-        onUndo={() => {
-          const result = engine.undo();
-          if (!result.ok) setToast({ kind: "error", message: result.message });
+        onUndo={() => runHistoryAction("undo")}
+        onRedo={() => runHistoryAction("redo")}
+        onResetDemo={() => {
+          if (mutationBlockReason) setToast({ kind: "error", message: mutationBlockReason });
+          else setConfirmingDemoReset(true);
         }}
-        onRedo={() => {
-          const result = engine.redo();
-          if (!result.ok) setToast({ kind: "error", message: result.message });
+        onImport={() => {
+          if (mutationBlockReason) setToast({ kind: "error", message: mutationBlockReason });
+          else importInputRef.current?.click();
         }}
-        onResetDemo={onResetDemo}
-        onImport={() => importInputRef.current?.click()}
         onExport={() => exportCaseJson(replayCaseRef.current)}
         onDebug={() => setShowDebug(true)}
       />
-      <div className="workspace-grid">
+      {externalConflict && (
+        <div className="workspace-conflict" role="alert">
+          <CircleAlert size={18} />
+          <div>
+            <strong>Editing paused to protect local work</strong>
+            <span>{externalConflict}</span>
+          </div>
+          <button className="button button--secondary" onClick={() => window.location.reload()}>
+            Reload latest
+          </button>
+        </div>
+      )}
+      {saveFailure && (
+        <div
+          className={`workspace-save-failure${saveFailureIsBlocking ? " is-blocking" : ""}`}
+          role={saveFailureIsBlocking ? "alert" : "status"}
+        >
+          <CircleAlert size={18} aria-hidden="true" />
+          <div>
+            <strong>
+              {saveFailureIsBlocking
+                ? "Local save failed. Editing is paused."
+                : "Local save failed. Recovery backup downloaded."}
+            </strong>
+            <span>{saveFailure.message}</span>
+          </div>
+          <div className="workspace-save-failure__actions">
+            <button
+              className="button button--secondary"
+              disabled={saveState === "saving"}
+              onClick={() => void retryLocalSave()}
+            >
+              {saveState === "saving" ? "Retrying…" : "Retry local save"}
+            </button>
+            <button className="button button--secondary" onClick={downloadSaveRecoveryBackup}>
+              <Download size={14} aria-hidden="true" /> Download recovery backup
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="mobile-edit-guidance" role="note">
+        <CircleAlert size={16} aria-hidden="true" />
+        <span>
+          Phone view prioritizes review. Use a larger screen for precise dragging; exact numeric
+          controls remain available after selecting a scene item.
+        </span>
+      </div>
+      <div className="workspace-grid" id="main-content" tabIndex={-1}>
         <div className="workspace-scene">
           {compareBranchIds.length > 0 && (
             <div className="comparison-banner">
@@ -806,7 +1446,9 @@ export function Workspace({
         </div>
         <InspectorPanel
           replayCase={replayCase}
+          currentTimeMs={currentTimeMs}
           activeTab={activeTab}
+          {...(focusedIssueId ? { focusedIssueId } : {})}
           {...(selectedId ? { selectedId } : {})}
           {...(reportPreview ? { reportPreview } : {})}
           evidenceUrls={evidenceUrls}
@@ -839,13 +1481,29 @@ export function Workspace({
               ...(locked ? { reason: "Human protected this observation." } : {}),
             })
           }
+          onUpdateActorPose={moveActorAtCurrentTime}
+          onUpdateTrajectoryKeyframe={updateTrajectoryKeyframeExact}
+          onSetTrajectoryVisible={setTrajectoryVisible}
+          onUpdateTimelineEvent={updateTimelineEventExact}
+          onToggleSceneItemLock={toggleSceneItemLock}
+          onAdjustProposal={(proposalId, summary, changes) =>
+            runCommand({ type: "proposal.adjust", proposalId, summary, changes })
+          }
+          onAcceptProposal={(proposalId) => runCommand({ type: "proposal.accept", proposalId })}
+          onRejectProposal={(proposalId) => runCommand({ type: "proposal.reject", proposalId })}
           onUploadEvidence={(input) => void uploadEvidence(input)}
           onDeleteEvidence={deleteEvidence}
           onUpdateEvidence={(evidenceId, update) =>
             runCommand({ type: "evidence.update", evidenceId, ...update })
           }
-          onLinkEvidence={(evidenceId, targetType, targetId) =>
-            runCommand({ type: "evidence.link", evidenceId, targetType, targetId })
+          onLinkEvidence={(evidenceId, targetType, targetId, annotationId) =>
+            runCommand({
+              type: "evidence.link",
+              evidenceId,
+              targetType,
+              targetId,
+              ...(annotationId ? { annotationId } : {}),
+            })
           }
           onAddQuestion={(question, reason, importance) =>
             runCommand({
@@ -869,6 +1527,9 @@ export function Workspace({
             runCommand({ type: "hypothesis.fork", parentBranchId, name, description })
           }
           onSetActiveBranch={(branchId) => runCommand({ type: "hypothesis.set-active", branchId })}
+          onRenameBranch={(branchId, name, description) =>
+            runCommand({ type: "hypothesis.rename", branchId, name, description })
+          }
           onAddAssumption={(branchId, statement) =>
             runCommand({
               type: "hypothesis.add-assumption",
@@ -876,6 +1537,14 @@ export function Workspace({
               statement,
               supportingEvidenceIds: [],
               conflictingEvidenceIds: [],
+            })
+          }
+          onUpdateAssumption={(branchId, assumptionId, update) =>
+            runCommand({
+              type: "hypothesis.update-assumption",
+              branchId,
+              assumptionId,
+              ...update,
             })
           }
           onToggleBranchArchive={(branch) =>
@@ -887,52 +1556,16 @@ export function Workspace({
           onCompareBranches={setCompareBranchIds}
           onValidate={() => runCommand({ type: "case.validate", scope: "all" })}
           onFocusIssue={(issue) => {
-            const state = replayCaseRef.current;
-            const affectedId = issue.affectedIds[0];
-            if (!affectedId) {
-              setToast({ kind: "info", message: issue.explanation });
-              return;
-            }
-            if (state.actors.some((item) => item.id === affectedId))
-              selectItem("actor", affectedId);
-            else if (state.trajectories.some((item) => item.id === affectedId))
-              selectItem("trajectory", affectedId);
-            else if (state.timelineEvents.some((item) => item.id === affectedId)) {
-              selectItem("timeline-event", affectedId);
-              const event = state.timelineEvents.find((item) => item.id === affectedId);
-              if (event) setCurrentTimeMs(event.timeMs);
-            } else if (state.claims.some((item) => item.id === affectedId))
-              selectItem("claim", affectedId);
-            else if (state.evidence.some((item) => item.id === affectedId))
-              selectItem("evidence", affectedId);
-            else if (state.questions.some((item) => item.id === affectedId))
-              selectItem("question", affectedId);
-            else if (state.branches.some((item) => item.id === affectedId))
-              selectItem("hypothesis", affectedId);
-            else setToast({ kind: "info", message: issue.explanation });
+            focusConsistencyIssue(issue.id, issue.affectedIds);
+            setToast({ kind: "info", message: issue.title, detail: issue.explanation });
           }}
           onBuildReport={buildPreview}
-          onAddReportNote={(text) => {
-            const claimId =
-              replayCaseRef.current.selectedItem?.type === "claim"
-                ? replayCaseRef.current.selectedItem.id
-                : replayCaseRef.current.claims.find((item) => item.humanConfirmed)?.id;
-            const evidenceId =
-              replayCaseRef.current.selectedItem?.type === "evidence"
-                ? replayCaseRef.current.selectedItem.id
-                : undefined;
-            if (!claimId && !evidenceId) {
-              setToast({
-                kind: "error",
-                message: "Select a claim or evidence item before adding an evidence-bound note.",
-              });
-              return;
-            }
+          onAddReportNote={(text, claimIds, evidenceIds) => {
             runCommand({
               type: "report.add-note",
               text,
-              claimIds: claimId ? [claimId] : [],
-              evidenceIds: evidenceId ? [evidenceId] : [],
+              claimIds,
+              evidenceIds,
             });
           }}
           onReviewReportNote={(noteId, approved) =>
@@ -992,9 +1625,10 @@ export function Workspace({
         />
         <div className="workspace-activity">
           <ActivityPanel
-            activities={replayCase.activity}
+            activities={[...replayCase.activity, ...toolInvocationActivity]}
             {...(agentAction ? { activeAgentAction: agentAction } : {})}
             {...(revertingActivityId ? { revertingActivityId } : {})}
+            revertibleActivityIds={revertibleActivityIds}
             maxItems={20}
             onRevert={revertActivity}
             onSelectActivity={focusActivity}
@@ -1030,7 +1664,99 @@ export function Workspace({
           }
         />
       )}
+      {confirmingDemoReset && (
+        <DemoResetDialog
+          onCancel={() => setConfirmingDemoReset(false)}
+          onConfirm={async () => {
+            await saveCoordinator.whenIdle();
+            if (saveCoordinator.getFailure() || saveCoordinator.getConflictSource()) {
+              setConfirmingDemoReset(false);
+              setToast({
+                kind: "error",
+                message:
+                  "The demo was not reset because the current case is not safely stored. Resolve the local save or editing-conflict notice first.",
+              });
+              return;
+            }
+            const reset = await onResetDemo();
+            if (!reset) setConfirmingDemoReset(false);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function DemoResetDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [resetting, setResetting] = useState(false);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>({
+    initialFocusRef: cancelButtonRef,
+    onEscape: () => {
+      if (!resetting) onCancel();
+    },
+  });
+
+  async function confirmReset(): Promise<void> {
+    if (resetting) return;
+    setResetting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  return (
+    <div
+      className="dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (!resetting && event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="dialog confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="reset-demo-title"
+        aria-describedby="reset-demo-description"
+        tabIndex={-1}
+      >
+        <div className="dialog-icon is-destructive">
+          <RotateCcw size={20} aria-hidden="true" />
+        </div>
+        <h2 id="reset-demo-title">Reset the deterministic demo?</h2>
+        <p id="reset-demo-description">
+          This permanently removes the saved demo case and its local evidence, then opens the
+          original deterministic seed. Export anything you need before continuing.
+        </p>
+        <footer>
+          <button
+            ref={cancelButtonRef}
+            className="button button--quiet"
+            disabled={resetting}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="button button--danger"
+            disabled={resetting}
+            onClick={() => void confirmReset()}
+          >
+            {resetting ? "Resetting…" : "Reset demo"}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 
@@ -1064,7 +1790,7 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
       </button>
       <div className="workspace-case-title">
         <span>{props.isDemo ? "Demo case" : "Local case"}</span>
-        <strong>{props.replayCase.title}</strong>
+        <h1>{props.replayCase.title}</h1>
         <small>v{props.replayCase.caseVersion}</small>
       </div>
       <div className={`save-status is-${props.saveState}`} role="status">
@@ -1118,10 +1844,10 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
         </summary>
         <div>
           <button onClick={props.onExport}>
-            <Download size={14} /> Export JSON backup
+            <Download size={14} /> Export structured case JSON
           </button>
           <button onClick={props.onImport}>
-            <FileUp size={14} /> Import case backup
+            <FileUp size={14} /> Import structured case JSON
           </button>
           {props.isDemo && (
             <button onClick={props.onResetDemo}>

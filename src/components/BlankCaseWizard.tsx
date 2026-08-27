@@ -52,7 +52,7 @@ export function BlankCaseWizard({ onCancel, onCreate }: BlankCaseWizardProps) {
   }
 
   return (
-    <main className="wizard-page" id="main-content">
+    <main className="wizard-page">
       <header className="wizard-header">
         <BrandMark />
         <span>New local case</span>
@@ -66,6 +66,8 @@ export function BlankCaseWizard({ onCancel, onCreate }: BlankCaseWizardProps) {
       </div>
 
       <form
+        id="main-content"
+        tabIndex={-1}
         className="wizard-form"
         onSubmit={(event) => {
           event.preventDefault();
@@ -247,8 +249,8 @@ export function BlankCaseWizard({ onCancel, onCreate }: BlankCaseWizardProps) {
       <aside className="wizard-aside" aria-label="Privacy note">
         <LockKeyholeSmall />
         <p>
-          <strong>Nothing leaves this browser.</strong> You can export or delete the case whenever
-          you choose.
+          <strong>Stored locally.</strong> Site Tools can share structured case fields with the
+          connected agent; uploaded image bytes stay in this browser.
         </p>
       </aside>
     </main>

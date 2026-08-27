@@ -1,9 +1,9 @@
 import { z } from "zod";
 
+import type { WorkspaceMode } from "../domain/models";
 import {
   ACTIVITY_AUTHOR_FILTERS,
   CONSISTENCY_SCOPES,
-  HYPOTHESIS_COMPARISON_MODES,
   WORKSPACE_ITEM_TYPES,
   WORKSPACE_SECTIONS,
   type WebMCPToolName,
@@ -30,6 +30,16 @@ const descriptionSchema = z.string().trim().min(1).max(1_000);
 const expectedVersionSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const normalizedCoordinateSchema = z.number().min(0).max(1);
 
+const WORKSPACE_MODES = [
+  "scene",
+  "timeline",
+  "facts",
+  "evidence",
+  "questions",
+  "hypotheses",
+  "report",
+] as const satisfies readonly WorkspaceMode[];
+
 const normalizedPositionSchema = z
   .object({
     x: normalizedCoordinateSchema,
@@ -51,6 +61,17 @@ const agentClaimStatusSchema = z.enum([
   "agent-hypothesis",
 ]);
 
+const agentImpactStatusSchema = z.enum(["reported", "uncertain", "agent-hypothesis"]);
+
+const impactActorIdsSchema = z
+  .array(replayIdSchema)
+  .min(2)
+  .max(4)
+  .refine((actorIds) => new Set(actorIds).size === actorIds.length, {
+    message: "Impact actor IDs must be distinct.",
+  })
+  .meta({ uniqueItems: true });
+
 const sourceTypeSchema = z.enum([
   "human-statement",
   "witness-statement",
@@ -67,6 +88,38 @@ const assumptionSchema = z
     relatedIds: z.array(replayIdSchema).max(32).default([]),
   })
   .strict();
+
+const proposedKeyframeSchema = z
+  .object({
+    id: replayIdSchema.optional(),
+    timeMs: z.number().int().nonnegative().max(86_400_000),
+    x: normalizedCoordinateSchema,
+    y: normalizedCoordinateSchema,
+    rotationDeg: z.number().min(-360).max(360),
+  })
+  .strict();
+
+const proposalChangeSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("actor-pose"),
+      actorId: replayIdSchema,
+      proposedPose: normalizedPositionSchema.extend({
+        rotationDeg: z.number().min(-360).max(360),
+      }),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("trajectory-set"),
+      trajectoryId: replayIdSchema.optional(),
+      actorId: replayIdSchema,
+      branchId: replayIdSchema,
+      keyframes: z.array(proposedKeyframeSchema).min(2).max(100),
+      visible: z.boolean().default(true),
+    })
+    .strict(),
+]);
 
 export const webMCPInputSchemas = {
   get_case_summary: z.object({}).strict(),
@@ -95,7 +148,7 @@ export const webMCPInputSchemas = {
     .object({
       itemType: z.enum(WORKSPACE_ITEM_TYPES),
       itemId: replayIdSchema,
-      workspaceMode: z.string().trim().min(1).max(64).optional(),
+      workspaceMode: z.enum(WORKSPACE_MODES).optional(),
     })
     .strict(),
 
@@ -158,15 +211,49 @@ export const webMCPInputSchemas = {
       }
     }),
 
+  propose_scene_changes: z
+    .object({
+      proposalId: replayIdSchema.optional(),
+      title: shortTextSchema,
+      rationale: descriptionSchema,
+      changes: z.array(proposalChangeSchema).min(2).max(10),
+      ...mutationMetadataShape,
+    })
+    .strict()
+    .superRefine(({ changes }, context) => {
+      const actorIds = new Set<string>();
+      changes.forEach((change, changeIndex) => {
+        if (actorIds.has(change.actorId)) {
+          context.addIssue({
+            code: "custom",
+            path: ["changes", changeIndex, "actorId"],
+            message: "A proposal may contain only one change per actor.",
+          });
+        }
+        actorIds.add(change.actorId);
+        if (change.kind !== "trajectory-set") return;
+        for (let frameIndex = 1; frameIndex < change.keyframes.length; frameIndex += 1) {
+          const current = change.keyframes[frameIndex];
+          const previous = change.keyframes[frameIndex - 1];
+          if (current && previous && current.timeMs <= previous.timeMs) {
+            context.addIssue({
+              code: "custom",
+              path: ["changes", changeIndex, "keyframes", frameIndex, "timeMs"],
+              message: "Proposed keyframe times must be strictly increasing.",
+            });
+          }
+        }
+      });
+    }),
+
   mark_impact_event: z
     .object({
       eventId: replayIdSchema.optional(),
       branchId: replayIdSchema,
       timeMs: z.number().int().nonnegative().max(86_400_000),
       location: normalizedPositionSchema,
-      actorIds: z.array(replayIdSchema).min(2).max(4),
-      status: agentClaimStatusSchema,
-      confidence: z.number().min(0).max(1).optional(),
+      actorIds: impactActorIdsSchema,
+      status: agentImpactStatusSchema,
       ...mutationMetadataShape,
     })
     .strict(),
@@ -216,7 +303,15 @@ export const webMCPInputSchemas = {
   link_evidence: z
     .object({
       evidenceId: replayIdSchema,
-      targetType: z.enum(["actor", "trajectory", "event", "claim", "hypothesis", "damage"]),
+      targetType: z.enum([
+        "actor",
+        "trajectory",
+        "event",
+        "claim",
+        "hypothesis",
+        "assumption",
+        "damage",
+      ]),
       targetId: replayIdSchema,
       annotationId: replayIdSchema.optional(),
       ...mutationMetadataShape,
@@ -282,7 +377,6 @@ export const webMCPInputSchemas = {
   compare_hypotheses: z
     .object({
       branchIds: z.array(replayIdSchema).min(2).max(8),
-      comparisonMode: z.enum(HYPOTHESIS_COMPARISON_MODES).default("full"),
     })
     .strict()
     .refine((value) => new Set(value.branchIds).size >= 2, {
@@ -293,7 +387,7 @@ export const webMCPInputSchemas = {
   build_report_preview: z
     .object({
       branchId: replayIdSchema.optional(),
-      ...mutationMetadataShape,
+      expectedVersion: expectedVersionSchema,
     })
     .strict(),
 

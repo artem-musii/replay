@@ -19,7 +19,7 @@ test.describe("REPLAY primary journey", () => {
     await expect(page.getByText("No account", { exact: true })).toBeVisible();
     await expect(page.getByText("Human-approved reports", { exact: true })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Your case stays in this browser." }),
+      page.getByRole("heading", { name: "Local by default, explicit when shared." }),
     ).toBeVisible();
   });
 
@@ -156,9 +156,9 @@ test.describe("REPLAY primary journey", () => {
     expect(sources).toEqual(
       [
         "/assets/generated/demo-road-condition.webp",
-        "/assets/generated/demo-roundabout-wide.webp",
-        "/assets/generated/demo-vehicle-a-damage.webp",
-        "/assets/generated/demo-vehicle-b-damage.webp",
+        "/assets/generated/demo-roundabout-wide-v2.webp",
+        "/assets/generated/demo-vehicle-a-damage-v2.webp",
+        "/assets/generated/demo-vehicle-b-damage-v2.webp",
       ].sort(),
     );
     await expect(page.getByText("Synthetic demo", { exact: true })).toBeVisible();
@@ -214,6 +214,33 @@ test.describe("REPLAY primary journey", () => {
     await page.getByRole("button", { name: "Fork reconstruction" }).click();
 
     await expect(page.getByRole("heading", { name: "Outer-lane alternative" })).toBeVisible();
+    let alternative = page.locator(".branch-item").filter({ hasText: "Outer-lane alternative" });
+    await alternative.getByRole("button", { name: "Edit branch" }).click();
+    const branchEditor = page.getByRole("form", { name: "Edit Outer-lane alternative" });
+    await branchEditor.getByLabel("Branch name").fill("Outer-lane path");
+    await branchEditor
+      .getByLabel("Description")
+      .fill("Vehicle B follows an outward path while shared observations remain unchanged.");
+    await branchEditor.getByRole("button", { name: "Save branch" }).click();
+
+    alternative = page.locator(".branch-item").filter({ hasText: "Outer-lane path" });
+    await alternative.getByRole("button", { name: "Assumption" }).click();
+    await alternative
+      .getByLabel("Alternative assumption")
+      .fill("Vehicle B may have remained in the outer lane before contact.");
+    await alternative.getByRole("button", { name: "Save assumption" }).click();
+    const assumption = alternative.locator(".assumption").last();
+    await expect(assumption).toContainText("Vehicle B may have remained");
+    await assumption.getByRole("button", { name: "Edit" }).click();
+    await assumption
+      .getByLabel("Assumption statement")
+      .fill("Vehicle B may have followed the outer lane before contact.");
+    await assumption.getByRole("button", { name: "Save assumption" }).click();
+    await assumption.getByRole("button", { name: "Withdraw" }).click();
+    await expect(assumption).toHaveClass(/is-withdrawn/);
+    await assumption.getByRole("button", { name: "Restore" }).click();
+    await expect(assumption).not.toHaveClass(/is-withdrawn/);
+
     await expect(page.getByText("Branches are alternatives, not conclusions.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Compare paths" })).toBeVisible();
     await page.getByRole("button", { name: "Compare side by side" }).click();
@@ -374,15 +401,13 @@ test.describe("REPLAY primary journey", () => {
       .getByLabel("Incident scene editor")
       .getByRole("button", { name: /Mark impact|Place the approximate impact/ })
       .click();
-    await expect(
-      page.getByText(/Click the scene at the approximate point of contact/),
-    ).toBeVisible();
+    await expect(page.getByText(/Click the scene or enter exact coordinates/)).toBeVisible();
     const scene = page.getByRole("application", { name: /Editable road scene/ });
     const sceneBounds = await scene.boundingBox();
     if (!sceneBounds) throw new Error("Scene is not measurable");
     await page.mouse.click(
       sceneBounds.x + sceneBounds.width * 0.72,
-      sceneBounds.y + sceneBounds.height * 0.28,
+      sceneBounds.y + sceneBounds.height * 0.5,
     );
     const impact = page.getByRole("button", {
       name: "Approximate impact at 5.0 seconds, uncertain",

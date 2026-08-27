@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildReportPreview,
   compareHypotheses,
+  containsLiabilityConclusion,
   createDemoCase,
   ReplayEngine,
+  validateCaseReferences,
 } from "../../src/domain";
 
 function createEngine(): ReplayEngine {
@@ -17,7 +19,7 @@ function createEngine(): ReplayEngine {
 }
 
 describe("evidence lifecycle", () => {
-  it("validates duplicates, creates bidirectional claim links, and tombstones deletion", () => {
+  it("validates duplicates, creates bidirectional claim links, and scrubs deletion", () => {
     const engine = createEngine();
     const add = engine.execute({
       type: "evidence.add",
@@ -82,10 +84,163 @@ describe("evidence lifecycle", () => {
       true,
     );
     expect(
+      engine.state.claims.find((claim) => claim.id === "claim-initial-statement")
+        ?.linkedEvidenceIds,
+    ).not.toContain("evidence-uploaded");
+    expect(engine.state.evidence.find((asset) => asset.id === "evidence-uploaded")).toMatchObject({
+      name: "Deleted evidence",
+      tags: [],
+      annotations: [],
+      annotationLinks: [],
+      linkedClaimIds: [],
+      linkedEventIds: [],
+      linkedSceneObjectIds: [],
+      linkedBranchIds: [],
+      deleted: true,
+    });
+    expect(
       engine.state.consistencyIssues.some(
         (issue) => issue.ruleId === "provenance.invalid-evidence-link",
       ),
+    ).toBe(false);
+    expect(JSON.stringify(engine.state)).not.toContain("Uploaded damage.jpg");
+  });
+
+  it("preserves an annotation-level link instead of silently widening it to the whole asset", () => {
+    const engine = createEngine();
+    const update = engine.execute({
+      type: "evidence.update",
+      actor: "human",
+      origin: "ui",
+      evidenceId: "evidence-overview",
+      annotations: [{ id: "annotation-contact", kind: "point", x: 0.52, y: 0.48 }],
+    });
+    expect(update.ok).toBe(true);
+
+    const link = engine.execute({
+      type: "evidence.link",
+      actor: "agent",
+      origin: "webmcp",
+      expectedVersion: 2,
+      requestId: "link-annotation-contact",
+      evidenceId: "evidence-overview",
+      annotationId: "annotation-contact",
+      targetType: "claim",
+      targetId: "claim-impact-location",
+    });
+
+    expect(link).toMatchObject({
+      ok: true,
+      affectedIds: ["evidence-overview", "annotation-contact", "claim-impact-location"],
+    });
+    expect(
+      engine.state.evidence.find((asset) => asset.id === "evidence-overview")?.annotationLinks,
+    ).toContainEqual({
+      annotationId: "annotation-contact",
+      targetType: "claim",
+      targetId: "claim-impact-location",
+    });
+    expect(
+      engine.state.claims.find((claim) => claim.id === "claim-impact-location")?.linkedEvidenceIds,
+    ).toContain("evidence-overview");
+
+    expect(
+      engine.execute({
+        type: "evidence.update",
+        actor: "human",
+        origin: "ui",
+        evidenceId: "evidence-overview",
+        annotations: [],
+      }).ok,
     ).toBe(true);
+    expect(
+      engine.state.evidence.find((asset) => asset.id === "evidence-overview")?.annotationLinks,
+    ).toEqual([]);
+  });
+
+  it("repairs a source-less assumption with annotation-level supporting evidence", () => {
+    const engine = createEngine();
+    const assumptionId = "assumption-inside-edge";
+    const annotationId = "annotation-inside-edge";
+
+    expect(
+      engine.execute({
+        type: "hypothesis.add-assumption",
+        actor: "human",
+        origin: "ui",
+        branchId: "branch-baseline",
+        assumptionId,
+        statement: "Vehicle A may have followed the inside edge before contact.",
+        supportingEvidenceIds: [],
+        conflictingEvidenceIds: [],
+      }).ok,
+    ).toBe(true);
+    expect(
+      engine.execute({
+        type: "evidence.update",
+        actor: "human",
+        origin: "ui",
+        evidenceId: "evidence-overview",
+        annotations: [{ id: annotationId, kind: "point", x: 0.48, y: 0.52 }],
+      }).ok,
+    ).toBe(true);
+
+    const beforeLink = buildReportPreview(engine.state, {
+      generatedAt: "2026-08-27T10:00:00.000Z",
+    });
+    expect(beforeLink.missingRequirements).toContain(
+      `Provenance for hypothesis assumption ${assumptionId}`,
+    );
+
+    const link = engine.execute({
+      type: "evidence.link",
+      actor: "human",
+      origin: "ui",
+      expectedVersion: engine.state.caseVersion,
+      evidenceId: "evidence-overview",
+      annotationId,
+      targetType: "assumption",
+      targetId: assumptionId,
+    });
+
+    expect(link).toMatchObject({
+      ok: true,
+      affectedIds: ["evidence-overview", annotationId, assumptionId, "branch-baseline"],
+    });
+    const branch = engine.state.branches.find((item) => item.id === "branch-baseline")!;
+    expect(
+      branch.assumptions.find((assumption) => assumption.id === assumptionId)
+        ?.supportingEvidenceIds,
+    ).toContain("evidence-overview");
+    expect(
+      engine.state.evidence.find((asset) => asset.id === "evidence-overview")?.linkedBranchIds,
+    ).toContain(branch.id);
+    expect(
+      engine.state.evidence.find((asset) => asset.id === "evidence-overview")?.annotationLinks,
+    ).toContainEqual({
+      annotationId,
+      targetType: "assumption",
+      targetId: assumptionId,
+    });
+    expect(validateCaseReferences(engine.state)).toEqual([]);
+
+    const afterLink = buildReportPreview(engine.state, {
+      generatedAt: "2026-08-27T10:00:00.000Z",
+    });
+    expect(afterLink.missingRequirements).not.toContain(
+      `Provenance for hypothesis assumption ${assumptionId}`,
+    );
+
+    const broken = engine.state;
+    const brokenAssumption = broken.branches
+      .flatMap((item) => item.assumptions)
+      .find((assumption) => assumption.id === assumptionId)!;
+    brokenAssumption.supportingEvidenceIds = [];
+    expect(validateCaseReferences(broken)).toContainEqual(
+      expect.objectContaining({
+        message: `Assumption ${assumptionId} is missing its reverse link to evidence evidence-overview`,
+      }),
+    );
   });
 });
 
@@ -291,5 +446,27 @@ describe("evidence-bound reporting", () => {
       .map((item) => item.text);
     expect(rendered.join(" ").toLowerCase()).not.toContain("vehicle b was at fault");
     expect(rendered.join(" ")).toContain("source supplied a fault or liability allegation");
+  });
+
+  it("detects common adopted-liability wording while allowing explicit negation", () => {
+    for (const statement of [
+      "Vehicle A is guilty.",
+      "Vehicle B was culpable.",
+      "Vehicle A bears responsibility.",
+      "Vehicle B committed negligence.",
+      "Vehicle A is legally liable.",
+      "Liability rests with Vehicle B.",
+    ]) {
+      expect(containsLiabilityConclusion(statement), statement).toBe(true);
+    }
+
+    for (const statement of [
+      "REPLAY does not determine fault or legal liability.",
+      "Vehicle A was not guilty.",
+      "Vehicle B did not bear responsibility.",
+      "A source supplied a fault or liability allegation.",
+    ]) {
+      expect(containsLiabilityConclusion(statement), statement).toBe(false);
+    }
   });
 });

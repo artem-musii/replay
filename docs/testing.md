@@ -1,6 +1,6 @@
 # Testing REPLAY
 
-Last local snapshot in this document: **2026-08-27**, Node.js 22+ toolchain. This guide distinguishes deterministic code tests, manual browser verification, and probabilistic agent evals. A result in one category is never presented as proof of another.
+Last source/test inventory reconciliation in this document: **2026-08-28**, Node.js 22.13+ toolchain. This guide distinguishes deterministic code tests, manual browser verification, and probabilistic agent evals. A result in one category is never presented as proof of another.
 
 ## Release command sequence
 
@@ -12,8 +12,11 @@ npm run format:check
 npm run lint
 npm run typecheck
 npm run test
+npm run test:coverage
 npm run test:e2e
 npm run build
+npm audit
+git diff --check
 ```
 
 Run the sequence against the exact commit to deploy. Do not reuse results from a dirty tree or a different dependency lockfile. If any command fails, record the failure and do not describe the release gate as passing.
@@ -30,20 +33,41 @@ The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` auto
 
 ## Current deterministic coverage
 
-| Area                          | Test location                                     | What is covered                                                                                                                                                                   |
-| ----------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Schema and deterministic seed | `tests/domain/schema-seed.test.ts`                | Runtime shape validation, cross-reference validity, deterministic demo reset, seeded certainty/evidence/issue expectations.                                                       |
-| Command engine                | `tests/domain/engine.test.ts`                     | Canonical mutations, case-version changes, stale-version rejection, request idempotency, locks, human-only confirmation/finalization, undo/redo, and safe agent-action reversion. |
-| Hypotheses, evidence, reports | `tests/domain/hypotheses-evidence-report.test.ts` | Branching/comparison, evidence relationships and import/export references, evidence-bound report behavior, reviewed agent notes, final snapshot rules.                            |
-| Geometry and consistency      | `tests/domain/interpolation-consistency.test.ts`  | Pose interpolation, rotation, clamping, trajectory/impact geometry, timing/provenance/completeness checks.                                                                        |
-| Timeline component            | `tests/components/timeline.test.tsx`              | Playback controls and keyboard/event interaction at the component boundary.                                                                                                       |
-| WebMCP registry               | `tests/webmcp/registry.test.ts`                   | Feature detection, tool inventory/schema/annotations, lifecycle groups, duplicate protection, direct execution, cancellation/reconciliation behavior, and fallback.               |
+| Area                              | Test location                                                                         | What is covered                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Schema and deterministic seed     | `tests/domain/schema-seed.test.ts`                                                    | Runtime/cross-reference validation, schema-v2 migration/import behavior, deterministic reset, seeded certainty/evidence/issues.                                                                                                                                                                                                                                                                                                                                |
+| Command engine                    | `tests/domain/engine.test.ts`                                                         | Canonical mutations, versions/idempotency/locks, human-only boundaries, explicit override correlation, undo/redo, and safe agent-action reversion.                                                                                                                                                                                                                                                                                                             |
+| Coordinated proposals             | `tests/domain/agent-proposals.test.ts`                                                | Agent-only proposal creation, preview isolation, human adjustment/accept/reject, stale/locked all-or-nothing acceptance, and unsigned-import trust reset.                                                                                                                                                                                                                                                                                                      |
+| Hypotheses, evidence, and reports | `tests/domain/hypotheses-evidence-report.test.ts`                                     | Branch comparison, annotation/assumption links, structured transfer references, workspace-path citations, report requirements, note review, and snapshots.                                                                                                                                                                                                                                                                                                     |
+| Geometry and consistency          | `tests/domain/interpolation-consistency.test.ts`                                      | Pose interpolation, rotation, clamping, trajectory/impact geometry, and deterministic timing/provenance/completeness rules.                                                                                                                                                                                                                                                                                                                                    |
+| Persistence and real adapter      | `tests/persistence/database.test.ts`, `tests/integration/replayWebMCPAdapter.test.ts` | Case/blob round-trip, Dexie index migration, malformed-record retention/recovery, newest-valid load, unreadable-record overwrite protection, compare-and-swap/BroadcastChannel behavior, plus staged adapter save/commit/compensation, semantic-intent idempotency, version/activity invariants, and author filtering before result limits. Runtime corrupt-blob rejection remains implemented source behavior rather than a directly exercised database test. |
+| Components                        | `tests/components/*.test.{ts,tsx}`                                                    | Timeline behavior, app load recovery, evidence annotation-link control, and packaged evidence-source asset path/size/SHA-256 checks.                                                                                                                                                                                                                                                                                                                           |
+| WebMCP registry                   | `tests/webmcp/registry.test.ts`                                                       | Nineteen-tool inventory/schema/annotations, lifecycle, session-versus-canonical audit, proposal routing, cancellation, reconciliation, direct execution, and fallback.                                                                                                                                                                                                                                                                                         |
+| Browser regressions               | `tests/e2e/*.spec.ts`                                                                 | Core workflows plus proposals, exact editors, issue focus, human overrides, finalized JSON/PDF, persisted demo reset, dialog focus behavior, 320px reflow, axe checks, and frame blocking.                                                                                                                                                                                                                                                                     |
 
-At the documentation snapshot, lint and strict typecheck passed, Vitest reported **53/53 tests across 6 files**, Playwright reported **32/32 runs in 17.1 seconds** across `chromium-desktop` (16/16) and `mobile-chrome` (16/16), and the production build passed. The Playwright run included blank-case path/event/impact/damage authoring, lock behavior, evidence annotations, and axe checks of the landing page, blank-case wizard, demo workspace, and human-finalization dialog with no serious or critical violations. This is not a claim that screen-reader review, complete WCAG conformance, or the supported-model eval matrix has passed. See `IMPLEMENTATION_STATUS.md` for the most recent project-wide status.
+**Historical baseline:** commit `f980d28` recorded passing lint/typecheck/build, **53/53 Vitest tests across 6 files**, and **32/32 Playwright runs in 17.1 seconds** across desktop/mobile Chromium. That result predates the current schema-v2/proposal candidate.
+
+### Current candidate local result
+
+The current working candidate completed the clean local sequence on **2026-08-28**:
+
+| Check                | Result                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------- |
+| Runtime/dependencies | Node.js floor **22.13**; `npm ci` installed **286 packages** with no deprecation warnings                 |
+| Dependency audit     | **0 vulnerabilities**                                                                                     |
+| Formatting/lint      | Prettier passed; ESLint passed with **0 warnings**                                                        |
+| Typecheck/build      | Strict TypeScript and the production build passed                                                         |
+| Vitest               | **119/119 passed across 14 files**                                                                        |
+| Coverage             | Statements **52.9%**; branches **41.46%**; functions **49.43%**; lines **54.77%**                         |
+| Playwright           | **78** project runs: **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**, 30.8 s |
+| Visual regression    | **9** checked screenshot baselines                                                                        |
+| Diff integrity       | `git diff --check` passed                                                                                 |
+
+The dependency install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1. These results are a complete local deterministic gate for the working candidate, not proof of a deployed commit or URL. Candidate deployment smoke, current public Lighthouse, current Site Tools lifecycle, supported-model eval traces, manual screen-reader/cross-browser review, complete WCAG conformance, YouTube publication, header-capable-origin verification, and downloaded-file fidelity remain separate gates.
 
 ## End-to-end coverage
 
-Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile project. The current 16 scenarios run once in each project and cover:
+Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile project. The 2026-08-28 run collected 78 project runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed in 30.8 seconds. The candidate scenarios cover the historical core plus:
 
 1. landing contract and both start actions;
 2. deterministic demo scene, time, and provenance;
@@ -58,21 +82,31 @@ Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile pro
 11. blank-case path/event/impact/damage authoring and lock enforcement;
 12. local persistence and restoration after reload;
 13. complete manual fallback when WebMCP is absent;
-14. success screenshots of landing and workspace at both viewports;
+14. checked visual-regression baselines for the judge-facing landing/workspace/report states;
 15. axe analysis of landing and blank wizard; and
-16. axe analysis of workspace and finalization dialog.
+16. axe analysis of workspace and finalization dialog;
+17. 320px reflow and skip-link behavior;
+18. timeline, WebMCP, evidence-deletion, review, and confirmation dialog focus/Escape/restoration behavior;
+19. preview-only coordinated proposals followed by explicit human acceptance;
+20. exact numeric editors for scene/path/event geometry;
+21. real consistency-issue focus and affected-ID highlighting;
+22. explicit human-override correlation that preserves the original agent mutation;
+23. parseable finalized JSON and non-empty PDF download; and
+24. saved-demo resume, explicit reset, and iframe/tool-registration blocking.
 
-Pointer drag/rotation, local user-evidence upload/delete, downloaded-file opening, full JSON import/export recovery, dialog focus behavior, screen readers, and a cross-client WebMCP matrix remain explicit manual or future automated gates below. A direct public Site Tools smoke run is recorded later in this document, but it is not a probabilistic model-eval pass. Playwright screenshot PNGs are success artifacts in `playwright-report`; they are not visual-regression baselines.
+Pointer drag/rotation, full local user-evidence upload/delete/reload, raw-recovery handling, downloaded SVG/PNG visual fidelity, screen readers, and a cross-client WebMCP matrix remain explicit manual gates below. Automated dialog regressions exist, but assistive-technology behavior still requires manual review. The historical direct public Site Tools smoke below is not a candidate or probabilistic model-eval pass. The repository now includes nine checked `toHaveScreenshot` visual-regression baselines across the required desktop/mobile dimensions; they are automated layout evidence, not a substitute for manual visual review.
 
 ## Deterministic demo fixture
 
-Use `case-demo-roundabout` from `src/domain/seed.ts` for automated and manual journeys.
+Use `case-demo-roundabout` from `src/domain/seed.ts` for automated and manual journeys. The current fixture has `seedVersion = 2`; schema v2 deliberately accepts saved positive seed versions through 2 for resume compatibility.
 
 Reset methods:
 
-- open `/#demo` in a clean navigation;
+- use a fresh browser origin with no saved demo;
 - use **Case options → Reset deterministic demo**; or
 - call `createDemoCase()` in an isolated deterministic test.
+
+Opening `/#demo` resumes a valid saved seed-v1 or seed-v2 demo case when present; navigation alone is not a reset. An explicit reset replaces it with seed v2.
 
 Before every run, capture:
 
@@ -110,11 +144,12 @@ Availability changes as the proposal evolves; follow the current [Chrome WebMCP 
 3. Open **Case options → WebMCP inspector**.
 4. Verify support is detected, lifecycle mode is correct, and the expected tools are registered exactly once.
 5. Inspect the JSON Schema and both annotations for representative read and write tools.
-6. If the browser exposes `getTools()` and `executeTool()`, directly run `get_case_summary` with `{}` and confirm no case/activity mutation.
+6. If the browser exposes `getTools()` and `executeTool()`, directly run `get_case_summary` with `{}` and confirm no case-version, canonical activity, or persistence mutation. A session-only invocation audit entry is expected.
 7. Run `validate_case_consistency` and confirm it returns the seeded issue without changing facts.
-8. Directly execute a versioned test mutation through a test fixture, then confirm scene/timeline/activity all agree before success is surfaced.
-9. Abort an invocation before commit and verify no case version, persistence, activity, or visible committed geometry changes; the working state must clear.
-10. Navigate away/close the workspace and verify lifecycle registrations disappear.
+8. Directly execute a versioned test mutation through a test fixture, then confirm its staged case is compare-and-swap saved before the live engine commits/notifies; verify persisted state, engine state, activity, and the compact result agree. Record browser-paint timing separately.
+9. Repeat an already completed request with the same semantic intent and verify `idempotent: true`, the original receipt `caseVersion`, no new save/activity, and no mutation-pause rejection. Reuse its request ID for different intent and verify `IDEMPOTENCY_CONFLICT` with no state change.
+10. Abort an invocation before primary persistence begins and verify no case version, persistence, canonical/session activity, or visible committed geometry changes; the working state must clear. A cancellation while a real save is pending, successful compensation, and compensation failure remain separate controlled fault-injection/browser gates.
+11. Navigate away/close the workspace and verify lifecycle registrations disappear.
 
 Use a disposable demo fixture for direct mutation tests. Never use personal evidence.
 
@@ -122,16 +157,18 @@ Use a disposable demo fixture for direct mutation tests. Never use personal evid
 
 Use a deployed HTTPS URL because that is the submission environment. At the source-of-truth date, the official OpenAI Site Tools documentation lists GPT-5.6 Sol and GPT-5.6 Terra as supported and notes rollout/workspace limitations; recheck before the final run.
 
+The public URL currently serves the historical build. Deploy the exact candidate first; otherwise record the run only as a historical-baseline check and expect its older tool inventory.
+
 1. Open [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) in the desktop app’s built-in browser.
 2. Confirm REPLAY’s page status says Site Tools available.
 3. Ask the four prompts in [demo-script.md](demo-script.md) without naming internal tools.
 4. Capture tool names, arguments, order, results, case versions, activity IDs, and visible UI effects.
 5. Verify the agent reads recent activity after the human correction and does not restore its older geometry.
 6. Verify both hypotheses remain alternatives, shared damage stays unchanged, and no fault conclusion appears.
-7. Verify the agent prepares but cannot complete the declarative finalization flow.
+7. Verify the agent builds and opens the report preview but does not complete finalization. OpenAI's current client does not expose declarative HTML form tools as Site Tools. It may still use ordinary browser capabilities, but those interactions are not WebMCP calls and must not operate the human-only acknowledgements or final confirmation. Verify the native declarative form lifecycle separately in compatible Chrome.
 8. Reset and repeat every scenario in `evals/webmcp-evals.json` at least five times per currently supported target model, recording exact model/client/build/commit.
 
-The machine-readable eval suite and scoring rules are documented in [webmcp-evals.md](webmcp-evals.md). A 2026-08-27 public smoke run discovered 17 baseline tools, called `get_case_summary`, visibly added and safely reverted an observation, built the report preview, discovered the 18th `add_report_note` tool, and verified one non-autosubmitting `finalize_factual_report` form. A separate blank-case journey survived reload through IndexedDB. Do not publish this direct contract verification as an aggregate model-eval rate, or publish an aggregate that hides any confirmation, finalization, lock, stale-version, cancellation, or prompt-injection safety failure.
+The machine-readable eval suite and scoring rules are documented in [webmcp-evals.md](webmcp-evals.md). **Historical evidence only:** a 2026-08-27 `f980d28` public smoke discovered its then-current 17-tool baseline, called `get_case_summary`, visibly added/reverted an observation, transitioned to 18 tools after report preview, verified the non-autosubmitting form, and restored a blank case after reload. The current candidate has an 18-tool baseline and 19 tools after preview because it adds `propose_scene_changes`; its public smoke and supported-model runs are pending. Do not publish direct contract verification as an aggregate model-eval rate or hide any safety failure.
 
 ## Accessibility verification
 
@@ -154,20 +191,20 @@ Automated axe results are a starting point, not a substitute for interaction rev
 3. Test incorrect MIME type, extension spoofing, unreadable bytes, file over 20 MiB, duplicate checksum, and corrupt JSON import.
 4. Use HTML/SVG/script-like strings in statement, filename, note, and imported text fields; verify they render as text and do not execute.
 5. Put an instruction-like sentence in evidence notes; confirm Site Tools treat it as untrusted case content.
-6. Verify rejected, stale, locked, duplicate, and cancelled mutations add no unintended activity or content change.
+6. Verify rejected, stale, and locked calls add no canonical mutation activity or content change but do leave a session-only failed-invocation entry. Cancellation before primary persistence begins leaves both audit layers unchanged; a post-save cancellation must compensate or surface/audit `PERSISTENCE_FAILED`. A repeated completed request with the same semantic intent must return `idempotent: true` at the original receipt version without another save, while different intent under that ID must return `IDEMPOTENCY_CONFLICT`.
 7. Check deployed response headers with:
 
 ```bash
 curl -sS -D - -o /dev/null https://artem-musii.github.io/replay-sol/
 ```
 
-The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so its live response lacks the intended `Permissions-Policy`, origin isolation, CSP, frame restriction, content-type, and referrer response policies. The production document mitigates the policies representable in HTML with restrictive CSP and no-referrer meta elements; use Cloudflare Pages, Netlify, or another header-capable host when the complete response contract is required. Hash fragments are client-side and are not sent to the server, so header checks target `/`.
+The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so its live response lacks the intended `Permissions-Policy`, origin isolation, CSP, frame restriction, content-type, and referrer response policies. The document mitigates representable policies with CSP/no-referrer meta elements, and the app refuses to render/register tools while framed, but neither replaces response headers. GitHub Pages also scopes IndexedDB to the shared `artem-musii.github.io` origin, not `/replay-sol/`; test there only with synthetic/non-sensitive data. Use a dedicated origin on Cloudflare Pages, Netlify, or another header-capable host when the complete response/privacy contract is required. Hash fragments are client-side and are not sent to the server, so header checks target `/`.
 
 ## Performance and visual verification
 
 - Record interaction responsiveness while dragging, scrubbing, playing at 2×, and overlaying two branches.
-- Lighthouse 13.4.1 audited the seeded workspace from the strict production preview: **96 performance, 100 accessibility, 100 best practices, and 100 SEO**. Recorded lab metrics were FCP 2.0 s, LCP 2.4 s, Speed Index 2.0 s, total blocking time 10 ms, CLS 0, and interactive 2.4 s.
-- The same Lighthouse version audited the cache-busted public application commit at **100 performance, 100 accessibility, 100 best practices, 100 SEO, and 100 agentic browsing**, with no binary failures. Public lab metrics were FCP 0.5 s, LCP 0.5 s, Speed Index 0.7 s, total blocking time 0 ms, CLS 0, and interactive 0.5 s.
+- Historical `f980d28` evidence: Lighthouse 13.4.1 audited the seeded strict preview at **96 performance, 100 accessibility, 100 best practices, and 100 SEO**, and the cache-busted public commit at **100/100/100/100** plus 100 agentic browsing. Those lab metrics are retained in [test-report.md](test-report.md).
+- Rerun Lighthouse against the exact final candidate and record the URL/SHA; do not reuse the historical scores as candidate proof.
 - Confirm no broken generated image, layout shift, clipped focus ring, unreadable status, or horizontal overflow at 1440 × 900, 1024 × 768, 390 × 844, and 200% zoom.
 - Inspect the five generated images for the criteria in [generated-assets.md](generated-assets.md).
 - Check the console for errors, unhandled rejections, hydration warnings, missing assets/source maps affecting users, and failed requests.

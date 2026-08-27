@@ -9,10 +9,10 @@ import {
   TOOL_NAMES,
   type ActivityAuthorFilter,
   type ConsistencyScope,
-  type HypothesisComparisonMode,
   type ReplayAdapterResult,
   type ReplayInvocationContext,
   type ReplayIssue,
+  type ReplayToolInvocationAudit,
   type ReplayWebMCPAdapter,
   type ReplayWebMCPCommand,
   type ReplayWebMCPLifecycle,
@@ -58,6 +58,7 @@ class TestAdapter implements ReplayWebMCPAdapter {
   readonly workingStates: { active: boolean; toolName: string; requestId?: string }[] = [];
   readonly revealedIds: string[][] = [];
   readonly readCalls: string[] = [];
+  readonly invocationAudits: ReplayToolInvocationAudit[] = [];
   readonly requestResults = new Map<string, ReplayAdapterResult>();
 
   executeHook:
@@ -115,7 +116,7 @@ class TestAdapter implements ReplayWebMCPAdapter {
   }
 
   compareHypotheses(
-    input: Readonly<{ branchIds: readonly string[]; comparisonMode: HypothesisComparisonMode }>,
+    input: Readonly<{ branchIds: readonly string[] }>,
     context: ReplayInvocationContext,
   ): unknown {
     this.readCalls.push(context.toolName);
@@ -190,23 +191,25 @@ class TestAdapter implements ReplayWebMCPAdapter {
   }
 
   buildReportPreview(
-    input: Readonly<{ branchId?: string; expectedVersion: number; requestId: string }>,
-    context: ReplayInvocationContext,
-  ): Promise<ReplayAdapterResult> {
-    return this.execute(
-      {
-        type: "add_report_note",
-        payload: {
-          preview: true,
-          ...(input.branchId === undefined ? {} : { branchId: input.branchId }),
-        },
-        actor: "agent",
-        origin: "webmcp",
-        expectedVersion: input.expectedVersion,
-        requestId: input.requestId,
-      },
-      context,
-    );
+    input: Readonly<{ branchId?: string; expectedVersion: number }>,
+  ): ReplayAdapterResult {
+    if (input.expectedVersion !== this.lifecycle.caseVersion) {
+      return {
+        ok: false,
+        code: "VERSION_CONFLICT",
+        message: "The report preview version is stale.",
+        caseVersion: this.lifecycle.caseVersion,
+        affectedIds: [],
+        issues: [],
+      };
+    }
+    return {
+      ok: true,
+      message: "Built the report preview.",
+      caseVersion: this.lifecycle.caseVersion,
+      affectedIds: ["report-preview"],
+      issues: [],
+    };
   }
 
   setAgentWorking(state: {
@@ -223,6 +226,10 @@ class TestAdapter implements ReplayWebMCPAdapter {
       ...this.lifecycle,
       ...(affectedIds[0] === undefined ? {} : { selectedItemId: affectedIds[0] }),
     };
+  }
+
+  recordToolInvocation(audit: ReplayToolInvocationAudit): void {
+    this.invocationAudits.push(audit);
   }
 }
 
@@ -421,6 +428,7 @@ describe("ReplayWebMCPRegistry", () => {
       }).not.toThrow();
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.inputSchema.additionalProperties).toBe(false);
+      expect(tool.annotations.untrustedContentHint).toBe(true);
     }
 
     expect(modelContext.definition("get_case_summary")?.annotations).toEqual({
@@ -429,17 +437,40 @@ describe("ReplayWebMCPRegistry", () => {
     });
     expect(modelContext.definition("validate_case_consistency")?.annotations).toEqual({
       readOnlyHint: true,
-      untrustedContentHint: false,
+      untrustedContentHint: true,
     });
     expect(modelContext.definition("compare_hypotheses")?.annotations).toEqual({
-      readOnlyHint: true,
+      readOnlyHint: false,
       untrustedContentHint: true,
     });
     expect(modelContext.definition("focus_workspace_item")?.annotations.readOnlyHint).toBe(false);
+    expect(modelContext.definition("focus_workspace_item")?.annotations.untrustedContentHint).toBe(
+      true,
+    );
+    expect(modelContext.definition("revert_agent_action")?.annotations.untrustedContentHint).toBe(
+      true,
+    );
     expect(modelContext.definition("build_report_preview")?.annotations).toEqual({
       readOnlyHint: false,
       untrustedContentHint: true,
     });
+
+    const focusProperties = modelContext.definition("focus_workspace_item")?.inputSchema
+      .properties as Record<string, Record<string, unknown>>;
+    expect(focusProperties.workspaceMode?.enum).toEqual([
+      "scene",
+      "timeline",
+      "facts",
+      "evidence",
+      "questions",
+      "hypotheses",
+      "report",
+    ]);
+
+    const impactProperties = modelContext.definition("mark_impact_event")?.inputSchema
+      .properties as Record<string, Record<string, unknown>>;
+    expect(impactProperties.actorIds?.uniqueItems).toBe(true);
+    expect(impactProperties.status?.enum).toEqual(["reported", "uncertain", "agent-hypothesis"]);
   });
 
   it("validates inputs locally before calling the canonical adapter", async () => {
@@ -479,6 +510,80 @@ describe("ReplayWebMCPRegistry", () => {
       requestId: "request-claim-0001",
     })) as { ok: boolean; code: string };
     expect(confirmedObservation).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+
+    const ambiguousProposal = (await registry.simulateTool("propose_scene_changes", {
+      title: "Ambiguous same-actor proposal",
+      rationale: "This must be rejected before the canonical adapter is called.",
+      changes: [
+        {
+          kind: "actor-pose",
+          actorId: "vehicle-b",
+          proposedPose: { x: 0.4, y: 0.4, rotationDeg: 0 },
+        },
+        {
+          kind: "actor-pose",
+          actorId: "vehicle-b",
+          proposedPose: { x: 0.5, y: 0.5, rotationDeg: 5 },
+        },
+      ],
+      expectedVersion: INITIAL_VERSION,
+      requestId: "request-proposal-0001",
+    })) as { ok: boolean; code: string };
+    expect(ambiguousProposal).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+
+    const ignoredConfidence = (await registry.simulateTool("mark_impact_event", {
+      branchId: "branch-main",
+      timeMs: 5_000,
+      location: { x: 0.5, y: 0.5 },
+      actorIds: ["vehicle-a", "vehicle-b"],
+      status: "uncertain",
+      confidence: 0.75,
+      expectedVersion: INITIAL_VERSION,
+      requestId: "request-impact-0001",
+    })) as { ok: boolean; code: string };
+    expect(ignoredConfidence).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+
+    const invalidWorkspaceMode = (await registry.simulateTool("focus_workspace_item", {
+      itemType: "actor",
+      itemId: "vehicle-a",
+      workspaceMode: "overview",
+    })) as { ok: boolean; code: string };
+    expect(invalidWorkspaceMode).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+
+    const duplicateImpactActors = (await registry.simulateTool("mark_impact_event", {
+      branchId: "branch-main",
+      timeMs: 5_000,
+      location: { x: 0.5, y: 0.5 },
+      actorIds: ["vehicle-a", "vehicle-a"],
+      status: "uncertain",
+      expectedVersion: INITIAL_VERSION,
+      requestId: "request-impact-0002",
+    })) as { ok: boolean; code: string; message: string };
+    expect(duplicateImpactActors).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+    expect(duplicateImpactActors.message).toContain("distinct");
+
+    const unsupportedImpactStatus = (await registry.simulateTool("mark_impact_event", {
+      branchId: "branch-main",
+      timeMs: 5_000,
+      location: { x: 0.5, y: 0.5 },
+      actorIds: ["vehicle-a", "vehicle-b"],
+      status: "likely",
+      expectedVersion: INITIAL_VERSION,
+      requestId: "request-impact-0003",
+    })) as { ok: boolean; code: string };
+    expect(unsupportedImpactStatus).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+
+    const ignoredComparisonMode = (await registry.simulateTool("compare_hypotheses", {
+      branchIds: ["branch-main", "branch-alternative"],
+      comparisonMode: "summary",
+    })) as { ok: boolean; code: string };
+    expect(ignoredComparisonMode).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+
+    const ignoredPreviewRequest = (await registry.simulateTool("build_report_preview", {
+      expectedVersion: INITIAL_VERSION,
+      requestId: "request-preview-0001",
+    })) as { ok: boolean; code: string };
+    expect(ignoredPreviewRequest).toMatchObject({ ok: false, code: "INVALID_INPUT" });
     expect(adapter.executeCalls).toEqual([]);
   });
 
@@ -500,6 +605,14 @@ describe("ReplayWebMCPRegistry", () => {
     expect(adapter.executeCalls).toEqual([]);
     expect(adapter.lifecycle.caseVersion).toBe(INITIAL_VERSION);
     expect(modelContext.executionCalls).toEqual([{ name: "get_case_summary", input: {} }]);
+    expect(adapter.invocationAudits).toEqual([
+      expect.objectContaining({
+        toolName: "get_case_summary",
+        ok: true,
+        caseVersion: INITIAL_VERSION,
+        affectedIds: [],
+      }),
+    ]);
     expect(registry.getDebugState().lastInvocation?.toolName).toBe("get_case_summary");
     expect(registry.getDebugState().lastResult).toMatchObject({ ok: true });
   });
@@ -555,6 +668,7 @@ describe("ReplayWebMCPRegistry", () => {
       requestId: "request-actor-0001",
     });
     expect(adapter.workingStates.at(-1)).toMatchObject({ active: false });
+    expect(adapter.invocationAudits).toEqual([]);
   });
 
   it("surfaces version conflicts and delegates request idempotency without duplicate commits", async () => {
@@ -603,6 +717,13 @@ describe("ReplayWebMCPRegistry", () => {
 
     expect(result).toMatchObject({ ok: false, code: "LOCKED", caseVersion: INITIAL_VERSION });
     expect(adapter.committedRequestIds).toEqual([]);
+    expect(adapter.invocationAudits).toEqual([
+      expect.objectContaining({
+        toolName: "upsert_scene_actor",
+        ok: false,
+        requestId: "request-actor-0001",
+      }),
+    ]);
     expect(modelContext.registeredNames()).not.toContain("finalize_factual_report");
   });
 
@@ -639,6 +760,7 @@ describe("ReplayWebMCPRegistry", () => {
     await expect(execution).rejects.toMatchObject({ name: "AbortError" });
     expect(adapter.lifecycle.caseVersion).toBe(INITIAL_VERSION);
     expect(adapter.committedRequestIds).toEqual([]);
+    expect(adapter.invocationAudits).toEqual([]);
     expect(adapter.workingStates.at(-1)).toMatchObject({ active: false });
     expect(registry.getDebugState().lastInvocation).toMatchObject({
       toolName: "upsert_scene_actor",

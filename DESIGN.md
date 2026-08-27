@@ -1,5 +1,7 @@
 # Design System
 
+Status: product design intent and reference targets, not a pixel-exact description or accessibility-conformance report. Current implementation evidence and remaining gaps live in `docs/accessibility.md` and `docs/testing.md`.
+
 ## Overview
 
 REPLAY is used at a desk in neutral daylight, often after a stressful but non-emergency incident. The interface is therefore light, warm, and low-glare, with cool ink panels that support concentration. The landing page may carry more editorial scale, but the workspace stays restrained and task-first.
@@ -34,13 +36,13 @@ No pure black or white. State differences combine color with icons, labels, line
 - UI stack: `Inter`, `SF Pro Text`, `Segoe UI`, system sans-serif.
 - Technical metadata and time: `SFMono-Regular`, `ui-monospace`, monospace with tabular numerals.
 - Product title: system sans, 750 weight, tight tracking. No display font inside the workspace.
-- Body prose max width: 70ch. Metadata never below 12px.
+- Body prose target max width: 70ch. Metadata targets 12px or larger; the current compact workspace still contains smaller technical labels that require final legibility review.
 
 ## Layout
 
-- Desktop workspace: 52px header, flexible scene, 344px inspector, 176px timeline, 112px activity rail.
-- 1024px: 304px inspector, shorter metadata, collapsible activity.
-- Mobile: landing and report review are fully supported; the editor becomes a simplified read/review surface with explicit desktop-edit guidance.
+- Reference desktop proportions: approximately 52px header, flexible scene, 344px inspector, 176px timeline, and 112px activity rail. Responsive CSS may vary these values.
+- Around 1024px, target a narrower inspector, compact metadata, and a collapsible activity surface.
+- Mobile target: preserve complete review and editing access through a stacked layout; verify exact behavior at 320px, touch sizes, and 200% zoom rather than inferring support from this document.
 - Use ruled sections and anchored panels rather than nesting cards.
 
 ## Components
@@ -51,12 +53,12 @@ No pure black or white. State differences combine color with icons, labels, line
 - Inspector: semantic tabs with an underline/current-state marker.
 - Scene objects: crisp accessible SVG with selection halo, lock badge, and branch-specific line pattern.
 - Toasts: short, non-blocking, announced in a polite live region.
-- Dialogs: reserved for destructive evidence deletion and immutable report finalization.
+- Dialogs: use for consequential confirmation and bounded modal workflows, including evidence deletion, timeline editing, WebMCP inspection, and report review/finalization.
 
 ## Interaction States
 
-All controls implement default, hover, focus-visible, active, disabled, loading, and error states. Dragging updates geometry smoothly without rerendering unrelated panels. Agent mutations leave a brief indigo outline pulse and a durable activity entry.
+Controls should implement every applicable default, hover, focus-visible, active, disabled, loading, and error state. Agent domain mutations leave durable activity; read/UI-only tool calls instead use session audit. Proposal creation shows preview deltas without moving canonical geometry until a human decision.
 
 ## Accessibility
 
-Focus uses a 2px high-contrast blue outline with 2px offset. Pointer targets are at least 40px in dense workspace controls and 44px on touch surfaces. Reduced motion removes path draws, pulses, smooth scrolling, and timeline interpolation animation while preserving deterministic state changes.
+Focus targets a 2px high-contrast blue outline with 2px offset. Pointer targets aim for at least 40px in dense workspace controls and 44px on touch surfaces; this is a design target, not a completed audit of every current control. Reduced motion should remove path draws, pulses, smooth scrolling, and timeline interpolation animation while preserving deterministic state changes.

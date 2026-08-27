@@ -121,16 +121,16 @@ function evidence(
 ): EvidenceAsset {
   const generatedAssetMetadata: Record<string, { path: string; sizeBytes: number }> = {
     "evidence-overview": {
-      path: "/assets/generated/demo-roundabout-wide.webp",
-      sizeBytes: 239_890,
+      path: "/assets/generated/demo-roundabout-wide-v2.webp",
+      sizeBytes: 302_658,
     },
     "evidence-damage-a": {
-      path: "/assets/generated/demo-vehicle-a-damage.webp",
-      sizeBytes: 136_452,
+      path: "/assets/generated/demo-vehicle-a-damage-v2.webp",
+      sizeBytes: 281_286,
     },
     "evidence-damage-b": {
-      path: "/assets/generated/demo-vehicle-b-damage.webp",
-      sizeBytes: 154_638,
+      path: "/assets/generated/demo-vehicle-b-damage-v2.webp",
+      sizeBytes: 211_696,
     },
     "evidence-road": { path: "/assets/generated/demo-road-condition.webp", sizeBytes: 389_932 },
   };
@@ -151,6 +151,7 @@ function evidence(
       "Synthetic demo evidence. Content is illustrative and must not be treated as independently verified.",
     tags,
     annotations: [],
+    annotationLinks: [],
     linkedClaimIds: links.linkedClaimIds ?? [],
     linkedEventIds: links.linkedEventIds ?? [],
     linkedSceneObjectIds: links.linkedSceneObjectIds ?? [],
@@ -238,26 +239,38 @@ function buildDemoCase(): ReplayCase {
 
   const trajectories: Trajectory[] = [
     trajectory("trajectory-a-baseline", "actor-vehicle-a", [
-      [0, 35, 50, 0],
-      [8_000, 48, 50, 0],
-      [10_000, 52, 50, 2],
-      [16_000, 64, 49, 5],
+      [0, 28, 50, 0],
+      [6_000, 35, 65, 38],
+      [8_000, 50, 72, 82],
+      [10_000, 62, 57, 15],
+      [16_000, 74, 54, 5],
     ]),
     trajectory("trajectory-b-baseline", "actor-vehicle-b", [
-      [0, 52, 35, 90],
-      [8_000, 55, 44, 88],
-      [10_000, 56, 50, 90],
-      [16_000, 57, 62, 88],
+      [0, 52, 20, 90],
+      [6_000, 65, 31, 125],
+      [8_000, 69, 43, 110],
+      [10_000, 66, 57, 90],
+      [16_000, 60, 70, 155],
     ]),
   ];
 
   const timelineEvents: TimelineEvent[] = [
-    event("event-start-a", 0, "actor-start", "Vehicle A enters the reviewed interval", [
-      "actor-vehicle-a",
-    ]),
-    event("event-start-b", 0, "actor-start", "Vehicle B enters the reviewed interval", [
-      "actor-vehicle-b",
-    ]),
+    event(
+      "event-start-a",
+      0,
+      "actor-start",
+      "Vehicle A enters the reviewed interval",
+      ["actor-vehicle-a"],
+      { linkedEvidenceIds: ["evidence-overview"] },
+    ),
+    event(
+      "event-start-b",
+      0,
+      "actor-start",
+      "Vehicle B enters the reviewed interval",
+      ["actor-vehicle-b"],
+      { linkedEvidenceIds: ["evidence-overview"] },
+    ),
     event(
       "event-maneuver",
       7_000,
@@ -279,11 +292,15 @@ function buildDemoCase(): ReplayCase {
         certainty: "uncertain",
         linkedClaimIds: ["claim-initial-statement", "claim-impact-location"],
         linkedEvidenceIds: ["evidence-overview"],
-        location: { x: 54, y: 50 },
+        location: { x: 64, y: 57 },
       },
     ),
-    event("event-stop-a", 16_000, "actor-stop", "Vehicle A final position", ["actor-vehicle-a"]),
-    event("event-stop-b", 16_000, "actor-stop", "Vehicle B final position", ["actor-vehicle-b"]),
+    event("event-stop-a", 16_000, "actor-stop", "Vehicle A final position", ["actor-vehicle-a"], {
+      linkedEvidenceIds: ["evidence-overview"],
+    }),
+    event("event-stop-b", 16_000, "actor-stop", "Vehicle B final position", ["actor-vehicle-b"], {
+      linkedEvidenceIds: ["evidence-overview"],
+    }),
     event(
       "event-evidence",
       17_000,
@@ -306,25 +323,32 @@ function buildDemoCase(): ReplayCase {
     evidence(
       "evidence-overview",
       "Roundabout incident overview — synthetic demo.webp",
-      "8d97209032313b37ffaf3a92142d4d254339c5d6ed19bd354888dae8c4c1b5ea",
+      "3cfb45061b48ffc5e04bb8299c5e558c07d1e21df772045f9b60e3006a810295",
       ["overview", "final-positions", "synthetic-demo"],
       {
         linkedClaimIds: ["claim-initial-statement"],
-        linkedEventIds: ["event-impact", "event-evidence"],
+        linkedEventIds: [
+          "event-start-a",
+          "event-start-b",
+          "event-impact",
+          "event-stop-a",
+          "event-stop-b",
+          "event-evidence",
+        ],
         linkedSceneObjectIds: ["actor-vehicle-a", "actor-vehicle-b"],
       },
     ),
     evidence(
       "evidence-damage-a",
       "Vehicle A front-left damage — synthetic demo.webp",
-      "27da729bfd9efdf78931d15423ef17253aa4d681faec7c6aaa03f2a4b9d5f0e9",
+      "f8e2a6110ac39c65133b7b25542472ef3ea8a5dd5c2eb0c331305defa3f551e6",
       ["vehicle-a", "damage", "synthetic-demo"],
       { linkedClaimIds: ["claim-damage-a"], linkedSceneObjectIds: ["actor-vehicle-a"] },
     ),
     evidence(
       "evidence-damage-b",
       "Vehicle B rear-right damage — synthetic demo.webp",
-      "b527745e962d163610cac7f3f6c529b35b9df28f32613165e2165307565cdeac",
+      "382f6f38420934d265529ef1b3588dc852580274cc07b7d4c514d056ad6c8326",
       ["vehicle-b", "damage", "synthetic-demo"],
       { linkedClaimIds: ["claim-damage-b"], linkedSceneObjectIds: ["actor-vehicle-b"] },
     ),
@@ -369,7 +393,7 @@ function buildDemoCase(): ReplayCase {
         kind: "vehicle",
         dimensions: { width: 1.82, length: 4.31 },
         colorToken: "vehicle-muted-blue",
-        pose: { x: 64, y: 49, rotationDeg: 5 },
+        pose: { x: 74, y: 54, rotationDeg: 5 },
         locked: false,
         damageMarkers: [
           {
@@ -390,7 +414,7 @@ function buildDemoCase(): ReplayCase {
         kind: "vehicle",
         dimensions: { width: 1.79, length: 4.22 },
         colorToken: "vehicle-silver",
-        pose: { x: 57, y: 62, rotationDeg: 88 },
+        pose: { x: 60, y: 70, rotationDeg: 155 },
         locked: false,
         damageMarkers: [
           {
@@ -475,6 +499,7 @@ function buildDemoCase(): ReplayCase {
         updatedAt: CREATED_AT,
       },
     ],
+    proposals: [],
     activity: [
       {
         id: "activity-seed-loaded",

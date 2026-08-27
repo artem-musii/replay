@@ -22,6 +22,51 @@ function download(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
+const PNG_MIME_TYPE = "image/png";
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
+
+export function pngDataUrlToBlob(dataUrl: string): Blob {
+  const separatorIndex = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || separatorIndex < 0) {
+    throw new Error("Scene PNG export returned an invalid data URL.");
+  }
+
+  const metadata = dataUrl.slice("data:".length, separatorIndex).split(";");
+  const mimeType = metadata.shift()?.trim().toLowerCase();
+  if (mimeType !== PNG_MIME_TYPE) {
+    throw new Error("Scene PNG export returned an unexpected media type.");
+  }
+  if (!metadata.some((value) => value.trim().toLowerCase() === "base64")) {
+    throw new Error("Scene PNG export returned a non-Base64 data URL.");
+  }
+
+  const encoded = dataUrl.slice(separatorIndex + 1).replace(/\s/g, "");
+  const validBase64 =
+    encoded.length > 0 &&
+    encoded.length % 4 === 0 &&
+    /^(?:[A-Za-z\d+/]{4})*(?:[A-Za-z\d+/]{2}==|[A-Za-z\d+/]{3}=)?$/.test(encoded);
+  if (!validBase64) {
+    throw new Error("Scene PNG export returned an invalid Base64 payload.");
+  }
+
+  let decoded: string;
+  try {
+    decoded = atob(encoded);
+  } catch {
+    throw new Error("Scene PNG export could not decode its Base64 payload.");
+  }
+
+  const bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  if (
+    bytes.length <= PNG_SIGNATURE.length ||
+    !PNG_SIGNATURE.every((value, index) => bytes[index] === value)
+  ) {
+    throw new Error("Scene PNG export returned invalid PNG data.");
+  }
+
+  return new Blob([bytes], { type: PNG_MIME_TYPE });
+}
+
 function sceneSvgElement(): SVGSVGElement {
   const element = document.querySelector<SVGSVGElement>(".scene-svg");
   if (!element) throw new Error("Open the scene before exporting it.");
@@ -72,8 +117,7 @@ export async function exportScenePng(replayCase: ReplayCase): Promise<void> {
     cacheBust: true,
     backgroundColor: "#d7d4c9",
   });
-  const response = await fetch(dataUrl);
-  download(await response.blob(), `${safeFilename(replayCase.title)}-scene.png`);
+  download(pngDataUrlToBlob(dataUrl), `${safeFilename(replayCase.title)}-scene.png`);
 }
 
 export async function exportReportPdf(
@@ -121,22 +165,30 @@ export async function exportReportPdf(
   );
   y = 55;
 
-  try {
-    const scene = sceneExportElement();
-    const scenePng = await toPng(scene, {
-      width: 1400,
-      height: 980,
-      pixelRatio: 1.5,
-      backgroundColor: "#d7d4c9",
-    });
-    pdf.addImage(scenePng, "PNG", margin, y, width, 77, undefined, "FAST");
-    y += 84;
-  } catch {
+  if (preview.caseVersion !== replayCase.caseVersion) {
     paragraph(
-      "Scene diagram could not be embedded in this export. The structured scene remains available in the JSON backup.",
+      `Scene diagram omitted: this immutable report describes case version ${String(preview.caseVersion)}, while the open workspace is version ${String(replayCase.caseVersion)}. REPLAY will not attach newer live geometry to an older snapshot.`,
       8,
       [100, 100, 100],
     );
+  } else {
+    try {
+      const scene = sceneExportElement();
+      const scenePng = await toPng(scene, {
+        width: 1400,
+        height: 980,
+        pixelRatio: 1.5,
+        backgroundColor: "#d7d4c9",
+      });
+      pdf.addImage(scenePng, "PNG", margin, y, width, 77, undefined, "FAST");
+      y += 84;
+    } catch {
+      paragraph(
+        "Scene diagram could not be embedded in this export. The structured scene remains available in the JSON backup.",
+        8,
+        [100, 100, 100],
+      );
+    }
   }
 
   for (const section of preview.sections) {
@@ -156,7 +208,11 @@ export async function exportReportPdf(
     }
     for (const statement of section.statements) {
       paragraph(`${statement.text} (${statement.certainty})`, 9);
-      const citations = [...statement.citations.claimIds, ...statement.citations.evidenceIds];
+      const citations = [
+        ...statement.citations.claimIds,
+        ...statement.citations.evidenceIds,
+        ...statement.citations.workspacePaths,
+      ];
       if (citations.length > 0) paragraph(`Sources: ${citations.join(", ")}`, 7, [96, 100, 101]);
     }
     y += 2;

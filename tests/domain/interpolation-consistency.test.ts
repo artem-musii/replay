@@ -36,8 +36,8 @@ describe("trajectory interpolation", () => {
   it("reads the active branch pose at an incident-relative time", () => {
     const replayCase = createDemoCase();
     expect(getActorPoseAtTime(replayCase, "actor-vehicle-a", 10_000)).toMatchObject({
-      x: 52,
-      y: 50,
+      x: 62,
+      y: 57,
     });
   });
 });
@@ -59,6 +59,19 @@ describe("deterministic consistency rules", () => {
     const second = validateConsistency(replayCase, { scope: "geometry" });
     expect(first).toEqual(second);
     expect(first.some((issue) => issue.ruleId === "geometry.trajectory-teleport")).toBe(true);
+  });
+
+  it("distinguishes the visible road template from the surrounding scene", () => {
+    const roundabout = createDemoCase();
+    roundabout.actors[0]!.pose = { x: 10, y: 10, rotationDeg: 0 };
+    roundabout.actors[1]!.pose = { x: 50, y: 50, rotationDeg: 0 };
+
+    const issues = validateConsistency(roundabout, { scope: "geometry" });
+    const affected = issues
+      .filter((issue) => issue.ruleId === "geometry.actor-outside-scene")
+      .flatMap((issue) => issue.affectedIds);
+    expect(affected).toContain(roundabout.actors[0]!.id);
+    expect(affected).toContain(roundabout.actors[1]!.id);
   });
 
   it("flags deleted evidence that remains cited", () => {

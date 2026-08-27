@@ -2,9 +2,11 @@ import {
   AlertTriangle,
   Archive,
   Camera,
+  CarFront,
   Check,
   ChevronRight,
   CircleHelp,
+  Clock3,
   Eye,
   FileImage,
   FileJson,
@@ -17,6 +19,7 @@ import {
   MessageSquareText,
   Plus,
   RotateCcw,
+  Route,
   SearchCheck,
   ShieldCheck,
   Sparkles,
@@ -28,18 +31,25 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import { compareHypotheses } from "../domain/hypotheses";
+import { getActorPoseAtTime } from "../domain/interpolation";
+import { rankOpenQuestions } from "../domain/reducer";
 import type {
   Claim,
   ClaimStatus,
   ConsistencyIssue,
+  AgentProposal,
   EvidenceAnnotation,
+  EvidenceAnnotationLink,
   EvidenceAsset,
   HypothesisBranch,
   OpenQuestion,
+  ActorPose,
   ReplayCase,
   ReportPreview,
   WorkspaceMode,
 } from "../domain/models";
+import { resolveEvidenceImageSource } from "./evidenceSource";
+import { useDialogFocus } from "./useDialogFocus";
 
 export type InspectorTab = Extract<
   WorkspaceMode,
@@ -52,13 +62,32 @@ export interface EvidenceUploadInput {
   capturedAt?: string;
 }
 
+type EvidenceLinkTargetType = EvidenceAnnotationLink["targetType"];
+
+type ProposalAdjustmentChange =
+  | {
+      kind: "actor-pose";
+      actorId: string;
+      proposedPose: ActorPose;
+    }
+  | {
+      kind: "trajectory-set";
+      trajectoryId: string;
+      actorId: string;
+      branchId: string;
+      keyframes: Array<ActorPose & { id: string; timeMs: number }>;
+      visible: boolean;
+    };
+
 interface InspectorPanelProps {
   replayCase: ReplayCase;
+  currentTimeMs: number;
   activeTab: InspectorTab;
   selectedId?: string;
   reportPreview?: ReportPreview;
   evidenceUrls?: Record<string, string>;
   compareBranchIds: string[];
+  focusedIssueId?: string;
   onTabChange: (tab: InspectorTab) => void;
   onSelect: (type: "claim" | "evidence" | "question" | "hypothesis" | "report", id: string) => void;
   onAddClaim: (
@@ -69,8 +98,35 @@ interface InspectorPanelProps {
   onConfirmClaim: (claimId: string) => void;
   onSetClaimStatus: (claimId: string, status: Exclude<ClaimStatus, "confirmed">) => void;
   onToggleLock: (type: "claim", id: string, locked: boolean) => void;
+  onUpdateActorPose: (actorId: string, pose: ActorPose) => void;
+  onUpdateTrajectoryKeyframe: (
+    trajectoryId: string,
+    keyframeId: string,
+    update: ActorPose & { timeMs: number },
+  ) => void;
+  onSetTrajectoryVisible: (trajectoryId: string, visible: boolean) => void;
+  onUpdateTimelineEvent: (
+    eventId: string,
+    update: {
+      timeMs: number;
+      certainty: Exclude<ClaimStatus, "confirmed" | "agent-hypothesis">;
+      location?: { x: number; y: number };
+    },
+  ) => void;
+  onToggleSceneItemLock: (
+    type: "actor" | "trajectory" | "timeline-event",
+    id: string,
+    locked: boolean,
+  ) => void;
+  onAdjustProposal: (
+    proposalId: string,
+    summary: string,
+    changes: ProposalAdjustmentChange[],
+  ) => void;
+  onAcceptProposal: (proposalId: string) => void;
+  onRejectProposal: (proposalId: string) => void;
   onUploadEvidence: (input: EvidenceUploadInput) => void;
-  onDeleteEvidence: (evidenceId: string) => void;
+  onDeleteEvidence: (evidenceId: string) => void | Promise<void>;
   onUpdateEvidence: (
     evidenceId: string,
     update: {
@@ -82,8 +138,9 @@ interface InspectorPanelProps {
   ) => void;
   onLinkEvidence: (
     evidenceId: string,
-    targetType: "claim" | "timeline-event" | "actor" | "hypothesis",
+    targetType: EvidenceLinkTargetType,
     targetId: string,
+    annotationId?: string,
   ) => void;
   onAddQuestion: (question: string, reason: string, importance: OpenQuestion["importance"]) => void;
   onUpdateQuestion: (
@@ -94,13 +151,19 @@ interface InspectorPanelProps {
   ) => void;
   onForkBranch: (parentId: string, name: string, description: string) => void;
   onSetActiveBranch: (branchId: string) => void;
+  onRenameBranch: (branchId: string, name: string, description: string) => void;
   onAddAssumption: (branchId: string, statement: string) => void;
+  onUpdateAssumption: (
+    branchId: string,
+    assumptionId: string,
+    update: { statement?: string; status?: "active" | "withdrawn" },
+  ) => void;
   onToggleBranchArchive: (branch: HypothesisBranch) => void;
   onCompareBranches: (ids: string[]) => void;
   onValidate: () => void;
   onFocusIssue: (issue: ConsistencyIssue) => void;
   onBuildReport: () => void;
-  onAddReportNote: (text: string) => void;
+  onAddReportNote: (text: string, claimIds: string[], evidenceIds: string[]) => void;
   onReviewReportNote: (noteId: string, approved: boolean) => void;
   onFinalizeReport: () => void;
   onExportJson: () => void;
@@ -124,13 +187,6 @@ const statusLabels: Record<ClaimStatus, string> = {
   disputed: "Disputed",
   unknown: "Unknown",
   "agent-hypothesis": "Agent hypothesis",
-};
-
-const evidenceImages: Record<string, string> = {
-  "evidence-overview": `${import.meta.env.BASE_URL}assets/generated/demo-roundabout-wide.webp`,
-  "evidence-damage-a": `${import.meta.env.BASE_URL}assets/generated/demo-vehicle-a-damage.webp`,
-  "evidence-damage-b": `${import.meta.env.BASE_URL}assets/generated/demo-vehicle-b-damage.webp`,
-  "evidence-road": `${import.meta.env.BASE_URL}assets/generated/demo-road-condition.webp`,
 };
 
 function StatusGlyph({ status }: { status: ClaimStatus }) {
@@ -183,6 +239,8 @@ export function InspectorPanel(props: InspectorPanelProps) {
         ))}
       </nav>
       <div className="inspector-content">
+        <ProposalReviewPanel {...props} />
+        <SceneSelectionEditor {...props} />
         {props.activeTab === "facts" && <FactsView {...props} />}
         {props.activeTab === "evidence" && <EvidenceView {...props} />}
         {props.activeTab === "questions" && <QuestionsView {...props} />}
@@ -190,6 +248,636 @@ export function InspectorPanel(props: InspectorPanelProps) {
         {props.activeTab === "report" && <ReportView {...props} />}
       </div>
     </aside>
+  );
+}
+
+function requiredNumber(form: FormData, name: string): number {
+  const raw = form.get(name);
+  const value = typeof raw === "string" && raw.trim().length > 0 ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number.`);
+  return value;
+}
+
+const eventCertainties = ["reported", "likely", "uncertain", "disputed", "unknown"] as const;
+
+function requiredEventCertainty(form: FormData): (typeof eventCertainties)[number] {
+  const value = form.get("certainty");
+  if (typeof value !== "string" || !eventCertainties.some((candidate) => candidate === value)) {
+    throw new Error("Choose a valid event certainty.");
+  }
+  return value as (typeof eventCertainties)[number];
+}
+
+function proposalAdjustmentFromForm(
+  proposal: AgentProposal,
+  form: FormData,
+): ProposalAdjustmentChange[] {
+  const revision = proposal.revisions.at(-1);
+  if (!revision) throw new Error(`Proposal ${proposal.id} has no revision.`);
+  return revision.changes.map((change, changeIndex) => {
+    if (change.kind === "actor-pose") {
+      return {
+        kind: "actor-pose" as const,
+        actorId: change.actorId,
+        proposedPose: {
+          x: requiredNumber(form, `change-${String(changeIndex)}-x`),
+          y: requiredNumber(form, `change-${String(changeIndex)}-y`),
+          rotationDeg: requiredNumber(form, `change-${String(changeIndex)}-rotation`),
+        },
+      };
+    }
+    return {
+      kind: "trajectory-set" as const,
+      trajectoryId: change.trajectoryId,
+      actorId: change.actorId,
+      branchId: change.branchId,
+      visible: form.get(`change-${String(changeIndex)}-visible`) === "on",
+      keyframes: change.proposedTrajectory.keyframes.map((frame, frameIndex) => ({
+        id: frame.id,
+        timeMs: Math.round(
+          requiredNumber(form, `change-${String(changeIndex)}-frame-${String(frameIndex)}-time`) *
+            1000,
+        ),
+        x: requiredNumber(form, `change-${String(changeIndex)}-frame-${String(frameIndex)}-x`),
+        y: requiredNumber(form, `change-${String(changeIndex)}-frame-${String(frameIndex)}-y`),
+        rotationDeg: requiredNumber(
+          form,
+          `change-${String(changeIndex)}-frame-${String(frameIndex)}-rotation`,
+        ),
+      })),
+    };
+  });
+}
+
+function ProposalReviewPanel(props: InspectorPanelProps) {
+  const pending = props.replayCase.proposals.filter((proposal) => proposal.status === "pending");
+  const resolved = props.replayCase.proposals
+    .filter((proposal) => proposal.status !== "pending")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const [decision, setDecision] = useState<{
+    proposalId: string;
+    outcome: "accepted" | "rejected";
+  }>();
+  if (pending.length === 0 && resolved.length === 0) return null;
+
+  return (
+    <section className="proposal-review" aria-label="Agent change proposals">
+      {pending.length > 0 && (
+        <header className="proposal-review__heading">
+          <div>
+            <span>
+              <Sparkles size={13} aria-hidden="true" /> Agent proposal
+            </span>
+            <h2>
+              {pending.length} change set{pending.length === 1 ? "" : "s"} awaiting you
+            </h2>
+          </div>
+          <strong>{pending.length}</strong>
+        </header>
+      )}
+      {pending.map((proposal) => {
+        const revision = proposal.revisions.at(-1);
+        if (!revision) return null;
+        return (
+          <form
+            className="proposal-card"
+            key={`${proposal.id}-${revision.id}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              props.onAdjustProposal(
+                proposal.id,
+                "Human adjusted the proposed geometry before deciding.",
+                proposalAdjustmentFromForm(proposal, new FormData(event.currentTarget)),
+              );
+            }}
+          >
+            <header>
+              <div>
+                <small>
+                  Revision {revision.revisionNumber} · {revision.createdBy}
+                  {!revision.authorshipTrusted ? " · unverified import" : ""}
+                </small>
+                <h3>{proposal.title}</h3>
+              </div>
+              <span>{revision.changes.length} changes</span>
+            </header>
+            <p>{proposal.rationale}</p>
+            <div className="proposal-change-list">
+              {revision.changes.map((change, changeIndex) => {
+                const actor = props.replayCase.actors.find(
+                  (candidate) => candidate.id === change.actorId,
+                );
+                if (change.kind === "actor-pose") {
+                  return (
+                    <fieldset key={change.id} className="proposal-change">
+                      <legend>{actor?.label ?? change.actorId} · proposed pose</legend>
+                      <div className="scene-numeric-form__grid">
+                        <label>
+                          <span>X</span>
+                          <input
+                            name={`change-${String(changeIndex)}-x`}
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            defaultValue={change.proposedPose.x}
+                            required
+                          />
+                        </label>
+                        <label>
+                          <span>Y</span>
+                          <input
+                            name={`change-${String(changeIndex)}-y`}
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            defaultValue={change.proposedPose.y}
+                            required
+                          />
+                        </label>
+                        <label>
+                          <span>Angle °</span>
+                          <input
+                            name={`change-${String(changeIndex)}-rotation`}
+                            type="number"
+                            min="-360"
+                            max="360"
+                            step="1"
+                            defaultValue={change.proposedPose.rotationDeg}
+                            required
+                          />
+                        </label>
+                      </div>
+                      <small>
+                        Current {change.basePose.x.toFixed(1)}, {change.basePose.y.toFixed(1)} at{" "}
+                        {Math.round(change.basePose.rotationDeg)}°
+                      </small>
+                    </fieldset>
+                  );
+                }
+                return (
+                  <fieldset key={change.id} className="proposal-change">
+                    <legend>{actor?.label ?? change.actorId} · proposed path</legend>
+                    <label className="proposal-change__visibility">
+                      <input
+                        name={`change-${String(changeIndex)}-visible`}
+                        type="checkbox"
+                        defaultChecked={change.proposedTrajectory.visible}
+                      />
+                      Show path when applied
+                    </label>
+                    <div className="proposal-keyframes">
+                      {change.proposedTrajectory.keyframes.map((frame, frameIndex) => (
+                        <div className="proposal-keyframe" key={frame.id}>
+                          <strong>Point {frameIndex + 1}</strong>
+                          <div className="scene-numeric-form__grid scene-numeric-form__grid--four">
+                            <label>
+                              <span>Time s</span>
+                              <input
+                                name={`change-${String(changeIndex)}-frame-${String(frameIndex)}-time`}
+                                type="number"
+                                min={props.replayCase.timeRangeMs.start / 1000}
+                                max={props.replayCase.timeRangeMs.end / 1000}
+                                step="0.1"
+                                defaultValue={frame.timeMs / 1000}
+                                required
+                              />
+                            </label>
+                            <label>
+                              <span>X</span>
+                              <input
+                                name={`change-${String(changeIndex)}-frame-${String(frameIndex)}-x`}
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                defaultValue={frame.x}
+                                required
+                              />
+                            </label>
+                            <label>
+                              <span>Y</span>
+                              <input
+                                name={`change-${String(changeIndex)}-frame-${String(frameIndex)}-y`}
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                defaultValue={frame.y}
+                                required
+                              />
+                            </label>
+                            <label>
+                              <span>Angle °</span>
+                              <input
+                                name={`change-${String(changeIndex)}-frame-${String(frameIndex)}-rotation`}
+                                type="number"
+                                min="-360"
+                                max="360"
+                                step="1"
+                                defaultValue={frame.rotationDeg}
+                                required
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </fieldset>
+                );
+              })}
+            </div>
+            <footer>
+              <button
+                type="button"
+                className="button button--quiet"
+                onClick={() => setDecision({ proposalId: proposal.id, outcome: "rejected" })}
+              >
+                Reject
+              </button>
+              <button className="button button--secondary">Save adjustment</button>
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => setDecision({ proposalId: proposal.id, outcome: "accepted" })}
+              >
+                Accept and apply
+              </button>
+            </footer>
+          </form>
+        );
+      })}
+      {resolved.length > 0 && (
+        <details className="proposal-history">
+          <summary>Recent proposal decisions ({resolved.length})</summary>
+          <ul>
+            {resolved.slice(0, 5).map((proposal) => (
+              <li key={proposal.id}>
+                <span>{proposal.title}</span>
+                <strong>{proposal.status}</strong>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {decision && (
+        <ConfirmDialog
+          title={decision.outcome === "accepted" ? "Apply this proposal?" : "Reject this proposal?"}
+          description={
+            decision.outcome === "accepted"
+              ? "All listed changes will be applied together. If any target changed or became locked, nothing will be applied."
+              : "The proposed geometry will remain unapplied and the human decision will be recorded."
+          }
+          confirmLabel={decision.outcome === "accepted" ? "Accept and apply" : "Reject proposal"}
+          destructive={decision.outcome === "rejected"}
+          onCancel={() => setDecision(undefined)}
+          onConfirm={() => {
+            if (decision.outcome === "accepted") props.onAcceptProposal(decision.proposalId);
+            else props.onRejectProposal(decision.proposalId);
+            setDecision(undefined);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function SceneSelectionEditor(props: InspectorPanelProps) {
+  const actor = props.replayCase.actors.find((item) => item.id === props.selectedId);
+  const trajectory = props.replayCase.trajectories.find((item) => item.id === props.selectedId);
+  const timelineEvent = props.replayCase.timelineEvents.find(
+    (item) => item.id === props.selectedId,
+  );
+  const branch = trajectory
+    ? props.replayCase.branches.find((item) => item.id === trajectory.branchId)
+    : undefined;
+  const actorPose = actor
+    ? (getActorPoseAtTime(props.replayCase, actor.id, props.currentTimeMs) ?? actor.pose)
+    : undefined;
+  if (!actor && !trajectory && !timelineEvent) return null;
+
+  if (actor && actorPose) {
+    return (
+      <section className="scene-selection-editor" aria-labelledby="scene-selection-title">
+        <header>
+          <span className="scene-selection-editor__icon">
+            <CarFront size={16} aria-hidden="true" />
+          </span>
+          <div>
+            <small>Selected vehicle</small>
+            <h2 id="scene-selection-title">{actor.label}</h2>
+          </div>
+          <button
+            className="icon-button icon-button--small"
+            type="button"
+            onClick={() => props.onToggleSceneItemLock("actor", actor.id, !actor.locked)}
+            aria-label={actor.locked ? `Unlock ${actor.label}` : `Lock ${actor.label}`}
+          >
+            {actor.locked ? <Unlock size={14} /> : <LockKeyhole size={14} />}
+          </button>
+        </header>
+        <p className="scene-selection-editor__hint">
+          Exact pose at the playhead. Values use the scene’s 0–100 coordinate system.
+        </p>
+        <form
+          key={`${actor.id}-${String(actorPose.x)}-${String(actorPose.y)}-${String(actorPose.rotationDeg)}`}
+          className="scene-numeric-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            props.onUpdateActorPose(actor.id, {
+              x: requiredNumber(data, "x"),
+              y: requiredNumber(data, "y"),
+              rotationDeg: requiredNumber(data, "rotation"),
+            });
+          }}
+        >
+          <div className="scene-numeric-form__grid">
+            <label>
+              <span>X position</span>
+              <input
+                name="x"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                defaultValue={actorPose.x}
+                required
+                disabled={actor.locked}
+              />
+            </label>
+            <label>
+              <span>Y position</span>
+              <input
+                name="y"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                defaultValue={actorPose.y}
+                required
+                disabled={actor.locked}
+              />
+            </label>
+            <label>
+              <span>Rotation °</span>
+              <input
+                name="rotation"
+                type="number"
+                min="-360"
+                max="360"
+                step="1"
+                defaultValue={actorPose.rotationDeg}
+                required
+                disabled={actor.locked}
+              />
+            </label>
+          </div>
+          <button className="button button--secondary" disabled={actor.locked}>
+            Apply exact pose
+          </button>
+        </form>
+        <dl className="scene-selection-facts">
+          <div>
+            <dt>Dimensions</dt>
+            <dd>
+              {actor.dimensions.length.toFixed(1)} × {actor.dimensions.width.toFixed(1)}
+            </dd>
+          </div>
+          <div>
+            <dt>Damage markers</dt>
+            <dd>{actor.damageMarkers.length || "None"}</dd>
+          </div>
+        </dl>
+      </section>
+    );
+  }
+
+  if (trajectory) {
+    return (
+      <section className="scene-selection-editor" aria-labelledby="scene-selection-title">
+        <header>
+          <span className="scene-selection-editor__icon">
+            <Route size={16} aria-hidden="true" />
+          </span>
+          <div>
+            <small>Selected trajectory</small>
+            <h2 id="scene-selection-title">
+              {props.replayCase.actors.find((item) => item.id === trajectory.actorId)?.label ??
+                "Vehicle path"}
+            </h2>
+          </div>
+          <button
+            className="icon-button icon-button--small"
+            type="button"
+            onClick={() =>
+              props.onToggleSceneItemLock("trajectory", trajectory.id, !trajectory.locked)
+            }
+            aria-label={trajectory.locked ? "Unlock trajectory" : "Lock trajectory"}
+          >
+            {trajectory.locked ? <Unlock size={14} /> : <LockKeyhole size={14} />}
+          </button>
+        </header>
+        <div className="scene-selection-editor__meta">
+          <span>{branch?.name ?? trajectory.branchId}</span>
+          <label>
+            <input
+              type="checkbox"
+              checked={trajectory.visible}
+              disabled={trajectory.locked}
+              onChange={(event) =>
+                props.onSetTrajectoryVisible(trajectory.id, event.target.checked)
+              }
+            />
+            Show path
+          </label>
+        </div>
+        <div className="keyframe-editor-list" aria-label="Exact trajectory points">
+          {trajectory.keyframes.map((frame, index) => (
+            <form
+              key={`${frame.id}-${String(frame.timeMs)}-${String(frame.x)}-${String(frame.y)}-${String(frame.rotationDeg)}`}
+              className="keyframe-editor"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const data = new FormData(event.currentTarget);
+                props.onUpdateTrajectoryKeyframe(trajectory.id, frame.id, {
+                  timeMs: Math.round(requiredNumber(data, "time") * 1000),
+                  x: requiredNumber(data, "x"),
+                  y: requiredNumber(data, "y"),
+                  rotationDeg: requiredNumber(data, "rotation"),
+                });
+              }}
+            >
+              <header>
+                <strong>Point {index + 1}</strong>
+                <button className="text-button" disabled={trajectory.locked}>
+                  Apply point
+                </button>
+              </header>
+              <div className="scene-numeric-form__grid scene-numeric-form__grid--four">
+                <label>
+                  <span>Time s</span>
+                  <input
+                    name="time"
+                    type="number"
+                    min={props.replayCase.timeRangeMs.start / 1000}
+                    max={props.replayCase.timeRangeMs.end / 1000}
+                    step="0.1"
+                    defaultValue={frame.timeMs / 1000}
+                    required
+                    disabled={trajectory.locked}
+                  />
+                </label>
+                <label>
+                  <span>X</span>
+                  <input
+                    name="x"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    defaultValue={frame.x}
+                    required
+                    disabled={trajectory.locked}
+                  />
+                </label>
+                <label>
+                  <span>Y</span>
+                  <input
+                    name="y"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    defaultValue={frame.y}
+                    required
+                    disabled={trajectory.locked}
+                  />
+                </label>
+                <label>
+                  <span>Angle °</span>
+                  <input
+                    name="rotation"
+                    type="number"
+                    min="-360"
+                    max="360"
+                    step="1"
+                    defaultValue={frame.rotationDeg}
+                    required
+                    disabled={trajectory.locked}
+                  />
+                </label>
+              </div>
+            </form>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (!timelineEvent) return null;
+  return (
+    <section className="scene-selection-editor" aria-labelledby="scene-selection-title">
+      <header>
+        <span className="scene-selection-editor__icon">
+          <Clock3 size={16} aria-hidden="true" />
+        </span>
+        <div>
+          <small>Selected timeline event</small>
+          <h2 id="scene-selection-title">{timelineEvent.title}</h2>
+        </div>
+        <button
+          className="icon-button icon-button--small"
+          type="button"
+          onClick={() =>
+            props.onToggleSceneItemLock("timeline-event", timelineEvent.id, !timelineEvent.locked)
+          }
+          aria-label={timelineEvent.locked ? "Unlock selected event" : "Lock selected event"}
+        >
+          {timelineEvent.locked ? <Unlock size={14} /> : <LockKeyhole size={14} />}
+        </button>
+      </header>
+      <form
+        key={`${timelineEvent.id}-${String(timelineEvent.timeMs)}-${timelineEvent.certainty}-${String(timelineEvent.location?.x)}-${String(timelineEvent.location?.y)}`}
+        className="scene-numeric-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          const location = timelineEvent.location
+            ? { x: requiredNumber(data, "x"), y: requiredNumber(data, "y") }
+            : undefined;
+          props.onUpdateTimelineEvent(timelineEvent.id, {
+            timeMs: Math.round(requiredNumber(data, "time") * 1000),
+            certainty: requiredEventCertainty(data),
+            ...(location ? { location } : {}),
+          });
+        }}
+      >
+        <div className="scene-numeric-form__grid">
+          <label>
+            <span>Time s</span>
+            <input
+              name="time"
+              type="number"
+              min={props.replayCase.timeRangeMs.start / 1000}
+              max={props.replayCase.timeRangeMs.end / 1000}
+              step="0.1"
+              defaultValue={timelineEvent.timeMs / 1000}
+              required
+              disabled={timelineEvent.locked}
+            />
+          </label>
+          {timelineEvent.location && (
+            <>
+              <label>
+                <span>X location</span>
+                <input
+                  name="x"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  defaultValue={timelineEvent.location.x}
+                  required
+                  disabled={timelineEvent.locked}
+                />
+              </label>
+              <label>
+                <span>Y location</span>
+                <input
+                  name="y"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  defaultValue={timelineEvent.location.y}
+                  required
+                  disabled={timelineEvent.locked}
+                />
+              </label>
+            </>
+          )}
+        </div>
+        <label className="scene-certainty-field">
+          <span>Certainty</span>
+          <select
+            name="certainty"
+            defaultValue={timelineEvent.certainty}
+            disabled={timelineEvent.locked}
+          >
+            <option value="reported">Reported</option>
+            <option value="likely">Likely</option>
+            <option value="uncertain">Uncertain</option>
+            <option value="disputed">Disputed</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </label>
+        <button className="button button--secondary" disabled={timelineEvent.locked}>
+          Apply event details
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -420,6 +1108,9 @@ function EvidenceView(props: InspectorPanelProps) {
   const [pendingDelete, setPendingDelete] = useState<string>();
   const evidence = props.replayCase.evidence.filter((item) => !item.deleted);
   const selected = evidence.find((item) => item.id === props.selectedId) ?? evidence[0];
+  const selectedImageUrl = selected
+    ? resolveEvidenceImageSource(selected, props.evidenceUrls?.[selected.id])
+    : undefined;
 
   function process(files: FileList | null) {
     const file = files?.[0];
@@ -451,6 +1142,8 @@ function EvidenceView(props: InspectorPanelProps) {
         ref={inputRef}
         className="visually-hidden"
         type="file"
+        tabIndex={-1}
+        aria-label="Choose evidence image"
         accept="image/jpeg,image/png,image/webp"
         onChange={(event) => process(event.target.files)}
       />
@@ -496,9 +1189,7 @@ function EvidenceView(props: InspectorPanelProps) {
           <EvidencePreviewEditor
             key={`preview-${selected.id}`}
             asset={selected}
-            {...((evidenceImages[selected.id] ?? props.evidenceUrls?.[selected.id])
-              ? { imageUrl: evidenceImages[selected.id] ?? props.evidenceUrls?.[selected.id] }
-              : {})}
+            {...(selectedImageUrl ? { imageUrl: selectedImageUrl } : {})}
             onUpdate={props.onUpdateEvidence}
           />
           <h3>{selected.name}</h3>
@@ -536,13 +1227,18 @@ function EvidenceView(props: InspectorPanelProps) {
               <dt>Annotations</dt>
               <dd>{selected.annotations.length}</dd>
             </div>
+            <div>
+              <dt>Annotation links</dt>
+              <dd>{selected.annotationLinks.length}</dd>
+            </div>
           </dl>
           <EvidenceMetadataEditor
             key={`metadata-${selected.id}`}
             asset={selected}
             onUpdate={props.onUpdateEvidence}
           />
-          <LinkEvidence
+          <EvidenceLinkControl
+            key={`link-${selected.id}`}
             asset={selected}
             replayCase={props.replayCase}
             onLink={props.onLinkEvidence}
@@ -560,7 +1256,7 @@ function EvidenceView(props: InspectorPanelProps) {
           destructive
           onCancel={() => setPendingDelete(undefined)}
           onConfirm={() => {
-            props.onDeleteEvidence(pendingDelete);
+            void props.onDeleteEvidence(pendingDelete);
             setPendingDelete(undefined);
           }}
         />
@@ -580,26 +1276,40 @@ function EvidencePreviewEditor({
 }) {
   const [annotationMode, setAnnotationMode] = useState<"point" | "rectangle">();
 
+  function addAnnotationAt(x: number, y: number, width = 0.2, height = 0.16) {
+    if (!annotationMode) return;
+    const safeX = Math.max(0, Math.min(1, x));
+    const safeY = Math.max(0, Math.min(1, y));
+    const id = `annotation-${crypto.randomUUID()}`;
+    const annotation: EvidenceAnnotation =
+      annotationMode === "point"
+        ? {
+            id,
+            kind: "point",
+            x: safeX,
+            y: safeY,
+            label: `Point ${asset.annotations.length + 1}`,
+          }
+        : {
+            id,
+            kind: "rectangle",
+            x: safeX,
+            y: safeY,
+            width: Math.max(0.01, Math.min(width, 1 - safeX)),
+            height: Math.max(0.01, Math.min(height, 1 - safeY)),
+            label: `Area ${asset.annotations.length + 1}`,
+          };
+    onUpdate(asset.id, { annotations: [...asset.annotations, annotation] });
+    setAnnotationMode(undefined);
+  }
+
   function addAnnotation(event: React.PointerEvent<HTMLDivElement>) {
     if (!annotationMode) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
     const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-    const id = `annotation-${crypto.randomUUID()}`;
-    const annotation: EvidenceAnnotation =
-      annotationMode === "point"
-        ? { id, kind: "point", x, y, label: `Point ${asset.annotations.length + 1}` }
-        : {
-            id,
-            kind: "rectangle",
-            x: Math.max(0, x - 0.1),
-            y: Math.max(0, y - 0.08),
-            width: Math.min(0.2, 1 - Math.max(0, x - 0.1)),
-            height: Math.min(0.16, 1 - Math.max(0, y - 0.08)),
-            label: `Area ${asset.annotations.length + 1}`,
-          };
-    onUpdate(asset.id, { annotations: [...asset.annotations, annotation] });
-    setAnnotationMode(undefined);
+    if (annotationMode === "point") addAnnotationAt(x, y);
+    else addAnnotationAt(x - 0.1, y - 0.08);
   }
 
   return (
@@ -664,6 +1374,80 @@ function EvidencePreviewEditor({
         </button>
         <span>{asset.annotations.length} marked</span>
       </div>
+      {annotationMode && (
+        <form
+          className="annotation-coordinate-form"
+          aria-label={`Place ${annotationMode} annotation by coordinates`}
+          onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            const x = requiredNumber(data, "annotation-x") / 100;
+            const y = requiredNumber(data, "annotation-y") / 100;
+            if (annotationMode === "point") addAnnotationAt(x, y);
+            else
+              addAnnotationAt(
+                x,
+                y,
+                requiredNumber(data, "annotation-width") / 100,
+                requiredNumber(data, "annotation-height") / 100,
+              );
+          }}
+        >
+          <label>
+            <span>X %</span>
+            <input
+              name="annotation-x"
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              defaultValue="50"
+              required
+            />
+          </label>
+          <label>
+            <span>Y %</span>
+            <input
+              name="annotation-y"
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              defaultValue="50"
+              required
+            />
+          </label>
+          {annotationMode === "rectangle" && (
+            <>
+              <label>
+                <span>Width %</span>
+                <input
+                  name="annotation-width"
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  defaultValue="20"
+                  required
+                />
+              </label>
+              <label>
+                <span>Height %</span>
+                <input
+                  name="annotation-height"
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  defaultValue="16"
+                  required
+                />
+              </label>
+            </>
+          )}
+          <button className="button button--secondary">Add annotation</button>
+        </form>
+      )}
       {asset.annotations.length > 0 && (
         <div className="annotation-list" role="list" aria-label="Evidence annotations">
           {asset.annotations.map((annotation) => (
@@ -763,7 +1547,7 @@ function EvidenceTile({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const image = evidenceImages[asset.id] ?? imageUrl;
+  const image = resolveEvidenceImageSource(asset, imageUrl);
   return (
     <button className={`evidence-tile${selected ? " is-selected" : ""}`} onClick={onSelect}>
       {image ? (
@@ -777,7 +1561,26 @@ function EvidenceTile({
   );
 }
 
-function LinkEvidence({
+interface EvidenceLinkOption {
+  key: string;
+  targetType: EvidenceLinkTargetType;
+  targetId: string;
+  label: string;
+}
+
+interface EvidenceLinkOptionGroup {
+  label: string;
+  items: EvidenceLinkOption[];
+}
+
+function compactOptionText(value: string, maxLength = 96): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+export function EvidenceLinkControl({
   asset,
   replayCase,
   onLink,
@@ -787,72 +1590,154 @@ function LinkEvidence({
   onLink: InspectorPanelProps["onLinkEvidence"];
 }) {
   const [target, setTarget] = useState("");
-  const options = [
-    ...replayCase.claims.map((item) => ({
-      value: `claim:${item.id}`,
-      label: `Fact: ${item.statement}`,
-    })),
-    ...replayCase.timelineEvents.map((item) => ({
-      value: `timeline-event:${item.id}`,
-      label: `Event: ${item.title}`,
-    })),
-    ...replayCase.actors.map((item) => ({ value: `actor:${item.id}`, label: item.label })),
-    ...replayCase.branches.map((item) => ({
-      value: `hypothesis:${item.id}`,
-      label: `Branch: ${item.name}`,
-    })),
+  const [annotationId, setAnnotationId] = useState("");
+  const optionGroups: EvidenceLinkOptionGroup[] = [
+    {
+      label: "Facts",
+      items: replayCase.claims.map((claim) => ({
+        key: `claim:${claim.id}`,
+        targetType: "claim",
+        targetId: claim.id,
+        label: compactOptionText(claim.statement),
+      })),
+    },
+    {
+      label: "Timeline events",
+      items: replayCase.timelineEvents.map((timelineEvent) => ({
+        key: `timeline-event:${timelineEvent.id}`,
+        targetType: "timeline-event",
+        targetId: timelineEvent.id,
+        label: compactOptionText(timelineEvent.title),
+      })),
+    },
+    {
+      label: "Vehicles",
+      items: replayCase.actors.map((actor) => ({
+        key: `actor:${actor.id}`,
+        targetType: "actor",
+        targetId: actor.id,
+        label: actor.label,
+      })),
+    },
+    {
+      label: "Trajectories",
+      items: replayCase.trajectories.map((trajectory) => {
+        const actor = replayCase.actors.find((candidate) => candidate.id === trajectory.actorId);
+        const branch = replayCase.branches.find(
+          (candidate) => candidate.id === trajectory.branchId,
+        );
+        return {
+          key: `trajectory:${trajectory.id}`,
+          targetType: "trajectory" as const,
+          targetId: trajectory.id,
+          label: `${actor?.label ?? trajectory.actorId} · ${branch?.name ?? trajectory.branchId}`,
+        };
+      }),
+    },
+    {
+      label: "Damage markers",
+      items: replayCase.actors.flatMap((actor) =>
+        actor.damageMarkers.map((marker) => ({
+          key: `damage:${marker.id}`,
+          targetType: "damage" as const,
+          targetId: marker.id,
+          label: compactOptionText(
+            `${actor.label} · ${marker.region.replaceAll("-", " ")} · ${marker.description}`,
+          ),
+        })),
+      ),
+    },
+    {
+      label: "Hypothesis branches",
+      items: replayCase.branches
+        .filter((branch) => branch.status === "active")
+        .map((branch) => ({
+          key: `hypothesis:${branch.id}`,
+          targetType: "hypothesis" as const,
+          targetId: branch.id,
+          label: branch.name,
+        })),
+    },
+    {
+      label: "Assumptions (supporting evidence)",
+      items: replayCase.branches
+        .filter((branch) => branch.status === "active")
+        .flatMap((branch) =>
+          branch.assumptions
+            .filter((assumption) => assumption.status === "active")
+            .map((assumption) => ({
+              key: `assumption:${assumption.id}`,
+              targetType: "assumption" as const,
+              targetId: assumption.id,
+              label: compactOptionText(`${branch.name} · ${assumption.statement}`),
+            })),
+        ),
+    },
   ];
+  const selectedTarget = optionGroups
+    .flatMap((group) => group.items)
+    .find((option) => option.key === target);
   return (
     <div className="link-evidence">
+      {asset.annotations.length > 0 && (
+        <label className="compact-field">
+          <span>Evidence scope</span>
+          <select value={annotationId} onChange={(event) => setAnnotationId(event.target.value)}>
+            <option value="">Whole evidence asset</option>
+            {asset.annotations.map((annotation, index) => (
+              <option key={annotation.id} value={annotation.id}>
+                {annotation.label ??
+                  `${annotation.kind === "point" ? "Point" : "Area"} ${index + 1}`}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="compact-field">
         <span>
           <Link2 size={13} /> Link to case item
         </span>
         <select value={target} onChange={(event) => setTarget(event.target.value)}>
           <option value="">Choose an item</option>
-          {options.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}
-            </option>
-          ))}
+          {optionGroups
+            .filter((group) => group.items.length > 0)
+            .map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.items.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
         </select>
       </label>
       <button
         className="button button--secondary"
-        disabled={!target}
+        disabled={!selectedTarget}
         onClick={() => {
-          const [type, ...rest] = target.split(":");
+          if (!selectedTarget) return;
           onLink(
             asset.id,
-            type as "claim" | "timeline-event" | "actor" | "hypothesis",
-            rest.join(":"),
+            selectedTarget.targetType,
+            selectedTarget.targetId,
+            annotationId || undefined,
           );
           setTarget("");
         }}
       >
-        Link
+        {selectedTarget?.targetType === "assumption" ? "Link as supporting evidence" : "Link"}
       </button>
     </div>
   );
 }
-
-const questionWeight: Record<OpenQuestion["importance"], number> = {
-  blocking: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-};
 
 function QuestionsView(props: InspectorPanelProps) {
   const [adding, setAdding] = useState(false);
   const [question, setQuestion] = useState("");
   const [reason, setReason] = useState("");
   const [importance, setImportance] = useState<OpenQuestion["importance"]>("high");
-  const ordered = [...props.replayCase.questions].sort(
-    (a, b) =>
-      questionWeight[b.importance] - questionWeight[a.importance] ||
-      a.question.localeCompare(b.question),
-  );
+  const ordered = rankOpenQuestions(props.replayCase.questions);
   return (
     <>
       <SectionHeading
@@ -1094,7 +1979,9 @@ function HypothesesView(props: InspectorPanelProps) {
             active={branch.id === props.replayCase.activeBranchId}
             index={index}
             onActivate={props.onSetActiveBranch}
+            onRename={props.onRenameBranch}
             onAddAssumption={props.onAddAssumption}
+            onUpdateAssumption={props.onUpdateAssumption}
             onArchive={props.onToggleBranchArchive}
           />
         ))}
@@ -1116,18 +2003,31 @@ function BranchItem({
   active,
   index,
   onActivate,
+  onRename,
   onAddAssumption,
+  onUpdateAssumption,
   onArchive,
 }: {
   branch: HypothesisBranch;
   active: boolean;
   index: number;
   onActivate: (id: string) => void;
+  onRename: (id: string, name: string, description: string) => void;
   onAddAssumption: (id: string, text: string) => void;
+  onUpdateAssumption: (
+    branchId: string,
+    assumptionId: string,
+    update: { statement?: string; status?: "active" | "withdrawn" },
+  ) => void;
   onArchive: (branch: HypothesisBranch) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
+  const [editingBranch, setEditingBranch] = useState(false);
+  const [branchName, setBranchName] = useState(branch.name);
+  const [branchDescription, setBranchDescription] = useState(branch.description);
+  const [editingAssumptionId, setEditingAssumptionId] = useState<string>();
+  const [assumptionText, setAssumptionText] = useState("");
   return (
     <article
       className={`branch-item branch-color-${index % 3}${active ? " is-active" : ""}${branch.status === "archived" ? " is-archived" : ""}`}
@@ -1144,15 +2044,128 @@ function BranchItem({
           </span>
         )}
       </header>
-      <p>{branch.description}</p>
-      {branch.assumptions
-        .filter((item) => item.status === "active")
-        .map((item) => (
-          <div className="assumption" key={item.id}>
-            <Sparkles size={12} />
-            <span>{item.statement}</span>
+      {editingBranch ? (
+        <form
+          className="inline-form"
+          aria-label={`Edit ${branch.name}`}
+          onSubmit={(event) => {
+            event.preventDefault();
+            onRename(branch.id, branchName, branchDescription);
+            setEditingBranch(false);
+          }}
+        >
+          <label>
+            <span>Branch name</span>
+            <input
+              value={branchName}
+              onChange={(event) => setBranchName(event.target.value)}
+              required
+              autoFocus
+            />
+          </label>
+          <label>
+            <span>Description</span>
+            <textarea
+              rows={3}
+              value={branchDescription}
+              onChange={(event) => setBranchDescription(event.target.value)}
+              required
+            />
+          </label>
+          <div className="inline-form__actions">
+            <button type="button" className="text-button" onClick={() => setEditingBranch(false)}>
+              Cancel
+            </button>
+            <button className="button button--primary">Save branch</button>
           </div>
-        ))}
+        </form>
+      ) : (
+        <p>{branch.description}</p>
+      )}
+      {branch.assumptions.map((item) => {
+        const evidenceCount = new Set([
+          ...item.supportingEvidenceIds,
+          ...item.conflictingEvidenceIds,
+        ]).size;
+        return (
+          <div
+            className={`assumption${item.status === "withdrawn" ? " is-withdrawn" : ""}`}
+            key={item.id}
+          >
+            <Sparkles size={12} />
+            <div>
+              {editingAssumptionId === item.id ? (
+                <form
+                  className="assumption-form"
+                  aria-label={`Edit assumption in ${branch.name}`}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    onUpdateAssumption(branch.id, item.id, { statement: assumptionText });
+                    setEditingAssumptionId(undefined);
+                  }}
+                >
+                  <input
+                    value={assumptionText}
+                    onChange={(event) => setAssumptionText(event.target.value)}
+                    aria-label="Assumption statement"
+                    required
+                    autoFocus
+                  />
+                  <button className="icon-button icon-button--small" aria-label="Save assumption">
+                    <Check size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setEditingAssumptionId(undefined)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <span>{item.statement}</span>
+              )}
+              <small
+                className={`assumption__provenance${evidenceCount === 0 ? " is-missing" : ""}`}
+              >
+                {evidenceCount === 0 ? (
+                  <>
+                    <AlertTriangle size={12} /> No evidence linked. Add support from Evidence.
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={12} /> {evidenceCount} evidence{" "}
+                    {evidenceCount === 1 ? "source" : "sources"}
+                  </>
+                )}
+              </small>
+              {branch.status === "active" && editingAssumptionId !== item.id && (
+                <span className="assumption__actions">
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setAssumptionText(item.statement);
+                      setEditingAssumptionId(item.id);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      onUpdateAssumption(branch.id, item.id, {
+                        status: item.status === "withdrawn" ? "active" : "withdrawn",
+                      })
+                    }
+                  >
+                    {item.status === "withdrawn" ? "Restore" : "Withdraw"}
+                  </button>
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
       {adding && (
         <form
           className="assumption-form"
@@ -1177,6 +2190,17 @@ function BranchItem({
         </form>
       )}
       <footer>
+        {branch.status === "active" && (
+          <button
+            onClick={() => {
+              setBranchName(branch.name);
+              setBranchDescription(branch.description);
+              setEditingBranch(true);
+            }}
+          >
+            Edit branch
+          </button>
+        )}
         {branch.status === "active" && !active && (
           <button onClick={() => onActivate(branch.id)}>View branch</button>
         )}
@@ -1282,8 +2306,41 @@ function CompareControl({
   );
 }
 
+function ConsistencyIssueRow({
+  issue,
+  focused,
+  onFocus,
+}: {
+  issue: ConsistencyIssue;
+  focused: boolean;
+  onFocus: (issue: ConsistencyIssue) => void;
+}) {
+  const rowRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    rowRef.current?.focus({ preventScroll: true });
+  }, [focused]);
+  return (
+    <button
+      ref={rowRef}
+      className={`issue-row is-${issue.severity}${focused ? " is-focused" : ""}`}
+      aria-current={focused ? "true" : undefined}
+      onClick={() => onFocus(issue)}
+    >
+      <span>{issue.severity === "error" ? "!" : issue.severity === "warning" ? "△" : "?"}</span>
+      <div>
+        <strong>{issue.title}</strong>
+        <p>{issue.explanation}</p>
+      </div>
+    </button>
+  );
+}
+
 function ReportView(props: InspectorPanelProps) {
   const [note, setNote] = useState("");
+  const [noteClaimId, setNoteClaimId] = useState("");
+  const [noteEvidenceId, setNoteEvidenceId] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [toolPrepared, setToolPrepared] = useState(false);
   const preview = props.reportPreview;
@@ -1343,19 +2400,12 @@ function ReportView(props: InspectorPanelProps) {
       </div>
       <div className="issue-list">
         {props.replayCase.consistencyIssues.map((issue) => (
-          <button
-            className={`issue-row is-${issue.severity}`}
+          <ConsistencyIssueRow
             key={issue.id}
-            onClick={() => props.onFocusIssue(issue)}
-          >
-            <span>
-              {issue.severity === "error" ? "!" : issue.severity === "warning" ? "△" : "?"}
-            </span>
-            <div>
-              <strong>{issue.title}</strong>
-              <p>{issue.explanation}</p>
-            </div>
-          </button>
+            issue={issue}
+            focused={props.focusedIssueId === issue.id}
+            onFocus={props.onFocusIssue}
+          />
         ))}
       </div>
       {!preview ? (
@@ -1377,9 +2427,15 @@ function ReportView(props: InspectorPanelProps) {
         className="report-note-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!note.trim()) return;
-          props.onAddReportNote(note.trim());
+          if (!note.trim() || (!noteClaimId && !noteEvidenceId)) return;
+          props.onAddReportNote(
+            note.trim(),
+            noteClaimId ? [noteClaimId] : [],
+            noteEvidenceId ? [noteEvidenceId] : [],
+          );
           setNote("");
+          setNoteClaimId("");
+          setNoteEvidenceId("");
         }}
       >
         <label>
@@ -1391,7 +2447,38 @@ function ReportView(props: InspectorPanelProps) {
             placeholder="Add context without changing the underlying facts"
           />
         </label>
-        <button className="button button--secondary" disabled={!note.trim()}>
+        <label>
+          <span>Supporting observation</span>
+          <select value={noteClaimId} onChange={(event) => setNoteClaimId(event.target.value)}>
+            <option value="">None selected</option>
+            {props.replayCase.claims.map((claim) => (
+              <option key={claim.id} value={claim.id}>
+                {claim.statement}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Supporting evidence</span>
+          <select
+            value={noteEvidenceId}
+            onChange={(event) => setNoteEvidenceId(event.target.value)}
+          >
+            <option value="">None selected</option>
+            {props.replayCase.evidence
+              .filter((asset) => !asset.deleted)
+              .map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <small>Choose at least one source. REPLAY never attaches a citation silently.</small>
+        <button
+          className="button button--secondary"
+          disabled={!note.trim() || (!noteClaimId && !noteEvidenceId)}
+        >
           <MessageSquareText size={14} /> Add note
         </button>
       </form>
@@ -1401,6 +2488,9 @@ function ReportView(props: InspectorPanelProps) {
           {props.replayCase.reportNotes.map((item) => (
             <article key={item.id}>
               <p>{item.text}</p>
+              <p className="report-note-citations">
+                Sources: {[...item.claimIds, ...item.evidenceIds].join(", ")}
+              </p>
               <footer>
                 <span>
                   {item.createdBy === "agent" ? (
@@ -1492,6 +2582,16 @@ function ReportPreviewView({ preview }: { preview: ReportPreview }) {
         </div>
         <span>{preview.includedClaimIds.length} cited claims</span>
       </header>
+      {preview.missingRequirements.length > 0 && (
+        <section className="report-missing" role="status">
+          <strong>Not ready to finalize</strong>
+          <ul>
+            {preview.missingRequirements.map((requirement) => (
+              <li key={requirement}>{requirement}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {sections.map((section) => (
         <section key={section.id}>
           <h4>{section.title}</h4>
@@ -1501,12 +2601,15 @@ function ReportPreviewView({ preview }: { preview: ReportPreview }) {
                 <span className={`certainty-dot is-${statement.certainty}`} />
                 {statement.text}
                 {(statement.citations.claimIds.length > 0 ||
-                  statement.citations.evidenceIds.length > 0) && (
+                  statement.citations.evidenceIds.length > 0 ||
+                  statement.citations.workspacePaths.length > 0) && (
                   <small>
                     [
-                    {[...statement.citations.claimIds, ...statement.citations.evidenceIds].join(
-                      ", ",
-                    )}
+                    {[
+                      ...statement.citations.claimIds,
+                      ...statement.citations.evidenceIds,
+                      ...statement.citations.workspacePaths,
+                    ].join(", ")}
                     ]
                   </small>
                 )}
@@ -1536,6 +2639,12 @@ function FinalizationDialog({
 }) {
   const [checks, setChecks] = useState({ unresolved: false, limitations: false, facts: false });
   const [confirming, setConfirming] = useState(false);
+  const firstCheckRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>({
+    active: !confirming,
+    initialFocusRef: firstCheckRef,
+    onEscape: onCancel,
+  });
   const ready = checks.unresolved && checks.limitations && checks.facts;
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1560,10 +2669,12 @@ function FinalizationDialog({
       }}
     >
       <section
+        ref={dialogRef}
         className="dialog finalization-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="finalize-title"
+        tabIndex={-1}
       >
         <header>
           <div>
@@ -1581,6 +2692,7 @@ function FinalizationDialog({
         <form onSubmit={submit}>
           <label>
             <input
+              ref={firstCheckRef}
               name="unresolvedQuestionsReviewed"
               type="checkbox"
               checked={checks.unresolved}
@@ -1654,13 +2766,20 @@ function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>({
+    initialFocusRef: cancelButtonRef,
+    onEscape: onCancel,
+  });
   return (
     <div className="dialog-backdrop" role="presentation">
       <section
+        ref={dialogRef}
         className="dialog confirm-dialog"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
+        tabIndex={-1}
       >
         <div className={`dialog-icon${destructive ? " is-destructive" : ""}`}>
           {destructive ? <Trash2 size={20} /> : <ShieldCheck size={20} />}
@@ -1668,7 +2787,7 @@ function ConfirmDialog({
         <h2 id="confirm-title">{title}</h2>
         <p>{description}</p>
         <footer>
-          <button className="button button--quiet" onClick={onCancel}>
+          <button ref={cancelButtonRef} className="button button--quiet" onClick={onCancel}>
             Cancel
           </button>
           <button

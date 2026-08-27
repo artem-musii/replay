@@ -27,7 +27,7 @@ Calm, exacting, humane. The product should create the confidence of a carefully 
 ## Design Principles
 
 1. Keep the difference visible: observation, memory, uncertainty, dispute, and inference must never collapse into one style or one sentence.
-2. Share one inspectable model: every human and agent action must affect the same visible scene and leave an activity trail.
+2. Share one inspectable model: factual UI and agent mutations use the same canonical command layer and durable activity; read/UI-only tool invocations remain visibly auditable in a separate session log. WebMCP cancellation before primary persistence records neither layer, while a post-save cancellation is compensated or surfaced as audited persistence failure.
 3. Let geometry lead: the scene and timeline are the work surface; inspectors support them instead of competing with them.
 4. Earn trust through restraint: neutral language, deterministic checks, explicit provenance, and reversible actions are more valuable than spectacle.
 5. Design the demo as a real workflow: a judge should understand the problem in ten seconds and the WebMCP advantage in thirty.

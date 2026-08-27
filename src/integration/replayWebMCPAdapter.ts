@@ -5,10 +5,12 @@ import {
   getRecentActivity,
   getWorkspaceState,
   validateConsistency,
+  type ActivityEvent,
   type ConsistencyValidationScope,
   type ReplayCase,
   type ReplayCommandResult,
   type ReplayEngine,
+  type ReplayStagedCommand,
   type WorkspaceItemType as DomainWorkspaceItemType,
   type WorkspaceMode,
 } from "../domain";
@@ -16,20 +18,29 @@ import type {
   ActivityAuthorFilter,
   ReplayAdapterResult,
   ReplayInvocationContext,
+  ReplayToolInvocationAudit,
   ReplayWebMCPAdapter,
   ReplayWebMCPCommand,
   WorkspaceItemType,
   WorkspaceSection,
 } from "../webmcp";
+import { ReplayWebMCPContractError } from "../webmcp";
 
 export interface ReplayAdapterUiBridge {
   getCase: () => ReplayCase;
   hasReportPreview: () => boolean;
-  persistCase?: (replayCase: ReplayCase) => Promise<void>;
+  persistCase?: (
+    replayCase: ReplayCase,
+    options: Readonly<{ expectedCaseVersion: number; compensation?: true }>,
+  ) => Promise<void>;
   setReportPreview: (preview: ReturnType<typeof buildReportPreview>) => void;
   setAgentWorking: (active: boolean, toolName?: string) => void;
   revealAffected: (ids: readonly string[]) => void;
+  focusIssue: (issueId: string, affectedIds: readonly string[]) => void;
   setComparison: (ids: string[]) => void;
+  getVisibleActivity?: () => readonly ActivityEvent[];
+  recordToolInvocation?: (audit: ReplayToolInvocationAudit) => void;
+  getMutationBlockReason?: () => string | undefined;
 }
 
 function resultFromDomain(result: ReplayCommandResult): ReplayAdapterResult {
@@ -38,6 +49,7 @@ function resultFromDomain(result: ReplayCommandResult): ReplayAdapterResult {
     message: result.message,
     caseVersion: result.caseVersion,
     ...(result.ok && result.activityId ? { activityId: result.activityId } : {}),
+    ...(result.ok && result.idempotent ? { idempotent: true } : {}),
     affectedIds: result.affectedIds,
     issues: result.issues,
     ...(!result.ok ? { code: result.error.code } : {}),
@@ -84,16 +96,120 @@ function id(prefix: string, requestId: string): string {
   return `${prefix}-${requestId}`.slice(0, 128);
 }
 
+function newSceneActorId(replayCase: ReplayCase): string {
+  const existingActorIds = new Set(replayCase.actors.map((actor) => actor.id));
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const candidate = `actor-${crypto.randomUUID()}`;
+    if (!existingActorIds.has(candidate)) return candidate;
+  }
+  throw new Error("Unable to allocate a unique scene actor ID.");
+}
+
+function adapterFailure(
+  replayCase: ReplayCase,
+  code: string,
+  message: string,
+): ReplayAdapterResult {
+  return {
+    ok: false,
+    message,
+    code,
+    caseVersion: replayCase.caseVersion,
+    affectedIds: [],
+    issues: replayCase.consistencyIssues,
+  };
+}
+
 export function createReplayWebMCPAdapter(
   engine: ReplayEngine,
   ui: ReplayAdapterUiBridge,
 ): ReplayWebMCPAdapter {
-  const execute = async (
+  let mutationQueue: Promise<void> = Promise.resolve();
+
+  const serializeMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const previous = mutationQueue;
+    let release: (() => void) | undefined;
+    mutationQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release?.();
+    }
+  };
+
+  const settleStagedMutation = async (
+    staged: ReplayStagedCommand,
+    context: ReplayInvocationContext,
+  ): Promise<ReplayAdapterResult> => {
+    if (!staged.result.ok || !staged.changed) {
+      return resultFromDomain(staged.commit({ signal: context.signal }));
+    }
+
+    let persistenceCompleted = false;
+    const liveBefore = engine.getState();
+    const stagedState = staged.state;
+    try {
+      ensureNotAborted(context);
+      if (ui.persistCase) {
+        await ui.persistCase(stagedState, {
+          expectedCaseVersion: liveBefore.caseVersion,
+        });
+        persistenceCompleted = true;
+      }
+      ensureNotAborted(context);
+      const committed = staged.commit({ signal: context.signal });
+      if (!committed.ok && persistenceCompleted && ui.persistCase) {
+        try {
+          await ui.persistCase(engine.getState(), {
+            expectedCaseVersion: stagedState.caseVersion,
+            compensation: true,
+          });
+        } catch {
+          return adapterFailure(
+            engine.getState(),
+            "PERSISTENCE_FAILED",
+            "The case changed during persistence and the durable rollback could not be confirmed. The live mutation was not committed.",
+          );
+        }
+      }
+      return resultFromDomain(committed);
+    } catch (error) {
+      staged.discard();
+      let rollbackFailed = false;
+      if (persistenceCompleted && ui.persistCase) {
+        try {
+          await ui.persistCase(engine.getState(), {
+            expectedCaseVersion: stagedState.caseVersion,
+            compensation: true,
+          });
+        } catch {
+          rollbackFailed = true;
+        }
+      }
+      if (context.signal.aborted && !rollbackFailed) {
+        throw context.signal.reason ?? error;
+      }
+      const detail = error instanceof Error ? error.message : "The local save failed.";
+      return adapterFailure(
+        engine.getState(),
+        "PERSISTENCE_FAILED",
+        rollbackFailed
+          ? `The mutation was not committed, but durable rollback could not be confirmed: ${detail}`
+          : `The mutation was not committed because persistence failed: ${detail}`,
+      );
+    }
+  };
+
+  const executeUnlocked = async (
     command: ReplayWebMCPCommand,
     context: ReplayInvocationContext,
   ): Promise<ReplayAdapterResult> => {
     ensureNotAborted(context);
     const replayCase = ui.getCase();
+    const blockedReason = ui.getMutationBlockReason?.();
     const payload = command.payload;
     const meta = mutationMeta(command);
     let domainCommand: Record<string, unknown>;
@@ -101,7 +217,7 @@ export function createReplayWebMCPAdapter(
     switch (command.type) {
       case "upsert_scene_actor": {
         const actorId =
-          typeof payload.actorId === "string" ? payload.actorId : id("actor", command.requestId);
+          typeof payload.actorId === "string" ? payload.actorId : newSceneActorId(replayCase);
         const existing = replayCase.actors.find((actor) => actor.id === actorId);
         const position = payload.position as { x: number; y: number };
         const dimensions = payload.dimensions as { width: number; length: number };
@@ -151,6 +267,67 @@ export function createReplayWebMCPAdapter(
         };
         break;
       }
+      case "propose_scene_changes": {
+        const changes = payload.changes as Array<
+          | {
+              kind: "actor-pose";
+              actorId: string;
+              proposedPose: { x: number; y: number; rotationDeg: number };
+            }
+          | {
+              kind: "trajectory-set";
+              trajectoryId?: string;
+              actorId: string;
+              branchId: string;
+              keyframes: Array<{
+                id?: string;
+                timeMs: number;
+                x: number;
+                y: number;
+                rotationDeg: number;
+              }>;
+              visible: boolean;
+            }
+        >;
+        domainCommand = {
+          type: "proposal.create",
+          ...meta,
+          proposalId:
+            typeof payload.proposalId === "string"
+              ? payload.proposalId
+              : id("proposal", command.requestId),
+          title: payload.title,
+          rationale: payload.rationale,
+          revisionSummary: "Initial coordinated scene proposal from Site Tools.",
+          changes: changes.map((change) =>
+            change.kind === "actor-pose"
+              ? {
+                  kind: change.kind,
+                  actorId: change.actorId,
+                  proposedPose: {
+                    x: change.proposedPose.x * 100,
+                    y: change.proposedPose.y * 100,
+                    rotationDeg: change.proposedPose.rotationDeg,
+                  },
+                }
+              : {
+                  kind: change.kind,
+                  ...(change.trajectoryId ? { trajectoryId: change.trajectoryId } : {}),
+                  actorId: change.actorId,
+                  branchId: change.branchId,
+                  keyframes: change.keyframes.map((frame) => ({
+                    ...(frame.id ? { id: frame.id } : {}),
+                    timeMs: frame.timeMs,
+                    x: frame.x * 100,
+                    y: frame.y * 100,
+                    rotationDeg: frame.rotationDeg,
+                  })),
+                  visible: change.visible,
+                },
+          ),
+        };
+        break;
+      }
       case "mark_impact_event": {
         const location = payload.location as { x: number; y: number };
         domainCommand = {
@@ -174,6 +351,18 @@ export function createReplayWebMCPAdapter(
           other: "unknown",
         };
         const sourceIds = payload.sourceIds as string[];
+        const knownSourceIds = new Set([
+          ...replayCase.evidence.map((asset) => asset.id),
+          ...replayCase.claims.map((claim) => claim.id),
+        ]);
+        const unknownSourceIds = sourceIds.filter((sourceId) => !knownSourceIds.has(sourceId));
+        if (unknownSourceIds.length > 0) {
+          return adapterFailure(
+            replayCase,
+            "NOT_FOUND",
+            `Damage source ${unknownSourceIds.join(", ")} ${unknownSourceIds.length === 1 ? "does" : "do"} not exist.`,
+          );
+        }
         domainCommand = {
           type: "damage.mark",
           ...meta,
@@ -234,9 +423,15 @@ export function createReplayWebMCPAdapter(
         const targetMap: Record<string, string> = { event: "timeline-event" };
         const targetType = targetMap[String(payload.targetType)] ?? payload.targetType;
         if (
-          !["claim", "timeline-event", "actor", "trajectory", "damage", "hypothesis"].includes(
-            String(targetType),
-          )
+          ![
+            "claim",
+            "timeline-event",
+            "actor",
+            "trajectory",
+            "damage",
+            "hypothesis",
+            "assumption",
+          ].includes(String(targetType))
         ) {
           return {
             ok: false,
@@ -251,6 +446,9 @@ export function createReplayWebMCPAdapter(
           type: "evidence.link",
           ...meta,
           evidenceId: payload.evidenceId,
+          ...(typeof payload.annotationId === "string"
+            ? { annotationId: payload.annotationId }
+            : {}),
           targetType,
           targetId: payload.targetId,
         };
@@ -258,6 +456,8 @@ export function createReplayWebMCPAdapter(
       }
       case "create_open_question": {
         const relatedIds = payload.relatedIds as string[];
+        const relatedClaimIds = new Set(replayCase.claims.map((claim) => claim.id));
+        const relatedBranchIds = new Set(replayCase.branches.map((branch) => branch.id));
         domainCommand = {
           type: "question.add",
           ...meta,
@@ -266,39 +466,33 @@ export function createReplayWebMCPAdapter(
           importance: payload.importance,
           rankingReasons:
             payload.importance === "blocking" ? ["blocks-report"] : ["contextual-detail"],
-          relatedClaimIds: relatedIds.filter((relatedId) =>
-            replayCase.claims.some((claim) => claim.id === relatedId),
-          ),
+          relatedClaimIds: relatedIds.filter((relatedId) => relatedClaimIds.has(relatedId)),
           relatedSceneObjectIds: relatedIds.filter(
-            (relatedId) =>
-              replayCase.actors.some((actor) => actor.id === relatedId) ||
-              replayCase.trajectories.some((trajectory) => trajectory.id === relatedId) ||
-              replayCase.timelineEvents.some((event) => event.id === relatedId),
+            (relatedId) => !relatedClaimIds.has(relatedId) && !relatedBranchIds.has(relatedId),
           ),
-          relatedBranchIds: relatedIds.filter((relatedId) =>
-            replayCase.branches.some((branch) => branch.id === relatedId),
-          ),
+          relatedBranchIds: relatedIds.filter((relatedId) => relatedBranchIds.has(relatedId)),
         };
         break;
       }
-      case "fork_hypothesis":
+      case "fork_hypothesis": {
+        const assumptions = payload.assumptions as Array<{
+          statement: string;
+          relatedIds: string[];
+        }>;
         domainCommand = {
           type: "hypothesis.fork",
           ...meta,
           parentBranchId: payload.sourceBranchId,
           name: payload.name,
           description: payload.description,
-          assumptions: (
-            payload.assumptions as Array<{ statement: string; relatedIds: string[] }>
-          ).map((assumption) => ({
+          assumptions: assumptions.map((assumption) => ({
             statement: assumption.statement,
-            supportingEvidenceIds: assumption.relatedIds.filter((relatedId) =>
-              replayCase.evidence.some((asset) => asset.id === relatedId),
-            ),
+            supportingEvidenceIds: assumption.relatedIds,
             conflictingEvidenceIds: [],
           })),
         };
         break;
+      }
       case "update_hypothesis_assumption": {
         const assumption = payload.assumption as
           { statement: string; relatedIds: string[] } | undefined;
@@ -344,10 +538,35 @@ export function createReplayWebMCPAdapter(
         };
     }
     ensureNotAborted(context);
-    const result = engine.execute(domainCommand, { signal: context.signal });
-    if (result.ok) await ui.persistCase?.(engine.getState());
-    return resultFromDomain(result);
+    const staged = engine.stage(
+      domainCommand,
+      { signal: context.signal },
+      {
+        operation: "webmcp-command",
+        type: command.type,
+        actor: command.actor,
+        origin: command.origin,
+        payload: command.payload,
+      },
+    );
+    if (blockedReason && staged.changed) {
+      staged.discard();
+      return {
+        ok: false,
+        message: blockedReason,
+        code: "VERSION_CONFLICT",
+        caseVersion: replayCase.caseVersion,
+        affectedIds: [],
+        issues: replayCase.consistencyIssues,
+      };
+    }
+    return settleStagedMutation(staged, context);
   };
+
+  const execute = (
+    command: ReplayWebMCPCommand,
+    context: ReplayInvocationContext,
+  ): Promise<ReplayAdapterResult> => serializeMutation(() => executeUnlocked(command, context));
 
   return {
     getLifecycle() {
@@ -383,70 +602,164 @@ export function createReplayWebMCPAdapter(
     },
     getRecentActivity(input: Readonly<{ limit: number; author: ActivityAuthorFilter }>, context) {
       ensureNotAborted(context);
-      const activity = getRecentActivity(ui.getCase(), input.limit);
-      return input.author === "all"
-        ? activity
-        : activity.filter((item) => item.author === input.author);
+      const replayCase = ui.getCase();
+      const activity = ui.getVisibleActivity
+        ? structuredClone([...ui.getVisibleActivity()]).sort((left, right) =>
+            right.createdAt.localeCompare(left.createdAt),
+          )
+        : getRecentActivity(replayCase, replayCase.activity.length);
+      const filtered =
+        input.author === "all" ? activity : activity.filter((item) => item.author === input.author);
+      return filtered.slice(0, input.limit);
     },
     validateConsistency(input, context) {
       ensureNotAborted(context);
-      return validateConsistency(ui.getCase(), {
+      const replayCase = ui.getCase();
+      if (
+        input.branchId !== undefined &&
+        !replayCase.branches.some((branch) => branch.id === input.branchId)
+      ) {
+        throw new ReplayWebMCPContractError(
+          "NOT_FOUND",
+          `Hypothesis branch ${input.branchId} does not exist.`,
+        );
+      }
+      return validateConsistency(replayCase, {
         scope: scopeForWebMCP(input.scope),
         ...(input.branchId ? { branchId: input.branchId } : {}),
       });
     },
     compareHypotheses(input, context) {
       ensureNotAborted(context);
+      const replayCase = ui.getCase();
       const [baseline, ...alternatives] = input.branchIds;
       if (!baseline || alternatives.length === 0)
-        throw new Error("Choose at least two hypothesis branches.");
-      ui.setComparison([...input.branchIds]);
-      return {
+        throw new ReplayWebMCPContractError(
+          "INVALID_INPUT",
+          "Choose at least two hypothesis branches.",
+        );
+      const unknownBranchIds = input.branchIds.filter(
+        (branchId) => !replayCase.branches.some((branch) => branch.id === branchId),
+      );
+      if (unknownBranchIds.length > 0) {
+        throw new ReplayWebMCPContractError(
+          "NOT_FOUND",
+          `Hypothesis branch ${unknownBranchIds.join(", ")} ${unknownBranchIds.length === 1 ? "does" : "do"} not exist.`,
+        );
+      }
+      const comparison = {
         branchIds: [...input.branchIds],
-        comparisonMode: input.comparisonMode,
         pairwiseComparisons: alternatives.map((alternative) =>
-          compareHypotheses(ui.getCase(), baseline, alternative),
+          compareHypotheses(replayCase, baseline, alternative),
         ),
       };
+      ensureNotAborted(context);
+      ui.setComparison([...input.branchIds]);
+      return comparison;
     },
     focusWorkspaceItem(input, context) {
-      ensureNotAborted(context);
-      const replayCase = ui.getCase();
-      const mode =
-        (input.workspaceMode as WorkspaceMode | undefined) ?? workspaceModeForItem(input.itemType);
-      const command = {
-        type: "workspace.focus",
-        actor: "agent",
-        origin: "webmcp",
-        itemType: domainItemType(input.itemType),
-        itemId:
-          input.itemType === "issue"
-            ? (replayCase.reportSnapshots.at(-1)?.id ?? "report-preview")
-            : input.itemId,
-        workspaceMode: mode,
-      };
-      return resultFromDomain(engine.execute(command));
+      return serializeMutation(async () => {
+        ensureNotAborted(context);
+        const replayCase = ui.getCase();
+        if (input.itemType === "issue") {
+          const issue = replayCase.consistencyIssues.find(
+            (candidate) => candidate.id === input.itemId,
+          );
+          if (!issue) {
+            return {
+              ok: false,
+              message: `Consistency issue ${input.itemId} does not exist.`,
+              code: "NOT_FOUND",
+              caseVersion: replayCase.caseVersion,
+              affectedIds: [],
+              issues: replayCase.consistencyIssues,
+            };
+          }
+          const focusResult = await settleStagedMutation(
+            engine.stage(
+              {
+                type: "workspace.focus",
+                actor: "agent",
+                origin: "webmcp",
+                itemType: "report",
+                itemId: replayCase.reportSnapshots.at(-1)?.id ?? "report-preview",
+                workspaceMode: "report",
+              },
+              { signal: context.signal },
+            ),
+            context,
+          );
+          if (!focusResult.ok) return focusResult;
+          ui.focusIssue(issue.id, issue.affectedIds);
+          return {
+            ...focusResult,
+            message: `Focused consistency issue: ${issue.title}`,
+            affectedIds: issue.affectedIds,
+          };
+        }
+        const mode =
+          (input.workspaceMode as WorkspaceMode | undefined) ??
+          workspaceModeForItem(input.itemType);
+        return settleStagedMutation(
+          engine.stage(
+            {
+              type: "workspace.focus",
+              actor: "agent",
+              origin: "webmcp",
+              itemType: domainItemType(input.itemType),
+              itemId: input.itemId,
+              workspaceMode: mode,
+            },
+            { signal: context.signal },
+          ),
+          context,
+        );
+      });
     },
     revertAgentAction(input, context) {
-      ensureNotAborted(context);
-      const activity = ui.getCase().activity.find((item) => item.id === input.activityId);
-      if (!activity?.requestId)
-        return {
-          ok: false,
-          message: "This activity has no reversible agent request ID.",
-          code: "UNSAFE_REVERT",
-          caseVersion: ui.getCase().caseVersion,
-          affectedIds: [],
-          issues: [],
-        };
-      return resultFromDomain(
-        engine.revertAgentAction(activity.requestId, {
-          actor: "agent",
-          origin: "webmcp",
-          requestId: input.requestId,
-          expectedVersion: input.expectedVersion,
-        }),
-      );
+      return serializeMutation(async () => {
+        ensureNotAborted(context);
+        const blockedReason = ui.getMutationBlockReason?.();
+        const activity = ui.getCase().activity.find((item) => item.id === input.activityId);
+        if (!activity?.requestId)
+          return {
+            ok: false,
+            message: "This activity has no reversible agent request ID.",
+            code: "UNSAFE_REVERT",
+            caseVersion: ui.getCase().caseVersion,
+            affectedIds: [],
+            issues: [],
+          };
+        const staged = engine.stageAgentActionRevert(
+          activity.requestId,
+          {
+            actor: "agent",
+            origin: "webmcp",
+            requestId: input.requestId,
+            expectedVersion: input.expectedVersion,
+          },
+          { signal: context.signal },
+          {
+            operation: "webmcp-agent-action-revert",
+            type: "revert_agent_action",
+            actor: "agent",
+            origin: "webmcp",
+            payload: { activityId: input.activityId },
+          },
+        );
+        if (blockedReason && staged.changed) {
+          staged.discard();
+          return {
+            ok: false,
+            message: blockedReason,
+            code: "VERSION_CONFLICT",
+            caseVersion: ui.getCase().caseVersion,
+            affectedIds: [],
+            issues: ui.getCase().consistencyIssues,
+          };
+        }
+        return settleStagedMutation(staged, context);
+      });
     },
     execute,
     buildReportPreview(input, context) {
@@ -461,6 +774,23 @@ export function createReplayWebMCPAdapter(
           affectedIds: [],
           issues: replayCase.consistencyIssues,
         };
+      if (input.branchId !== undefined) {
+        const branch = replayCase.branches.find((candidate) => candidate.id === input.branchId);
+        if (!branch) {
+          return adapterFailure(
+            replayCase,
+            "NOT_FOUND",
+            `Hypothesis branch ${input.branchId} does not exist.`,
+          );
+        }
+        if (branch.status !== "active") {
+          return adapterFailure(
+            replayCase,
+            "INVALID_INPUT",
+            `Hypothesis branch ${input.branchId} is archived and cannot be previewed.`,
+          );
+        }
+      }
       const preview = buildReportPreview(
         replayCase,
         input.branchId ? { branchIds: [input.branchId] } : {},
@@ -468,10 +798,18 @@ export function createReplayWebMCPAdapter(
       ui.setReportPreview(preview);
       return {
         ok: true,
-        message: "Built and opened a neutral report preview for human review.",
+        message:
+          preview.missingRequirements.length > 0
+            ? `Built and opened the preview with ${String(preview.missingRequirements.length)} missing requirements for human review.`
+            : "Built and opened a neutral report preview for human review.",
         caseVersion: replayCase.caseVersion,
         affectedIds: ["report-preview"],
         issues: replayCase.consistencyIssues,
+        data: {
+          previewVersion: preview.caseVersion,
+          missingRequirements: preview.missingRequirements,
+          unresolvedQuestionIds: preview.unresolvedQuestionIds,
+        },
       };
     },
     setAgentWorking(state) {
@@ -479,6 +817,9 @@ export function createReplayWebMCPAdapter(
     },
     revealAffected(ids) {
       ui.revealAffected(ids);
+    },
+    recordToolInvocation(audit) {
+      ui.recordToolInvocation?.(audit);
     },
   };
 }

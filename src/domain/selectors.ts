@@ -119,6 +119,7 @@ export function getWorkspaceState(replayCase: ReplayCase, section: WorkspaceStat
       return structuredClone({
         branches: replayCase.branches,
         activeBranchId: replayCase.activeBranchId,
+        proposals: replayCase.proposals,
       });
     case "report":
       return structuredClone({

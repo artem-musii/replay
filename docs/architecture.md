@@ -1,28 +1,27 @@
 # REPLAY architecture
 
-Status: implemented architecture snapshot, reconciled with the repository on 2026-08-27. This document distinguishes current behavior from release work that still requires manual or external verification.
+Status: implemented architecture snapshot, reconciled with the repository on 2026-08-28. This document distinguishes current behavior from release work that still requires manual or external verification.
 
 ## Architectural objective
 
-REPLAY keeps evidence, human-confirmed facts, reported information, uncertainty, disputes, and agent inference distinct in one local incident model. Human UI actions and imperative WebMCP tools both reach the same `ReplayEngine` command layer. WebMCP may prepare a report review, but only the human UI can confirm a claim or finalize an immutable report snapshot.
+REPLAY keeps evidence, human-confirmed facts, reported information, uncertainty, disputes, and agent inference distinct in one local incident model. Human UI actions and imperative WebMCP tools reach the same domain command/query layer. WebMCP may create a reversible coordinated-scene proposal or prepare report review, but only the human UI can adjust/accept/reject a proposal, confirm a claim, delete evidence, or finalize an immutable report snapshot.
 
 ```text
 Human UI                                WebMCP / Site Tools
    |                                             |
-   +-------------- command or query -------------+
-                         |
-                ReplayEngine / projections
-                         |
-       Zod validation -> reducer -> consistency
-                         |
-              committed in-memory ReplayCase
-                    /                   \
-          React subscription       post-command save
-                    |                   |
- SVG scene / timeline / inspector   Dexie / IndexedDB
+   +------- same validated command or query -----+
+   |                                             |
+engine.execute(...)                    engine.stage(...)
+live commit + notify                   isolated complete engine copy
+   |                                             |
+React + queued CAS save                CAS save staged ReplayCase
+   |                                             |
+Dexie / IndexedDB                      stage.commit() + notify React
+                                                 |
+                              post-save abort/conflict -> compensation
 ```
 
-The engine commit and IndexedDB save are deliberately shown as separate steps. The current application does not claim a single transaction spanning React state, the command engine, and Dexie.
+The paths share command semantics but deliberately differ in persistence order. The human UI can commit live before its queued save; WebMCP keeps a mutation isolated until its staged case saves successfully. The current application does not claim one physical transaction spanning React state, the command engine, browser paint, and Dexie.
 
 ## Runtime and dependencies
 
@@ -44,33 +43,37 @@ There is no Zustand or Immer store. `package.json` contains neither package.
 
 ### Domain model and validation
 
-`src/domain/models.ts` defines the TypeScript vocabulary for cases, actors, trajectories, events, evidence and annotations, claims, branches, questions, issues, activity, report notes, and snapshots. `src/domain/schema.ts` supplies strict persisted-shape validation. `src/domain/importExport.ts` performs cross-record reference checks for seed, import, engine state, and persistence loads.
+`src/domain/models.ts` defines the TypeScript vocabulary for cases, actors, trajectories, events, evidence and annotation links, claims, branches, questions, agent proposals/revisions/decisions, issues, activity, report notes, and snapshots. `src/domain/schema.ts` supplies strict persisted-shape validation. `src/domain/importExport.ts` performs migration, unsigned-import trust reset, and cross-record reference checks for seed, import, engine state, and persistence loads.
 
 Pure projections and deterministic rules stay outside React:
 
 - `src/domain/interpolation.ts` derives an actor pose at a time;
 - `src/domain/consistency.ts` emits structured issues without deciding fault;
 - `src/domain/report.ts` builds the evidence-bound preview;
-- `src/domain/compare.ts` compares branches without ranking one as true.
+- `src/domain/hypotheses.ts` compares branches without ranking one as true.
 
 ### ReplayEngine command boundary
 
-`src/domain/engine.ts` is the canonical mutation boundary. Both UI handlers in `Workspace.tsx` and the adapter in `src/integration/replayWebMCPAdapter.ts` construct domain commands and call `engine.execute(...)`.
+`src/domain/engine.ts` is the canonical mutation boundary. UI handlers in `Workspace.tsx` construct domain commands and call `engine.execute(...)`. The adapter constructs the same commands and evaluates them through `engine.stage(...)` (or `stageAgentActionRevert(...)`) so WebMCP persistence can complete before the staged engine state becomes live.
 
-For a normal mutation, the engine currently:
+For a normal direct/UI mutation, the engine currently:
 
 1. checks an already-aborted signal;
 2. validates the command with `ReplayCommandSchema`;
-3. returns an in-memory receipt or persisted activity match for a repeated request ID;
+3. binds the request ID to the validated caller intent, then returns an exact in-memory receipt or a synthesized persisted-activity match for the same semantic fingerprint;
 4. rejects an `expectedVersion` mismatch;
 5. applies authorization, lock, provenance, and branch rules in the reducer;
 6. recomputes deterministic consistency issues and attributable activity;
 7. validates references and the complete next case;
 8. replaces the in-memory case, records undo/receipt state, and notifies subscribers.
 
-Every successful engine command currently increments `caseVersion`, including persisted workspace focus and explicit validation commands. Playback time, hover, menus, toasts, comparison selection, and other React-only state do not.
+`engine.stage(...)` runs that same validation/reduction path on a cloned case, undo/redo history, and receipt map. Its returned state is isolated until `stage.commit()` verifies the live baseline version, adopts the full staged engine state, and notifies subscribers. Discarding a stage leaves the live engine untouched.
 
-History snapshots and the fast request-receipt map are process-memory features. Activity, including request IDs, is stored in the `ReplayCase`; after reload, that activity provides bounded duplicate-request recognition, but exact prior result payloads are not stored in a separate durable receipt table.
+Every successful engine command increments `caseVersion`, including proposal creation/revision/decision, persisted workspace focus, and explicit validation commands. Playback time, hover, menus, toasts, comparison selection, the replaceable report preview, and session invocation audit do not.
+
+`proposal.create` is authorized only for agent/WebMCP origin. It stores immutable baseline and proposed geometry in a pending proposal without applying it. `proposal.adjust`, `proposal.accept`, and `proposal.reject` require a human/UI origin. Acceptance first validates every target baseline and lock, then applies the whole latest revision or rejects without a partial scene change.
+
+History snapshots and the fast request-receipt map are process-memory features. Activity persists each request ID with its semantic caller-intent fingerprint, original activity `caseVersion`, summary, activity ID, and affected IDs. After reload, a matching request/intent returns a synthesized `idempotent: true` response at that original version; a different intent with the same ID returns `IDEMPOTENCY_CONFLICT`. Legacy activity without a fingerprint retains action-type-only compatibility. Exact prior result payloads are not stored in a separate durable receipt table.
 
 ### React state and UI projections
 
@@ -83,26 +86,30 @@ The implemented manual path includes:
 - claims with explicit certainty and human confirmation;
 - local evidence upload, metadata, point/rectangle annotations, linking, and deletion;
 - questions, hypothesis forks/assumptions, branch overlay, and side-by-side summaries;
+- visible proposal review with human-only adjustment, acceptance, and rejection;
 - consistency review, evidence-bound preview, reviewed report notes, human-only finalization, and local exports;
 - activity, undo/redo, safe agent-action reversion, and an in-workspace WebMCP inspector.
 
 Report previews are replaceable React state and are invalidated after content mutations. Finalized previews live inside immutable `ReportSnapshot` records.
 
-### Persistence sequencing
+### Persistence sequencing, migration, and recovery
 
-`src/persistence/database.ts` stores cases and evidence blobs in separate Dexie tables. Case records contain validated JSON metadata and blob keys, never object URLs.
+`src/persistence/database.ts` stores cases and evidence blobs in separate Dexie tables. Case records contain validated JSON metadata and blob keys, never object URLs. Current schema-v2 state uses `replay-local-vault-v2`; the former `replay-local-vault` remains readable for migration/recovery so a rolled-back schema-v1 build cannot reject or delete newer state.
 
 Current sequencing is:
 
-- on workspace mount, save the opened case;
-- after each engine notification, update React immediately and start `saveCase(state)`; the header reports saving, saved, or error;
-- for imperative WebMCP mutations, execute the same engine command and then await the adapter's `persistCase` callback before returning a successful tool result;
+- on workspace mount, request persistent browser storage where supported, acquire a best-effort exclusive Web Locks editing lease, and save only after write access is available;
+- after each direct/UI engine notification, update React immediately and queue compare-and-swap `saveCase(state)` with the prior case version; the header reports saving, saved, conflict, or error, and a failure pauses further mutations for retry or recovery;
+- for imperative WebMCP mutations, reduce the same engine command on an isolated complete engine copy, call `persistCase(stagedState)` with the live baseline as the expected version, then adopt/notify only after that save resolves and the live baseline still matches;
+- if a WebMCP primary save rejects, discard the stage and return `PERSISTENCE_FAILED` without changing live state; if cancellation or a live conflict occurs after a resolved save, compare-and-swap the pre-mutation live case back as explicit compensation, and return/audit `PERSISTENCE_FAILED` if compensation cannot be confirmed;
 - for local evidence upload, validate/decode/hash the image, write the blob first, then add domain metadata; delete the just-written blob if the metadata command fails;
-- for evidence deletion, tombstone/unlink domain metadata, then delete the local blob and revoke its object URL.
+- for evidence load, verify case ID, checksum, MIME metadata, blob MIME, and SHA-256 bytes before display;
+- for evidence deletion, scrub/tombstone/unlink domain metadata and save that case change, then attempt to delete the local blob and revoke its object URL; a failed physical delete is reported and may leave bytes for retry/site-data clearing; and
+- use `BroadcastChannel` to pause a stale tab after another writer saves the same case.
 
-The engine and Dexie do not share a rollback transaction. If a post-command save fails, the in-memory case can be newer than the durable record. The UI exposes a save error, and a WebMCP call can surface execution failure, but neither path rolls back the already-committed engine state. This is a known integrity/recovery limitation, not an atomicity claim.
+The engine and Dexie do not share a physical rollback transaction. On the human UI path, a post-commit save failure can leave the in-memory case newer than the durable record. On the WebMCP path, staging prevents a rejected primary save from changing live state, and compensation normally reconciles a resolved save followed by cancellation or a live-version conflict; failed compensation is the explicit residual risk. Web Locks are not universal, compare-and-swap is the final local-write guard, and browser paint is not transactionally coupled to the tool promise.
 
-Dexie schema version 2 removes the former global uniqueness constraint from evidence checksums so the same bytes can exist in different cases. The `ReplayCase` JSON shape remains schema version 1. Unsupported JSON schema versions are rejected; a general case-shape migration/quarantine UI is not implemented.
+Dexie table version 2 removes the former global uniqueness constraint from evidence checksums so the same bytes can exist in different cases. The `ReplayCase` JSON shape is schema version 2. Import/load migrates v1 by adding the v2 proposal, annotation-link, and report-workspace-path defaults. Malformed or unsupported local records are retained and can be downloaded as raw recovery JSON rather than silently deleted.
 
 ### WebMCP adapter and lifecycle
 
@@ -112,20 +119,22 @@ Imperative handlers:
 
 - validate narrow Zod/JSON Schema input;
 - set and clear visible agent-working state;
-- call a query or the canonical engine command;
-- await post-command case persistence for successful mutations;
+- call a query or stage the canonical engine command and its complete engine-side history/receipt effects;
+- compare-and-swap save a changed staged case, then commit/notify it; compensate a resolved save when a later cancellation/live conflict prevents commit;
 - reveal affected objects where applicable;
 - return a compact result with current version, affected IDs, issues, and visible state.
 
-Cancellation is checked before adapter work and before the synchronous engine command. A cancellation before engine commit leaves the case unchanged. Once the engine has committed, a later cancellation or persistence failure does not roll the command back. Cancellable fake-adapter lifecycle behavior is covered by registry tests; real-browser cancellation during storage remains a manual integration gate.
+Successful domain mutations already contain durable canonical activity. A successful/rejected read or UI-only invocation without a canonical activity ID is added to a separate capped session audit outside `ReplayCase`; `get_recent_activity` merges both views and filters by author before applying its limit. This preserves invocation visibility without changing case version, persistence, report eligibility, or canonical history.
 
-The visible declarative form is named `finalize_factual_report`, includes `tooldescription`, and intentionally omits `toolautosubmit`. `toolactivated` marks the form as Site Tools-prepared and opens the visible review; `toolcancel` clears the prepared state. The person must still check all acknowledgements, continue to a second confirmation, and click the final human control. No imperative finalization tool is registered.
+Cancellation is checked before adapter work, before staging, before the primary save, and before staged commit. A cancellation before primary persistence begins leaves live state, durable state, and both audit layers unchanged. If it arrives while a non-cancellable primary save is pending, the adapter waits for that save's outcome; a resolved save is compensated before `AbortError` is surfaced, while failed compensation returns/audits `PERSISTENCE_FAILED`. Deterministic adapter tests cover these branches; combined real-adapter + actual-Dexie/browser timing remains a manual integration gate.
+
+The visible declarative form is named `finalize_factual_report`, includes `tooldescription`, and intentionally omits `toolautosubmit`. In a compatible declarative client, `toolactivated` marks the form prepared and opens the visible review; `toolcancel` clears the prepared state. OpenAI's built-in Site Tools browser currently does not expose declarative form tools, although its ordinary browser capabilities may still interact with forms outside WebMCP. REPLAY's acknowledgements, second confirmation, and final control remain human-only policy boundaries, and no imperative finalization tool is registered.
 
 ### Reports and exports
 
 Reports are deterministic projections over a case version. Confirmed sections draw only from human-confirmed claims; reported, uncertain, disputed, and hypothetical material remains labelled. Human-reviewed report notes can enter a preview, while unreviewed agent notes remain excluded.
 
-Finalization creates an immutable snapshot through `report.finalize`, which the reducer rejects for agent/WebMCP origin. PDF, SVG, PNG, and JSON exports are explicit local UI actions. The JSON export contains the structured `ReplayCase`; it is not a complete binary-evidence backup. PDF and scene image exports render the currently visible scene, so final release verification must confirm that the visible branch/time matches the intended preview.
+Finalization creates an immutable snapshot through `report.finalize`, which the reducer rejects for agent/WebMCP origin. PDF, SVG, PNG, and JSON exports are explicit local UI actions. JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence blobs and contains the source case ID. The visible import flow creates a re-keyed local copy, then deliberately resets unsigned trust attestations and immutable snapshots. SVG/PNG render the visible scene. PDF embeds scene geometry only when the preview case version still equals the open case version; otherwise it explicitly omits newer geometry. Final release verification must still inspect downloaded files.
 
 ## Error and recovery behavior
 
@@ -133,23 +142,23 @@ Finalization creates an immutable snapshot through `report.finalize`, which the 
 - Invalid commands return structured domain failures; UI failures become toasts or save status.
 - Imports are size-bounded, strictly parsed, version-checked, and reference-validated.
 - Evidence upload rejects unsupported MIME types, files over 20 MiB, unreadable images, duplicates within the case, and images over the implemented decoded-dimension/pixel limits.
-- Invalid most-recent persisted cases are currently deleted after failed import validation rather than quarantined; there is no raw-record recovery UI.
+- Invalid/unsupported persisted records are skipped without deletion and offered through a raw-recovery download. The raw payload is not trusted or automatically repaired.
 - Export failures leave the case open and display an error.
 
 ## Deployment boundary
 
-The production artifact is a static application published over HTTPS from GitHub Pages. The repository includes Vite preview headers, provider-neutral `_headers`/`_redirects`, production CSP/referrer meta policies, and a Cloudflare Pages `wrangler.toml`. GitHub Pages does not honor `_headers`, so the full response-header contract remains a separate header-capable-host gate even though the public top-level Site Tools path was verified.
+The artifact is a static application publishable over HTTPS. The repository includes Vite preview headers, provider-neutral `_headers`/`_redirects`, production CSP/referrer meta policies, and a Cloudflare Pages `wrangler.toml`. GitHub Pages does not honor `_headers` and shares the `artem-musii.github.io` storage origin with other projects. The application refuses to render/register tools inside a frame, but the full response-header and dedicated-origin contract remains a separate header-capable-host gate.
 
 ## Verification status
 
-The recorded 2026-08-27 local snapshot reports:
+The historical `f980d28` snapshot recorded on 2026-08-27 reports:
 
 - lint, strict typecheck, and production build passed;
 - Vitest: **53/53 tests across 6 files**;
 - Playwright: **32/32 project runs in 17.1 seconds** (16 scenarios in desktop Chromium and 16 in mobile Chrome);
 - automated axe checks found no serious or critical violations in the four covered states.
 
-The deterministic suite covers engine invariants, schema/seed/import behavior, hypotheses/evidence/reports, interpolation/consistency, timeline components, and WebMCP registry behavior. A public in-app browser smoke run separately established the tested Site Tools lifecycle and direct invocation path, and Lighthouse audited the deployed workspace. Neither result establishes broad client compatibility, durable cross-layer atomicity, complete screen-reader/WCAG conformance, full response-header enforcement on GitHub Pages, exported-file fidelity, or the probabilistic model eval matrix.
+That baseline predates schema v2, proposals, CAS/recovery controls, session audit, the framing guard, and the current 19-tool inventory. New deterministic coverage exists for those areas, but the final candidate gate and exact counts are pending. The historical public Site Tools and Lighthouse results remain evidence for `f980d28`, not the current candidate. Current deployment, broad client compatibility, complete screen-reader/WCAG conformance, dedicated-origin headers, exported-file fidelity, and supported-model eval traces remain external gates.
 
 ## External architecture references
 
@@ -157,4 +166,4 @@ The deterministic suite covers engine invariants, schema/seed/import behavior, h
 - [Chrome WebMCP overview, updated 2026-08-07](https://developer.chrome.com/docs/ai/webmcp)
 - [Chrome Imperative API, updated 2026-08-20](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
 - [Chrome Declarative API, published 2026-05-18](https://developer.chrome.com/docs/ai/webmcp/declarative-api)
-- [OpenAI Site Tools, retrieved 2026-08-27](https://learn.chatgpt.com/docs/webmcp)
+- [OpenAI Site Tools, retrieved 2026-08-28](https://learn.chatgpt.com/docs/webmcp)

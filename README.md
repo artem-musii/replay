@@ -14,14 +14,16 @@ _Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The 
 
 ## Try it
 
-| Destination        | Link                                                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------ |
-| Live app           | [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)           |
-| Deterministic demo | [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) |
-| Public repository  | [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)           |
-| Demo video         | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.            |
+| Destination                   | Link                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| Historical live build         | [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)           |
+| Historical deterministic demo | [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) |
+| Public repository             | [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)           |
+| Demo video                    | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.            |
 
 To start without WebMCP, run the app locally and choose **Try the demo case**. Every core workspace feature remains available in an ordinary browser.
+
+The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. Opening `/#demo` resumes a valid saved seed-v1 or seed-v2 demo; use **Case options → Reset deterministic demo** to replace it with the current seed-v2 fixture.
 
 ## The problem
 
@@ -42,25 +44,28 @@ It is designed for drivers, claims-support teams, fleet managers, insurance inta
 
 ## Human and agent share one model
 
-The human interface and WebMCP tools do not maintain separate versions of the incident. Both call the same validated domain command engine.
+The human interface and WebMCP tools do not maintain separate incident models. Both use the same validated domain commands and authorization rules, with persistence sequencing appropriate to each caller.
 
 ```text
 Human edits scene or facts              Agent calls a Site Tool
               \                              /
                same canonical command/query layer
-                            |
-           validation, locks, versioning, activity
-                            |
+              /                              \
+   live commit + notify                 isolated engine stage
+   then queued CAS save                 CAS save, then adopt + notify
+              \                              /
          one visible case model + local persistence
                             |
        scene, timeline, inspector, report, activity
 ```
 
+The ordinary UI can therefore show a newer in-memory case while a queued save is pending and pauses further mutations if that save fails. A WebMCP mutation does not become live until its staged case passes the version-checked save; a post-save cancellation or live conflict is compensated before the invocation settles when possible.
+
 A useful collaboration cycle looks like this:
 
 1. The agent reads the live scene, claims, evidence, questions, and recent activity.
-2. It adds or changes visible geometry through narrow WebMCP tools.
-3. The person directly corrects, locks, confirms, disputes, or rejects that work.
+2. It makes a narrow attributed change, or creates a coordinated scene proposal whose geometry remains preview-only.
+3. The person directly corrects, locks, confirms, disputes, or rejects that work. Only the visible UI can adjust, accept, or reject a scene proposal.
 4. The agent rereads the newer activity and revalidates rather than overwriting it.
 5. Multiple unresolved explanations stay as comparable branches.
 6. The agent may prepare a cited report preview, but a visible human review and manual confirmation create the immutable snapshot.
@@ -78,6 +83,7 @@ In the workspace you can:
 - answer ranked questions and optionally turn an answer into a reported observation;
 - fork, annotate, activate, archive, restore, and compare hypotheses;
 - inspect deterministic consistency findings and attributed activity;
+- review reversible agent proposals before coordinated position or trajectory changes are applied;
 - undo, redo, or safely revert an eligible agent action;
 - build and human-review a neutral report; and
 - export the case as JSON, the scene as SVG or PNG, and the report as PDF.
@@ -86,19 +92,21 @@ In the workspace you can:
 
 REPLAY uses the current proposed imperative API, `document.modelContext.registerTool(...)`, behind runtime feature detection. Registration begins only while a workspace is open and is divided into lifecycle groups for base, scene, facts, hypothesis, and reviewed-report capabilities. Once a baseline exists, the hypothesis group includes `build_report_preview`; `add_report_note` joins only after a preview exists. Aborting a group unregisters it. Each invocation also receives its own cancellation signal.
 
-The current implementation defines 18 narrow imperative tools:
+The current implementation defines 19 narrow imperative tools:
 
-| Group                | Tools                                                                                                               |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Read and context     | `get_case_summary`, `get_workspace_state`, `get_recent_activity`, `validate_case_consistency`, `compare_hypotheses` |
-| Visible coordination | `focus_workspace_item`, `revert_agent_action`                                                                       |
-| Scene                | `upsert_scene_actor`, `set_actor_trajectory`, `mark_impact_event`, `mark_vehicle_damage`                            |
-| Facts and evidence   | `add_observation`, `link_evidence`, `create_open_question`                                                          |
-| Hypotheses           | `fork_hypothesis`, `update_hypothesis_assumption`                                                                   |
-| Report preview       | `build_report_preview` once a baseline reconstruction exists                                                        |
-| Reviewed report      | `add_report_note` after a preview exists                                                                            |
+| Group                | Tools                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Read and context     | `get_case_summary`, `get_workspace_state`, `get_recent_activity`, `validate_case_consistency`                     |
+| Visible coordination | `focus_workspace_item`, `revert_agent_action`, `compare_hypotheses`                                               |
+| Scene                | `upsert_scene_actor`, `set_actor_trajectory`, `propose_scene_changes`, `mark_impact_event`, `mark_vehicle_damage` |
+| Facts and evidence   | `add_observation`, `link_evidence`, `create_open_question`                                                        |
+| Hypotheses           | `fork_hypothesis`, `update_hypothesis_assumption`                                                                 |
+| Report preview       | `build_report_preview` once a baseline reconstruction exists                                                      |
+| Reviewed report      | `add_report_note` after a preview exists                                                                          |
 
-The visible final-review form is a declarative Site Tool named `finalize_factual_report`. It intentionally omits automatic submission. Agent-origin commands cannot confirm claims or finalize reports; those boundaries are also enforced in the domain layer.
+The visible final-review form implements the standards/Chrome declarative tool contract as `finalize_factual_report` and intentionally omits automatic submission. OpenAI's current ChatGPT/Codex Site Tools browser does not expose declarative HTML form tools as Site Tools. ChatGPT Work or Codex may still interact with a form through ordinary browser capabilities, but that interaction is not a WebMCP call and must not be treated as authorization to operate REPLAY's human confirmation controls. Agent/WebMCP-origin commands cannot confirm claims, accept/reject/adjust proposals, or finalize reports; those boundaries are enforced in the domain layer.
+
+Every imperative result is marked as potentially untrusted output. Read calls, visible UI-only calls, and rejected calls may appear in a capped session invocation audit without mutating the durable case; successful domain mutations append canonical activity. WebMCP mutations are staged, compare-and-swap saved, and then committed to the live engine. Repeating a completed request with the same validated semantic intent returns `idempotent: true` at the original receipt's `caseVersion` without another save; reusing the ID for different intent is rejected. A cancellation before primary persistence begins appends neither audit layer, while a cancellation after a resolved save invokes compensation.
 
 Read the complete contracts in [WebMCP tools](docs/webmcp-tools.md), [WebMCP evals](docs/webmcp-evals.md), and the dated [source of truth](docs/source-of-truth.md).
 
@@ -108,7 +116,7 @@ Primary external references: the [WebMCP Draft Community Group Report](https://w
 
 REPLAY is a static React 19 + strict TypeScript application built with Vite. The core workflow needs no server, account, analytics, location access, or runtime model API.
 
-- `src/domain/`: versioned model, Zod schemas, command engine, locks, optimistic versioning, idempotency, undo/redo, consistency, hypotheses, import/export, and report projections.
+- `src/domain/`: schema-v2 model, Zod schemas, command engine, locks, optimistic versioning, idempotency, proposals, undo/redo, consistency, hypotheses, import/export, and report projections.
 - `src/components/`: landing page, blank-case wizard, SVG scene, timeline, inspector, activity, report review, and WebMCP inspector.
 - `src/webmcp/`: schemas, tool definitions, annotations, instrumentation, registration lifecycle, feature detection, and debug state.
 - `src/integration/`: adapter from WebMCP operations to canonical domain queries and commands.
@@ -120,7 +128,7 @@ See [architecture](docs/architecture.md) and [data model](docs/data-model.md) fo
 
 ## Local setup
 
-Requirements: Node.js 22 or newer and npm.
+Requirements: Node.js 22.13 or newer and npm.
 
 ```bash
 npm ci
@@ -154,7 +162,7 @@ Vite prints the preview URL, normally `http://localhost:4173/`.
 3. Open **Case options → WebMCP inspector**.
 4. Confirm `document.modelContext` is detected and the expected lifecycle tools are registered.
 5. Inspect annotations and schemas. If the browser exposes `getTools()` and `executeTool()`, run a read-only tool from the inspector and confirm the returned case version and visible state.
-6. Execute the sequence in [docs/demo-script.md](docs/demo-script.md). Verify agent changes appear in the scene and activity feed before the result is treated as complete.
+6. Execute the sequence in [docs/demo-script.md](docs/demo-script.md). Verify the successful result agrees with the persisted case and committed engine state; capture browser-paint timing separately rather than assuming paint is transactionally coupled to the tool promise.
 
 ### ChatGPT/Codex Site Tools
 
@@ -177,20 +185,21 @@ npm run test:e2e
 npm run build
 ```
 
-The repository contains deterministic coverage for the domain engine, seed/schema/report rules, consistency and interpolation, timeline behavior, and WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
+The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, consistency and interpolation, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
 
-Verification on 2026-08-27 completed with lint and strict typecheck passing, **53/53 Vitest tests**, **32/32 Playwright runs** across desktop and mobile Chromium, and a successful production build. The Playwright run included blank-case path, event, impact, damage, lock, and evidence-annotation journeys plus axe checks of the landing page, blank wizard, workspace, and finalization dialog with no serious or critical violations. Lighthouse 13.4.1 scored the seeded strict local production preview **96 performance, 100 accessibility, 100 best practices, and 100 SEO**; the exact public application commit scored **100/100/100/100**, plus 100 for agentic browsing, with no binary failures. A direct public in-app browser run discovered the 17-tool baseline, executed read/mutate/revert operations, built the report preview, observed the 18-tool reviewed-report lifecycle, and verified the non-autosubmitting human finalization form. Supported-model probabilistic evals and screen-reader review remain separate release gates.
+**Historical baseline:** on 2026-08-27, commit `f980d28` recorded lint and strict typecheck passing, **53/53 Vitest tests**, **32/32 Playwright runs** across desktop/mobile Chromium, a successful build, Lighthouse results, and a direct public Site Tools smoke run. Those results remain useful historical evidence but do not verify the schema-v2/proposal release candidate. A clean final gate, candidate deployment, current tool-lifecycle smoke, browser/Lighthouse run, supported-model eval traces, and screen-reader review are pending and must be recorded against the final commit and URL before being claimed as current proof.
 
 See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, Site Tools steps, and how to record results without conflating deterministic tests with probabilistic evals.
 
 ## Privacy, safety, and limitations
 
-- Cases and uploaded evidence stay in this browser’s IndexedDB unless the person explicitly exports a file.
-- The core demo performs no evidence upload, analytics call, geolocation lookup, or runtime AI request.
+- Cases and uploaded evidence stay in this browser’s IndexedDB in manual mode unless the person explicitly exports a file. In Site Tools mode, structured text and metadata returned by a called tool can be processed by the connected agent/client and its model service; evidence image bytes are not returned by REPLAY tools.
+- The core app has no REPLAY-operated backend, analytics call, geolocation lookup, evidence-upload service, or runtime model API. This does not make an external Site Tools client part of the local-only boundary.
 - User statements, filenames, notes, and evidence metadata are treated as untrusted case data, not executable instructions.
 - “Confirmed” means explicitly confirmed by a person in REPLAY; it does not mean independently verified.
 - Consistency checks organize contradictions and missing information. They are not collision physics, truth assessment, legal advice, or a fault decision.
-- Local browser storage is not application-level encrypted. Do not use the prototype for highly sensitive production records without an appropriate security review and retention policy.
+- JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence bytes, and unsigned import deliberately clears or demotes local trust attestations and report snapshots.
+- Local browser storage is not application-level encrypted. GitHub Pages also shares the `artem-musii.github.io` storage origin with other projects. Do not use the prototype for highly sensitive production records without a dedicated origin, appropriate security review, and retention policy.
 
 Read [security and privacy notes](docs/security-and-privacy-notes.md) for the threat model and residual risks.
 
@@ -202,9 +211,9 @@ Prompts, dimensions, file sizes, visual-review criteria, and SHA-256 checksums a
 
 ## Deployment
 
-`npm run build` creates the static application in `dist/`. GitHub Actions publishes `main` to [GitHub Pages](https://artem-musii.github.io/replay-sol/) over HTTPS. The deployed build injects a restrictive CSP and no-referrer policy in HTML; provider-neutral `_headers` are also included for hosts such as Cloudflare Pages or Netlify that support full response policies.
+`npm run build` creates the static application in `dist/`. GitHub Actions publishes `main` to [GitHub Pages](https://artem-musii.github.io/replay-sol/) over HTTPS. The build injects a restrictive CSP and no-referrer policy in HTML; provider-neutral `_headers` are also included for hosts such as Cloudflare Pages or Netlify that support full response policies.
 
-GitHub Pages does not apply the repository’s `_headers` file, so response-only defenses such as `Permissions-Policy`, COOP/COEP, and `X-Frame-Options` are documented deployment limitations. Site Tools registration and invocation were nevertheless verified in the public top-level page. See [docs/deployment.md](docs/deployment.md) for the exact release record and the stricter-host alternative.
+GitHub Pages does not apply the repository’s `_headers` file, so response-only defenses such as `Permissions-Policy`, COOP/COEP, and `X-Frame-Options` remain deployment limitations. The current application also refuses to render the workspace or register tools when framed; that runtime guard complements but does not replace response headers. The historical Site Tools result predates the current candidate, whose deployment verification is pending. See [docs/deployment.md](docs/deployment.md) for the release record and stricter-host alternative.
 
 ## Project documents
 

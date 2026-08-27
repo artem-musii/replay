@@ -14,7 +14,7 @@
   },
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "vite",
@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
-    "@eslint/js": "9.39.5",
+    "@eslint/js": "10.0.1",
     "@playwright/test": "1.62.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
@@ -50,8 +50,8 @@
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.0",
     "@vitest/coverage-v8": "4.1.11",
-    "eslint": "9.39.5",
-    "eslint-plugin-react-hooks": "7.0.1",
+    "eslint": "10.9.1",
+    "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.4.26",
     "fake-indexeddb": "6.2.5",
     "jsdom": "28.0.0",

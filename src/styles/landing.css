@@ -103,7 +103,7 @@
   flex-wrap: wrap;
   gap: 18px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 .landing-hero__assurances li {
@@ -126,7 +126,7 @@
   margin-top: 16px;
 }
 .resume-case span {
-  font-size: 0.59rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
 }
@@ -177,7 +177,7 @@
   gap: 24px;
   padding: 7px 7px 0;
   color: var(--muted);
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   letter-spacing: 0.04em;
 }
 .visual-caption__index {
@@ -236,7 +236,7 @@
 .landing-step__number {
   font-family: "SFMono-Regular", ui-monospace, monospace;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .landing-step h3 {
   font-size: 1.55rem;
@@ -302,12 +302,12 @@
   border: 1px solid var(--rule-strong);
   border-radius: 50%;
   font:
-    0.62rem "SFMono-Regular",
+    0.75rem "SFMono-Regular",
     ui-monospace,
     monospace;
 }
 .collaboration-loop span {
-  font-size: 0.69rem;
+  font-size: 0.75rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--agent);
@@ -322,7 +322,7 @@
 }
 .collaboration-loop small {
   color: var(--muted);
-  font-size: 0.69rem;
+  font-size: 0.75rem;
 }
 .collaboration-note {
   grid-column: 2;
@@ -394,7 +394,7 @@
   align-items: center;
   gap: 30px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .landing-footer p {
   max-width: 54ch;
@@ -536,7 +536,7 @@
 }
 .choice-tile span {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   align-self: start;
 }
 .choice-tile:hover {
@@ -560,7 +560,7 @@
   border: 1px solid var(--rule);
   border-radius: 7px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   text-transform: capitalize;
 }
 .wizard-aside {
@@ -570,7 +570,7 @@
   max-width: 255px;
   margin: 0 0 56px 46px;
   color: var(--muted);
-  font-size: 0.73rem;
+  font-size: 0.75rem;
   line-height: 1.55;
 }
 .wizard-aside svg {
