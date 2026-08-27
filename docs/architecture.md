@@ -146,7 +146,7 @@ The recorded 2026-08-27 local snapshot reports:
 
 - lint, strict typecheck, and production build passed;
 - Vitest: **53/53 tests across 6 files**;
-- Playwright: **32/32 project runs in 16.0 seconds** (16 scenarios in desktop Chromium and 16 in mobile Chrome);
+- Playwright: **32/32 project runs in 17.1 seconds** (16 scenarios in desktop Chromium and 16 in mobile Chrome);
 - automated axe checks found no serious or critical violations in the four covered states.
 
 The deterministic suite covers engine invariants, schema/seed/import behavior, hypotheses/evidence/reports, interpolation/consistency, timeline components, and WebMCP registry behavior. A public in-app browser smoke run separately established the tested Site Tools lifecycle and direct invocation path, and Lighthouse audited the deployed workspace. Neither result establishes broad client compatibility, durable cross-layer atomicity, complete screen-reader/WCAG conformance, full response-header enforcement on GitHub Pages, exported-file fidelity, or the probabilistic model eval matrix.

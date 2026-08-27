@@ -1097,7 +1097,6 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
       <button
         className={`webmcp-status${props.webMcpSupported ? " is-supported" : ""}${props.agentWorking ? " is-working" : ""}`}
         onClick={props.onDebug}
-        aria-label={`Site Tools: ${props.webMcpSupported ? `${props.registeredTools} registered` : "manual browser mode"}`}
       >
         <span className="webmcp-status__dot" />
         {props.webMcpSupported ? (
@@ -1105,8 +1104,8 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
         ) : (
           <CloudOff size={14} aria-hidden="true" />
         )}
-        <span>
-          <strong>Site Tools</strong>
+        <span className="webmcp-status__text">
+          <strong>Site Tools</strong>{" "}
           <small>
             {props.webMcpSupported ? `${props.registeredTools} registered` : "Manual mode"}
           </small>

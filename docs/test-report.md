@@ -12,7 +12,7 @@ Environment: macOS, Node.js 22+, Chromium desktop and mobile emulation
 | ESLint             | Passing with zero warnings                                     |
 | Strict TypeScript  | Passing                                                        |
 | Vitest             | **53/53** tests across 6 files                                 |
-| Playwright         | **32/32** project runs in 16.0 seconds: 16 desktop + 16 mobile |
+| Playwright         | **32/32** project runs in 17.1 seconds: 16 desktop + 16 mobile |
 | Axe via Playwright | Zero serious or critical violations in four principal states   |
 | Lighthouse 13.4.1  | Local: **96/100/100/100**; public: **99/100/100/100**          |
 | Production build   | Passing                                                        |

@@ -26,7 +26,7 @@ The 2026-08-27 snapshot recorded in `docs/testing.md` reports:
 
 - format check, lint, strict typecheck, and production build passed;
 - Vitest: **53/53 tests across 6 files**;
-- Playwright: **32/32 project runs** in 16.0 seconds, comprising 16 scenarios in desktop Chromium and the same 16 in mobile Chrome;
+- Playwright: **32/32 project runs** in 17.1 seconds, comprising 16 scenarios in desktop Chromium and the same 16 in mobile Chrome;
 - automated axe checks found no serious or critical violations in the landing page, blank-case wizard, demo workspace, and human-finalization dialog.
 - Lighthouse 13.4.1 scored the seeded strict production preview **96 performance, 100 accessibility, 100 best practices, and 100 SEO**, with 10 ms total blocking time and zero layout shift.
 - The public GitHub Pages build scored **99 performance, 100 accessibility, 100 best practices, and 100 SEO**, with 0 ms total blocking time and zero layout shift.

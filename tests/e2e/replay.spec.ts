@@ -440,6 +440,7 @@ test.describe("REPLAY primary journey", () => {
     await expect(page.locator("main.workspace")).toBeVisible();
     const siteToolsButton = page.locator("button.webmcp-status");
     await expect(siteToolsButton).toContainText("Manual mode");
+    await expect(siteToolsButton).toHaveAccessibleName("Site Tools Manual mode");
     await siteToolsButton.click();
     const dialog = page.getByRole("dialog", { name: "WebMCP Site Tools" });
     await expect(dialog.getByText("Manual browser mode")).toBeVisible();

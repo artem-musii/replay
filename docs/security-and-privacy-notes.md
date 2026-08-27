@@ -182,7 +182,7 @@ There is no analytics by default. If diagnostics are ever added, they require a 
 
 ## Verification status and remaining checks
 
-The recorded local snapshot has passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 16.0 seconds** (16 desktop and 16 mobile). Deterministic tests cover human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, and pre-command cancellation. Playwright covers manual fallback, blank-case authoring/locks, normalized evidence annotations, and automated axe checks in four principal states.
+The recorded local snapshot has passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). Deterministic tests cover human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, and pre-command cancellation. Playwright covers manual fallback, blank-case authoring/locks, normalized evidence annotations, and automated axe checks in four principal states.
 
 The following are not yet established by that snapshot and remain manual or external gates:
 

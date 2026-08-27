@@ -330,9 +330,20 @@
     max-width: 190px;
   }
   .save-status,
-  .history-controls span,
-  .webmcp-status span:not(.webmcp-status__dot) {
+  .history-controls span {
     display: none;
+  }
+  .webmcp-status__text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
   .workspace-grid {
     min-height: auto;
