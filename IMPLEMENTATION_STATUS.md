@@ -29,10 +29,10 @@ The 2026-08-27 baseline for commit `f980d28` remains preserved in `docs/testing.
 
 The repository now contains additional proposal, persistence, semantic-intent idempotency, staged WebMCP save/commit/compensation, dialog, iframe, evidence-link, override/focus, reset, and export regression coverage. The clean 2026-08-28 local gate recorded:
 
-- `npm ci` passing for 286 packages with no deprecation warnings and `npm audit` reporting 0 vulnerabilities after upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1; the Node.js floor is 22.13;
+- `npm ci` passing for 287 packages with no deprecation warnings and `npm audit` reporting 0 vulnerabilities after upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1 plus a self-hosted Inter 5.3.0 font dependency; the Node.js floor is 22.13;
 - format, lint with 0 warnings, strict typecheck, production build, and `git diff --check` passing;
 - **119/119 Vitest tests across 14 files**, with coverage of **52.9% statements, 41.46% branches, 49.43% functions, and 54.77% lines**; and
-- **78 Playwright project runs in 30.8 seconds: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 9 checked screenshot baselines.
+- **78 Playwright project runs in 30.9 seconds: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 9 checked screenshot baselines.
 
 This is current local deterministic evidence for the working candidate. It is not a deployed-commit, public-browser, Lighthouse, manual accessibility/export, or supported-model result.
 

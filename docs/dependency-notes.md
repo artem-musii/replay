@@ -6,15 +6,16 @@ REPLAY’s own source is licensed under the checked-in MIT `LICENSE`. Direct run
 
 ## Runtime dependencies
 
-| Package                                                  | Version | Purpose in REPLAY                                                        | Declared license | Notes                                                          |
-| -------------------------------------------------------- | ------: | ------------------------------------------------------------------------ | ---------------- | -------------------------------------------------------------- |
-| [React](https://react.dev/)                              |  19.2.8 | Component and client rendering model.                                    | MIT              | Core UI runtime.                                               |
-| [react-dom](https://react.dev/)                          |  19.2.8 | Mounts the application into the browser document.                        | MIT              | Core UI runtime.                                               |
-| [Dexie](https://dexie.org/)                              |   4.4.5 | IndexedDB case records and separate local evidence blobs.                | Apache-2.0       | Local-first persistence; no server dependency.                 |
-| [Zod](https://zod.dev/)                                  |   4.4.3 | Runtime validation for case state, commands, imports, and WebMCP inputs. | MIT              | TypeScript types alone do not validate untrusted runtime data. |
-| [jsPDF](https://github.com/parallax/jsPDF)               |   4.2.1 | Explicit local factual-report PDF export.                                | MIT              | Loaded in the export path, not required to inspect a case.     |
-| [html-to-image](https://github.com/bubkoo/html-to-image) | 1.11.13 | Converts the same-origin SVG scene surface to PNG for explicit export.   | MIT              | Scene SVG export itself does not depend on rasterization.      |
-| [lucide-react](https://lucide.dev/)                      |  1.34.0 | Consistent accessible interface icon components.                         | ISC              | Icons supplement text/labels and are not the only status cue.  |
+| Package                                                            | Version | Purpose in REPLAY                                                        | Declared license | Notes                                                                       |
+| ------------------------------------------------------------------ | ------: | ------------------------------------------------------------------------ | ---------------- | --------------------------------------------------------------------------- |
+| [`@fontsource-variable/inter`](https://fontsource.org/fonts/inter) |   5.3.0 | Bundles the variable Inter typeface for deterministic local typography.  | OFL-1.1          | Self-hosted by the build; no font CDN or runtime request leaves the origin. |
+| [React](https://react.dev/)                                        |  19.2.8 | Component and client rendering model.                                    | MIT              | Core UI runtime.                                                            |
+| [react-dom](https://react.dev/)                                    |  19.2.8 | Mounts the application into the browser document.                        | MIT              | Core UI runtime.                                                            |
+| [Dexie](https://dexie.org/)                                        |   4.4.5 | IndexedDB case records and separate local evidence blobs.                | Apache-2.0       | Local-first persistence; no server dependency.                              |
+| [Zod](https://zod.dev/)                                            |   4.4.3 | Runtime validation for case state, commands, imports, and WebMCP inputs. | MIT              | TypeScript types alone do not validate untrusted runtime data.              |
+| [jsPDF](https://github.com/parallax/jsPDF)                         |   4.2.1 | Explicit local factual-report PDF export.                                | MIT              | Loaded in the export path, not required to inspect a case.                  |
+| [html-to-image](https://github.com/bubkoo/html-to-image)           | 1.11.13 | Converts the same-origin SVG scene surface to PNG for explicit export.   | MIT              | Scene SVG export itself does not depend on rasterization.                   |
+| [lucide-react](https://lucide.dev/)                                |  1.34.0 | Consistent accessible interface icon components.                         | ISC              | Icons supplement text/labels and are not the only status cue.               |
 
 ## Development and verification dependencies
 

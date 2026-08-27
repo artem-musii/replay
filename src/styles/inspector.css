@@ -1509,7 +1509,7 @@
 }
 .report-preview section p small {
   grid-column: 2;
-  font-family: Inter, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.75rem;
   color: var(--muted);
   overflow-wrap: anywhere;

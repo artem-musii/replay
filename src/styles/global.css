@@ -5,7 +5,8 @@
 @import "./workspace.css";
 
 :root {
-  font-family: Inter, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Inter Variable", Inter, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-sans);
   color: oklch(0.245 0.025 210);
   background: oklch(0.965 0.009 85);
   font-synthesis: none;

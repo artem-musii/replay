@@ -49,9 +49,9 @@ The current candidate adds schema-v2 storage/migration, versioned evidence asset
 
 ### Current local deployment-readiness gate
 
-On 2026-08-28, a clean `npm ci` installed 286 packages with no deprecation warnings and the audit reported 0 vulnerabilities. This followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, with the Node.js floor raised to 22.13.
+On 2026-08-28, a clean `npm ci` installed 287 packages with no deprecation warnings and the audit reported 0 vulnerabilities. This followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, the addition of self-hosted Inter 5.3.0, and a Node.js floor of 22.13.
 
-Formatting, lint with 0 warnings, strict typecheck, production build, and `git diff --check` passed. Vitest passed **119/119 tests across 14 files**; coverage was **52.9% statements, 41.46% branches, 49.43% functions, and 54.77% lines**. Playwright completed **78 project runs in 30.8 seconds: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 9 checked screenshot baselines.
+Formatting, lint with 0 warnings, strict typecheck, production build, and `git diff --check` passed. Vitest passed **119/119 tests across 14 files**; coverage was **52.9% statements, 41.46% branches, 49.43% functions, and 54.77% lines**. Playwright completed **78 project runs in 30.9 seconds: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 9 checked screenshot baselines.
 
 This record establishes local build/test readiness only. It does not establish the final commit/workflow, candidate deployment, route/assets/headers, current public Lighthouse, Site Tools or supported-model behavior, manual screen-reader/cross-browser/export fidelity, YouTube publication, or a header-capable production origin.
 

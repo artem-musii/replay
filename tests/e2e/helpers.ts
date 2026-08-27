@@ -19,7 +19,8 @@ export async function openDemo(page: Page): Promise<void> {
 
 export async function waitForLocalSave(page: Page): Promise<void> {
   const status = page.locator(".save-status");
-  await expect(status).toContainText("Saving locally", { timeout: 5_000 });
+  // A fast IndexedDB transaction can complete between the user action and this
+  // assertion. The persisted state is verified by the caller after reload.
   await expect(status).toContainText("Saved locally", { timeout: 10_000 });
 }
 

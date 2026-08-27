@@ -53,21 +53,21 @@ The current working candidate completed the clean local sequence on **2026-08-28
 
 | Check                | Result                                                                                                    |
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
-| Runtime/dependencies | Node.js floor **22.13**; `npm ci` installed **286 packages** with no deprecation warnings                 |
+| Runtime/dependencies | Node.js floor **22.13**; `npm ci` installed **287 packages** with no deprecation warnings                 |
 | Dependency audit     | **0 vulnerabilities**                                                                                     |
 | Formatting/lint      | Prettier passed; ESLint passed with **0 warnings**                                                        |
 | Typecheck/build      | Strict TypeScript and the production build passed                                                         |
 | Vitest               | **119/119 passed across 14 files**                                                                        |
 | Coverage             | Statements **52.9%**; branches **41.46%**; functions **49.43%**; lines **54.77%**                         |
-| Playwright           | **78** project runs: **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**, 30.8 s |
+| Playwright           | **78** project runs: **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**, 30.9 s |
 | Visual regression    | **9** checked screenshot baselines                                                                        |
 | Diff integrity       | `git diff --check` passed                                                                                 |
 
-The dependency install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1. These results are a complete local deterministic gate for the working candidate, not proof of a deployed commit or URL. Candidate deployment smoke, current public Lighthouse, current Site Tools lifecycle, supported-model eval traces, manual screen-reader/cross-browser review, complete WCAG conformance, YouTube publication, header-capable-origin verification, and downloaded-file fidelity remain separate gates.
+The dependency install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, plus the addition of self-hosted Inter 5.3.0 for cross-platform typography. These results are a complete local deterministic gate for the working candidate, not proof of a deployed commit or URL. Candidate deployment smoke, current public Lighthouse, current Site Tools lifecycle, supported-model eval traces, manual screen-reader/cross-browser review, complete WCAG conformance, YouTube publication, header-capable-origin verification, and downloaded-file fidelity remain separate gates.
 
 ## End-to-end coverage
 
-Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile project. The 2026-08-28 run collected 78 project runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed in 30.8 seconds. The candidate scenarios cover the historical core plus:
+Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile project. The 2026-08-28 run collected 78 project runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed in 30.9 seconds. The candidate scenarios cover the historical core plus:
 
 1. landing contract and both start actions;
 2. deterministic demo scene, time, and provenance;

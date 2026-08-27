@@ -54,19 +54,19 @@ On **2026-08-28**, the current working candidate completed a clean local depende
 | Gate                 | Recorded result                                                                                           |
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
 | Node requirement     | Floor raised to Node.js **22.13**                                                                         |
-| `npm ci`             | Passing; **286 packages** installed, with no deprecation warnings                                         |
+| `npm ci`             | Passing; **287 packages** installed, with no deprecation warnings                                         |
 | Dependency audit     | **0 vulnerabilities**                                                                                     |
 | Prettier             | Passing                                                                                                   |
 | ESLint               | Passing with **0 warnings**                                                                               |
 | Strict TypeScript    | Passing                                                                                                   |
 | Vitest               | **119/119** tests passed across **14 files**                                                              |
 | Coverage             | Statements **52.9%**; branches **41.46%**; functions **49.43%**; lines **54.77%**                         |
-| Playwright           | **78** project runs: **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**, 30.8 s |
+| Playwright           | **78** project runs: **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**, 30.9 s |
 | Screenshot baselines | **9** checked baselines                                                                                   |
 | Production build     | Passing                                                                                                   |
 | `git diff --check`   | Passing                                                                                                   |
 
-The clean install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1. This is local deterministic evidence for the working candidate, not proof of a deployed commit, public URL, current Lighthouse score, supported-model behavior, or manual accessibility/export fidelity.
+The clean install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, plus the addition of self-hosted Inter 5.3.0 for cross-platform typography. This is local deterministic evidence for the working candidate, not proof of a deployed commit, public URL, current Lighthouse score, supported-model behavior, or manual accessibility/export fidelity.
 
 ## Remaining manual/external gates
 
