@@ -1,73 +1,102 @@
-# REPLAY historical test report
+# REPLAY release test report
 
-Snapshot date: **2026-08-27**, application commit `f980d28`
+- Release date: **2026-08-28**
+- Application commit: [`df599f37e59e562ffaee919fdc4072eec9265f51`](https://github.com/artem-musii/replay-sol/commit/df599f37e59e562ffaee919fdc4072eec9265f51)
+- Public application: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
 
-Environment: macOS, Node.js 22+, Chromium desktop and mobile emulation
+This report distinguishes deterministic source/CI evidence, public artifact verification, ordinary live-browser behavior, an injected WebMCP contract harness, and still-unrun native client/model/manual checks. Evidence in one category is not presented as proof of another.
 
-This report is immutable historical evidence for `f980d28`. It does **not** verify the current schema-v2/proposal candidate. The separately labelled appendix below records the candidate's 2026-08-28 clean local gate; see [testing.md](testing.md) for procedures and remaining external gates.
+## Exact workflow and artifact
 
-## Automated results
+[GitHub Actions run `33125071538`](https://github.com/artem-musii/replay-sol/actions/runs/33125071538) completed successfully for the application commit.
 
-| Gate               | Result                                                         |
-| ------------------ | -------------------------------------------------------------- |
-| Prettier           | Passing after release formatting                               |
-| ESLint             | Passing with zero warnings                                     |
-| Strict TypeScript  | Passing                                                        |
-| Vitest             | **53/53** tests across 6 files                                 |
-| Playwright         | **32/32** project runs in 17.1 seconds: 16 desktop + 16 mobile |
-| Axe via Playwright | Zero serious or critical violations in four principal states   |
-| Lighthouse 13.4.1  | Local: **96/100/100/100**; public: **100/100/100/100**         |
-| Production build   | Passing                                                        |
-| `npm audit`        | Zero known vulnerabilities at the recorded snapshot            |
+| Gate                           | Recorded result                                                                   |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| Verify/build job               | `98701114804`, successful                                                         |
+| Deploy job                     | `98701763882`, successful                                                         |
+| Pages deployment               | `6132593328`, successful                                                          |
+| Pages artifact                 | `9668071269`, 2,994,535 bytes                                                     |
+| Artifact SHA-256               | `b35ee8311e9f94928ff3fc1a38e93d4d77282271874bb7481d2bae8cd4e9b8c4`                |
+| `npm ci`                       | **287 packages**, no deprecation warnings; audit **0 vulnerabilities**            |
+| Prettier / ESLint / TypeScript | Passing; lint **0 warnings**                                                      |
+| Vitest                         | **119/119** across **14 files**                                                   |
+| Coverage                       | Statements **52.9%**; branches **41.46%**; functions **49.43%**; lines **54.77%** |
+| Playwright                     | **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**      |
+| Visual baselines               | **9** checked screenshots                                                         |
+| Production build / diff check  | Passing                                                                           |
 
-Vitest covers schemas and seed validity, domain authorization/version/idempotency/locks, undo and safe reversion, hypotheses/evidence/report rules, import/export references, interpolation, deterministic consistency, timeline behavior, and WebMCP registration/lifecycle/cancellation.
+The matching clean local gate produced the coverage figures above and completed all 78 Playwright project runs in 30.9 seconds. Before uploading the artifact, the workflow independently passed dependency installation, formatting, lint, typecheck, all 119 Vitest tests, the 73/5/0 Playwright outcome, and the production build.
 
-Playwright covers the landing and blank wizard, deterministic demo, synchronized playback, human confirmation, WebMCP polyfill mutation, evidence provenance and annotations, hypothesis comparison, human-only finalization, local persistence, ordinary-browser fallback, blank-case path/event/impact/damage authoring, lock enforcement, screenshots, mobile behavior, and axe checks.
+## Public artifact verification
 
-## Historical direct Site Tools checks
+All 43 deployed files returned successfully and byte-matched Pages artifact `9668071269`, including the landing/404 documents, base-path bundles, metadata, current seed-v2 evidence images, and retained seed-v1 compatibility assets. Key public SHA-256 values were:
 
-The in-app browser loaded both the strict local preview and the public [GitHub Pages demo](https://artem-musii.github.io/replay-sol/#demo) and discovered the then-current 17 WebMCP tools. On the public origin, `get_case_summary` returned the seeded case, an `add_observation` call visibly advanced the case and activity, and `revert_agent_action` safely reversed it. `build_report_preview` changed that lifecycle to 18 tools, exposed `add_report_note`, and rendered one declarative `finalize_factual_report` form with no `toolautosubmit`.
+- cache-busted index: `42eb06ec840d3477ea6c18da952de6bc4807d4b90433e01723b4c3dfb689b581`;
+- main JavaScript `index-Cki63kWO.js`: `a47e2b491b7887172709fd372ec16da8f0ec72595680a855b7cca84370652e31`; and
+- stylesheet `index-DPk9q71M.css`: `a9469b787507d427a80504412adf092565077296178ea9f504d6a298ad8b0b57`.
 
-A separate public-origin journey created a blank case, saved it to IndexedDB, reloaded, and restored the workspace. The landing page, demo route, generated hero, favicon, manifest, and 404 response all returned successfully.
+An earlier workflow, `33124001324` for commit `54ccefcf0919be237916310dfb05b74dd3172ae3`, failed during verification before build/deploy. It is retained as a failed attempt and was never the public release.
 
-This is historical direct browser/tool verification, not a claimed probabilistic model-eval pass rate or proof of the candidate's current 18/19-tool lifecycle.
+## Live ordinary-browser verification
 
-## Performance snapshot
+A fresh public browser session loaded the landing page and deterministic demo with:
 
-The seeded workspace was audited from the strict local production preview. Recorded Lighthouse lab metrics were FCP 2.0 s, LCP 2.4 s, Speed Index 2.0 s, total blocking time 10 ms, CLS 0, and time to interactive 2.4 s. The cache-busted public commit `f980d28` run recorded FCP 0.5 s, LCP 0.5 s, Speed Index 0.7 s, total blocking time 0 ms, CLS 0, and time to interactive 0.5 s. The public run also scored 100 for agentic browsing. Both final runs had no binary Lighthouse failures. These are lab measurements, not field data.
+- zero console errors and zero warnings;
+- all observed requests returning 200;
+- no off-origin requests;
+- the bundled Inter font and all four current evidence images loading successfully; and
+- no missing current asset.
 
-## Defects found during final E2E expansion
+An ordinary-UI observation advanced the case to version 2, showed **Saved locally**, and survived full navigation reload before explicit reset. In the separate WebMCP harness journey below, a cache-busted new-document navigation retained the durable tool-created observation at case version 2 with **Saved locally**, correctly cleared the transient report preview and injected registry, and exposed the client's native manual mode. The visible destructive reset confirmation then restored the seed-v2 fixture at case version 1, removed the audit observation, showed **Saved locally**, and left zero console errors/warnings.
 
-Two real integration defects were fixed and regression-covered:
+This is evidence for current application load, same-origin networking, UI persistence/reload, and deterministic cleanup. It is not full manual cross-browser, assistive-technology, upload/delete/recovery, multi-tab, or export-fidelity evidence.
 
-1. Evidence annotation clicks stored 0–100 percentages while the canonical schema required normalized 0–1 coordinates.
-2. UI trajectory edits leaked stored `actorId` fields into a strict keyframe command schema.
+## Injected WebMCP contract smoke—not native Site Tools
 
-## Candidate coverage added after this report
+The Playwright audit client exposed no native `document.modelContext`. A minimal standards-compatible registry was injected at runtime solely to execute the **deployed bundle's registration/tool contract**. This harness is not OpenAI Site Tools, native browser discovery, a supported-model evaluation, or declarative-form evidence.
 
-The working candidate adds deterministic coverage for schema-v2 migration, raw-record recovery, compare-and-swap persistence, case/blob round-trip and packaged evidence-asset digest verification, staged adapter save/commit/compensation and semantic-intent idempotency, annotation links, coordinated agent proposals and human decisions, explicit human overrides, issue focus, dialog focus/Escape/restoration, 320px reflow, finalized JSON/PDF, saved-demo reset, and iframe/tool-registration blocking. Runtime corrupt-blob rejection is implemented but is not described here as a directly exercised database test.
+The harness verified:
 
-## Current candidate clean local gate
+1. exactly 18 baseline imperative tools, including `propose_scene_changes`, with `untrustedContentHint: true` throughout and the expected boolean `readOnlyHint` values;
+2. `get_case_summary` returned schema v2, four active evidence items, the expected certainty groups, and the seeded geometry warning without canonical mutation;
+3. branch-scoped `add_observation` under request `live-audit-df599f3-002` succeeded at case version 2 and became visible/durable;
+4. exact semantic replay returned the original activity/version with `idempotent: true` and no new version;
+5. different intent under the same request ID returned `IDEMPOTENCY_CONFLICT` with no version increment;
+6. a report preview built through the human UI produced the version-2 neutral report and raised the registry to 19 tools by adding `add_report_note` with `readOnlyHint: false` and `untrustedContentHint: true`;
+7. a cache-busted new-document navigation preserved the durable observation at case version 2 with **Saved locally**, while correctly clearing the transient preview and injected registry; and
+8. explicit visible UI reset removed the observation and restored the seed-v2 fixture at case version 1.
 
-On **2026-08-28**, the current working candidate completed a clean local dependency install and release gate:
+Native current-client Site Tools discovery/execution, supported-model traces, proposal/cancellation journeys, and compatible-Chrome declarative `toolactivated`/`toolcancel` remain separate gates.
 
-| Gate                 | Recorded result                                                                                           |
-| -------------------- | --------------------------------------------------------------------------------------------------------- |
-| Node requirement     | Floor raised to Node.js **22.13**                                                                         |
-| `npm ci`             | Passing; **287 packages** installed, with no deprecation warnings                                         |
-| Dependency audit     | **0 vulnerabilities**                                                                                     |
-| Prettier             | Passing                                                                                                   |
-| ESLint               | Passing with **0 warnings**                                                                               |
-| Strict TypeScript    | Passing                                                                                                   |
-| Vitest               | **119/119** tests passed across **14 files**                                                              |
-| Coverage             | Statements **52.9%**; branches **41.46%**; functions **49.43%**; lines **54.77%**                         |
-| Playwright           | **78** project runs: **73 passed**, **5 intentional mobile screenshot-owner skips**, **0 failed**, 30.9 s |
-| Screenshot baselines | **9** checked baselines                                                                                   |
-| Production build     | Passing                                                                                                   |
-| `git diff --check`   | Passing                                                                                                   |
+## Public Lighthouse 13.4.1
 
-The clean install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, plus the addition of self-hosted Inter 5.3.0 for cross-platform typography. This is local deterministic evidence for the working candidate, not proof of a deployed commit, public URL, current Lighthouse score, supported-model behavior, or manual accessibility/export fidelity.
+The exact cache-busted audit URL was `https://artem-musii.github.io/replay-sol/?lighthouse=df599f37e59e562ffaee919fdc4072eec9265f51#demo`. It ran in Chrome 151.0.7922.175 at a 1350 × 940 desktop viewport with simulated 40 ms RTT, 10,240 Kbps throughput, and CPU ×1.
 
-## Remaining manual/external gates
+| Category / metric | Result     |
+| ----------------- | ---------- |
+| Performance       | **100**    |
+| Accessibility     | **100**    |
+| Best Practices    | **100**    |
+| SEO               | **100**    |
+| FCP               | 385.565 ms |
+| LCP               | 505.565 ms |
+| TBT               | 0 ms       |
+| CLS               | 0          |
+| Speed Index       | 565.156 ms |
+| TTI               | 505.565 ms |
 
-The candidate still needs a fixed final commit and workflow record, deployment/asset/header smoke, current Site Tools lifecycle, public Lighthouse rerun, screen-reader and cross-browser review, complete WCAG review, downloaded-file inspection, supported-model eval traces, the public demo video, and any production-like deployment proof from a dedicated header-capable origin. GitHub Pages was historically verified to ignore `_headers`. See [testing.md](testing.md) for exact procedures.
+The report contained no binary audit failures, errors, warnings, or runtime error. Its SHA-256 is `dc66e723bd05dbda6ce2dad6d460a16d7507250305c395682d5b54b560f6f647`. These are lab measurements, not field data.
+
+## Preserved historical baseline
+
+Commit `f980d28` remains the immutable 2026-08-27 baseline: **53/53 Vitest tests across 6 files**, **32/32 Playwright project runs** across desktop/mobile Chromium, zero serious/critical axe findings in four states, public/local Lighthouse evidence, public persistence, and a direct then-native 17→18 Site Tools lifecycle smoke. It predates schema v2, proposals, CAS/recovery controls, the framing guard, and the current 19-tool inventory; it is not substituted for current release evidence.
+
+## Remaining manual and external gates
+
+- Run the eleven-scenario probabilistic matrix in each supported native Site Tools model/client and retain complete traces.
+- Verify the current imperative lifecycle natively, and declarative activation/cancel in compatible Chrome.
+- Complete screen-reader, cross-browser, 200% zoom, reduced-motion, upload/delete/reload, multi-tab, and downloaded PDF/JSON/SVG/PNG inspection.
+- Deploy to a dedicated origin that honors `_headers` before making production-like response-policy/privacy claims; GitHub Pages ignores that file and shares its origin.
+- Record and publish the public under-three-minute YouTube demo.
+
+See [testing.md](testing.md) for repeatable procedures and evidence-boundary rules.

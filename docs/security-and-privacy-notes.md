@@ -180,7 +180,7 @@ Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'
 
 `'unsafe-inline'` above is limited to styles and should be removed if the verified production UI does not need it. Do not add `'unsafe-eval'`, wildcard script/connect sources, or arbitrary external image origins. If hosting, PDF, worker, or development behavior needs a change, document the narrow production exception and retest. CSP `frame-ancestors 'none'` is the primary frame restriction; `X-Frame-Options: DENY` is legacy defense in depth.
 
-The historical 2026-08-27 GitHub Pages response was checked and did not apply the repository’s `_headers` file. The document injects restrictive CSP and no-referrer meta policies, but those cannot provide `Permissions-Policy`, origin isolation, `frame-ancestors`, or the other response-only defenses. The current app also refuses to render its workspace or register tools while framed, but that runtime defense does not replace response headers. Use a dedicated origin on a host that honors `_headers` when the complete contract is required. Candidate deployment/header verification is pending; local Vite headers are not production proof.
+The current 2026-08-28 GitHub Pages response was checked and does not apply the repository’s `_headers` file. The document injects restrictive CSP and no-referrer meta policies, but those cannot provide `Permissions-Policy`, origin isolation, `frame-ancestors`, or the other response-only defenses. The current app also refuses to render its workspace or register tools while framed, but that runtime defense does not replace response headers. Use a dedicated origin on a host that honors `_headers` when the complete contract is required; local Vite headers are not production proof.
 
 ## Privacy-safe logging and activity
 
@@ -190,11 +190,11 @@ There is no analytics by default. If diagnostics are ever added, they require a 
 
 ## Verification status and remaining checks
 
-The historical `f980d28` snapshot recorded passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). It covered human-only confirmation/finalization, locks, stale versions, duplicate request IDs, schema/reference rejection, WebMCP annotations/lifecycle, manual fallback, blank-case authoring, normalized evidence annotations, and automated axe checks. It predates the current schema-v2/proposal/security candidate and is not current release proof.
+The historical `f980d28` snapshot recorded passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). It remains preserved but predates schema v2, proposals, persistence recovery/CAS, and the current 19-tool inventory.
 
-The current repository adds deterministic proposal, migration/recovery/CAS, case/blob round-trip, packaged evidence-asset digest, staged real-adapter persistence/compensation, semantic-intent idempotency, dialog, override/focus, frame-guard, reset, and export regressions. Runtime corrupt-blob rejection is implemented but is not claimed here as a directly exercised database test. A clean final gate, exact candidate counts, and public/browser verification remain pending.
+Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` passed strict typecheck/build, **119/119 Vitest tests**, and **73 passing plus 5 intentionally skipped Playwright runs** in CI before deployment. Public verification byte-matched all 43 artifact files, observed no off-origin or failed requests and no console warnings/errors, and confirmed ordinary-UI persistence/reset. Runtime corrupt-blob rejection remains implemented source behavior rather than a directly exercised database test.
 
-The following are not yet established by that snapshot and remain manual or external gates:
+The following remain manual or external gates:
 
 - Prompt-injection behavior with each supported real agent/client, beyond deterministic schema and authorization tests.
 - Combined real-adapter + actual-Dexie cancellation/storage-failure/compensation behavior and recovery in a real browser.
@@ -203,7 +203,6 @@ The following are not yet established by that snapshot and remain manual or exte
 - Object-URL cleanup, physical blob deletion, import re-key/reference behavior in a real browser, and downloaded-file inspection.
 - Complete report citation/provenance review, including system-derived structural statements.
 - Full response-policy enforcement remains unavailable on the current GitHub Pages host; verify it if the artifact moves to Cloudflare Pages, Netlify, or another header-capable provider.
-- No unexpected network request occurs during the core demo.
 
 ## Residual risks
 

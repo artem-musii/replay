@@ -1,6 +1,6 @@
 # Devpost submission draft
 
-The application and repository links below currently resolve to the historical public build. The schema-v2/proposal candidate must be deployed and reverified before submission. Replace the remaining YouTube placeholder after recording the final public demo; do not submit with that placeholder.
+The schema-v2/proposal application is live from commit `df599f37e59e562ffaee919fdc4072eec9265f51`, with CI, artifact, public-browser, persistence, and Lighthouse evidence recorded in the repository. Replace the remaining YouTube placeholder after recording the final public demo; do not submit with that placeholder. Native supported-model traces and the stated manual gates must not be implied until captured.
 
 ## Project title
 
@@ -83,7 +83,7 @@ REPLAY was built from an empty workspace during the challenge period. It is a st
 
 A command engine owns schema validation, author/origin authorization, reference checks, locks, optimistic case-version conflicts, request idempotency, undo/redo boundaries, agent-action reversion, activity attribution, and deterministic consistency recomputation. Pure interpolation drives the SVG scene and timeline. Report generation is a deterministic projection over eligible cited state, not a free-form model summary.
 
-Dexie stores case JSON and evidence blobs in IndexedDB. The candidate uses a separate v2 vault with v1 migration, compare-and-swap writes, a best-effort Web Locks lease, BroadcastChannel conflict pause, retained raw recovery, and blob case/checksum/MIME/byte verification. Structured JSON import passes through schema/referential validation and deliberately clears or demotes unsigned trust attestations; it excludes evidence bytes and is not a full backup. jsPDF and `html-to-image` produce explicit local exports.
+Dexie stores case JSON and evidence blobs in IndexedDB. The release uses a separate v2 vault with v1 migration, compare-and-swap writes, a best-effort Web Locks lease, BroadcastChannel conflict pause, retained raw recovery, and blob case/checksum/MIME/byte verification. Structured JSON import passes through schema/referential validation and deliberately clears or demotes unsigned trust attestations; it excludes evidence bytes and is not a full backup. jsPDF and `html-to-image` produce explicit local exports.
 
 The WebMCP layer has separate schemas, fixed descriptions and annotations, an adapter into the domain engine, registration-group reconciliation, duplicate registration protection, execution instrumentation, cancellation handling, visible affected-item reveal, and a built-in inspector for browser support, lifecycle state, schemas, annotations, and supported direct execution.
 
@@ -109,9 +109,9 @@ Evidence notes, filenames, imported statements, and hypothesis text are untruste
 
 The repository includes deterministic coverage for the original workflow plus schema-v2 migration/import, coordinated proposals and human decisions, persistence conflict/recovery and case/blob round-trip, packaged evidence-asset digest verification, staged real-adapter save/commit/compensation, semantic-intent idempotency, annotation links, override correlation, issue focus, dialog focus/Escape/restoration, exact scene editors, saved-demo reset, finalized JSON/PDF, and iframe/tool-registration blocking. Runtime corrupt-blob rejection is implemented but is not claimed as a directly exercised database test.
 
-**Historical evidence:** `f980d28` recorded passing lint/typecheck/build, 53/53 Vitest tests, 32/32 desktop/mobile Playwright runs, four-state axe checks, Lighthouse, and a direct public Site Tools smoke. Those results predate the current candidate. The final clean gate, exact candidate counts, public deployment/assets/headers/Lighthouse, current 18/19-tool lifecycle, and browser/manual matrix are pending and must not be claimed as completed in the final submission until recorded.
+**Current deterministic/deployment evidence:** `df599f37e59e562ffaee919fdc4072eec9265f51` passed Actions run `33125071538` with 119/119 Vitest tests and 73 passing plus 5 intentionally skipped Playwright runs. Pages deployment `6132593328` published artifact `9668071269`; all 43 deployed files byte-matched it. A fresh public browser produced no console warnings/errors or off-origin requests, loaded the current assets, preserved a durable observation across a cache-busted new-document navigation, correctly cleared the transient report preview/injected registry, and returned to deterministic state after explicit reset. Public Lighthouse 13.4.1 scored 100/100/100/100.
 
-The repository also includes eleven machine-readable WebMCP eval scenarios covering inspect, reconstruction, human correction, hypothesis branching, confirmation protection, locks, human-only reporting, prompt injection, stale versions, cancellation, and human-gated coordinated proposals. These are an eval specification, not model-run results. The historical public build has a 17/18-tool direct smoke; the current 18/19-tool candidate and supported-model matrix remain pending. Retain exact commit, URL, browser/client/model, tool traces, and every safety failure.
+The repository also includes eleven machine-readable WebMCP eval scenarios covering inspect, reconstruction, human correction, hypothesis branching, confirmation protection, locks, human-only reporting, prompt injection, stale versions, cancellation, and human-gated coordinated proposals. These are an eval specification, not model-run results. A runtime-injected standards-compatible registry verified the deployed 18→19 lifecycle plus read/mutate/idempotency/conflict/persistence/reset behavior, but the audit client exposed no native `document.modelContext`; the polyfill is not Site Tools or a supported-model result. The historical build's native 17/18-tool smoke remains preserved. Retain exact commit, URL, browser/client/model, tool traces, and every safety failure.
 
 ## Judging criteria
 
@@ -121,7 +121,7 @@ WebMCP exposes the semantics ordinary screen automation lacks: branch-scoped tra
 
 ### Execution
 
-REPLAY implements the full manual journey from landing and blank/demo start through scene/timeline editing, proposals, evidence, facts, questions, branches, activity, persistence/recovery, consistency, report review, finalization, and local export. It includes optimized original assets, fallback browser behavior, tests, public-facing documentation, and a public repository. The current candidate deployment, cross-client supported-model runs, manual matrices, and public video remain final submission gates; only the older baseline deployment is verified today.
+REPLAY implements the full manual journey from landing and blank/demo start through scene/timeline editing, proposals, evidence, facts, questions, branches, activity, persistence/recovery, consistency, report review, finalization, and local export. It includes optimized original assets, fallback browser behavior, tests, public-facing documentation, a public repository, and a byte-verified current deployment. Native cross-client supported-model runs, manual accessibility/cross-browser/export matrices, a dedicated header-capable origin for production response-policy claims, and the public video remain final submission gates.
 
 ### Potential Impact
 

@@ -1,6 +1,6 @@
 # Accessibility report
 
-Status recorded **2026-08-27**. REPLAY targets WCAG 2.2 AA behavior but does not claim complete conformance or certification.
+Status updated **2026-08-28**. REPLAY targets WCAG 2.2 AA behavior but does not claim complete conformance or certification.
 
 ## Implemented support
 
@@ -14,13 +14,15 @@ Status recorded **2026-08-27**. REPLAY targets WCAG 2.2 AA behavior but does not
 - alt text for meaningful images and decorative treatment for redundant thumbnails; and
 - explicit human-review labels and confirmation controls for consequential actions.
 
-## Historical automated evidence
+## Automated evidence
 
 The `f980d28` Playwright suite passed **32/32 project runs**: 16 scenarios in desktop Chromium and 16 in mobile Chrome. Axe checks covered the landing page, blank-case wizard, deterministic workspace, and human-finalization dialog with **zero serious or critical violations**.
 
 Lighthouse 13.4.1 scored both the seeded local production-preview workspace and the public GitHub Pages build **100 for accessibility** for that historical commit. A label-in-name diagnostic found during the first audit was corrected before those recorded runs.
 
-The current candidate adds automated focus trapping, Escape/cancel behavior, focus restoration, 320px reflow, exact scene editors, and iframe-guard regressions. A clean candidate Playwright/axe/Lighthouse run is pending. Automated checks are guardrails, not a substitute for assistive-technology review.
+The current `df599f37e59e562ffaee919fdc4072eec9265f51` release adds automated focus trapping, Escape/cancel behavior, focus restoration, 320px reflow, exact scene editors, and iframe-guard regressions. Its clean Playwright gate completed **78 runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, including the axe states. The deployed public Lighthouse 13.4.1 audit scored **100 for accessibility**.
+
+These automated checks are guardrails, not a substitute for assistive-technology review. The historical `f980d28` results above remain preserved rather than being substituted for current manual evidence.
 
 ## Manual checks still required
 

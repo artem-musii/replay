@@ -151,14 +151,11 @@ The artifact is a static application publishable over HTTPS. The repository incl
 
 ## Verification status
 
-The historical `f980d28` snapshot recorded on 2026-08-27 reports:
+Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` passed the 2026-08-28 local and CI release gates: **119/119 Vitest tests across 14 files**, **73 passing plus 5 intentionally skipped Playwright project runs**, strict typecheck/lint/build, and nine screenshot baselines. GitHub Actions run `33125071538` deployed the byte-verified Pages artifact; the public demo then passed current asset/network/console/persistence/reset checks and a **100/100/100/100** Lighthouse audit.
 
-- lint, strict typecheck, and production build passed;
-- Vitest: **53/53 tests across 6 files**;
-- Playwright: **32/32 project runs in 17.1 seconds** (16 scenarios in desktop Chromium and 16 in mobile Chrome);
-- automated axe checks found no serious or critical violations in the four covered states.
+A runtime-injected standards-compatible registry exercised the deployed 18→19 WebMCP contract, including read/mutate/idempotency/conflict, the transient report-preview lifecycle, durable observation persistence across a cache-busted new-document navigation, and reset. Because the audit client exposed no native `document.modelContext`, this is polyfilled contract evidence—not native Site Tools discovery, declarative behavior, or a supported-model trace.
 
-That baseline predates schema v2, proposals, CAS/recovery controls, session audit, the framing guard, and the current 19-tool inventory. New deterministic coverage exists for those areas, but the final candidate gate and exact counts are pending. The historical public Site Tools and Lighthouse results remain evidence for `f980d28`, not the current candidate. Current deployment, broad client compatibility, complete screen-reader/WCAG conformance, dedicated-origin headers, exported-file fidelity, and supported-model eval traces remain external gates.
+The historical `f980d28` snapshot remains preserved with **53/53 Vitest tests**, **32/32 Playwright runs**, axe/Lighthouse evidence, and its then-native 17→18 Site Tools smoke. Broad current native-client compatibility, complete screen-reader/WCAG conformance, dedicated-origin headers, exported-file fidelity, and supported-model eval traces remain external gates.
 
 ## External architecture references
 

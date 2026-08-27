@@ -1,6 +1,6 @@
 # REPLAY source of truth
 
-External-source register last verified: **2026-08-27** (Europe/Madrid); the OpenAI Site Tools page was rechecked and implementation consequences were reconciled on **2026-08-28**. This file records external facts, resulting REPLAY decisions, and the current implementation caveats that materially affect those decisions. Detailed verification status remains in `IMPLEMENTATION_STATUS.md` and `docs/testing.md`.
+External-source register last verified: **2026-08-27** (Europe/Madrid); the OpenAI Site Tools page and current release evidence were reconciled on **2026-08-28**. This file records external facts, resulting REPLAY decisions, and the current implementation caveats that materially affect those decisions. Detailed verification status remains in `IMPLEMENTATION_STATUS.md` and `docs/testing.md`.
 
 ## Authority order
 
@@ -134,6 +134,14 @@ The live [Site Tools page](https://learn.chatgpt.com/docs/webmcp), rechecked 202
 - OpenAI recommends narrow inputs, explicit side effects, existing app authentication/authorization/validation, enough output to verify a result, and preserving the ordinary UI as fallback.
 
 REPLAY consequently treats ChatGPT/Codex testing as a compatibility target, not an availability guarantee. Its declarative `finalize_factual_report` form remains a standards/Chrome-compatible human gate; OpenAI Site Tools flows use the imperative preview tool and manual report UI rather than claiming that form is tool-discoverable. Any ordinary browser interaction is a separate capability and must not be presented as a declarative/WebMCP call or as authorization to operate the human confirmation controls.
+
+## Current release-evidence boundary
+
+Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` passed GitHub Actions run `33125071538` and Pages deployment `6132593328`. Its **119/119 Vitest tests**, **73 passing plus 5 intentionally skipped Playwright runs**, artifact `9668071269`, all-43-file public byte match, current public browser/persistence/assets/console smoke, and 100/100/100/100 Lighthouse audit are deterministic/deployment evidence.
+
+The same public bundle was exercised with a runtime-injected standards-compatible `document.modelContext` registry because the Playwright audit client exposed no native implementation. The harness verified 18 baseline tools, read/mutate/idempotency/conflict behavior, the ordinary-UI report-preview transition to 19 tools, durable observation persistence across a cache-busted new-document navigation, correct clearing of the transient preview/injected registry, and explicit visible UI reset. It is **not native OpenAI Site Tools discovery, a model trace, or declarative-form verification**.
+
+Therefore the repository still does not claim a current supported-model pass rate, native current-client compatibility, native declarative activation/cancel, cross-browser/screen-reader conformance, downloaded-export fidelity, or production response-policy deployment. GitHub Pages ignores `_headers` and shares its origin; a dedicated header-capable origin remains necessary for those response-policy claims. The public YouTube deliverable is also outstanding.
 
 ## Chrome engineering guidance adopted by REPLAY
 

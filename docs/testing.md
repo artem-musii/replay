@@ -45,11 +45,11 @@ The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` auto
 | WebMCP registry                   | `tests/webmcp/registry.test.ts`                                                       | Nineteen-tool inventory/schema/annotations, lifecycle, session-versus-canonical audit, proposal routing, cancellation, reconciliation, direct execution, and fallback.                                                                                                                                                                                                                                                                                         |
 | Browser regressions               | `tests/e2e/*.spec.ts`                                                                 | Core workflows plus proposals, exact editors, issue focus, human overrides, finalized JSON/PDF, persisted demo reset, dialog focus behavior, 320px reflow, axe checks, and frame blocking.                                                                                                                                                                                                                                                                     |
 
-**Historical baseline:** commit `f980d28` recorded passing lint/typecheck/build, **53/53 Vitest tests across 6 files**, and **32/32 Playwright runs in 17.1 seconds** across desktop/mobile Chromium. That result predates the current schema-v2/proposal candidate.
+**Historical baseline:** commit `f980d28` recorded passing lint/typecheck/build, **53/53 Vitest tests across 6 files**, and **32/32 Playwright runs in 17.1 seconds** across desktop/mobile Chromium. That result predates the current schema-v2/proposal release.
 
-### Current candidate local result
+### Current deployed release result
 
-The current working candidate completed the clean local sequence on **2026-08-28**:
+Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` completed the clean local sequence and then passed GitHub Actions run `33125071538` on **2026-08-28**:
 
 | Check                | Result                                                                                                    |
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -63,11 +63,11 @@ The current working candidate completed the clean local sequence on **2026-08-28
 | Visual regression    | **9** checked screenshot baselines                                                                        |
 | Diff integrity       | `git diff --check` passed                                                                                 |
 
-The dependency install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, plus the addition of self-hosted Inter 5.3.0 for cross-platform typography. These results are a complete local deterministic gate for the working candidate, not proof of a deployed commit or URL. Candidate deployment smoke, current public Lighthouse, current Site Tools lifecycle, supported-model eval traces, manual screen-reader/cross-browser review, complete WCAG conformance, YouTube publication, header-capable-origin verification, and downloaded-file fidelity remain separate gates.
+The dependency install followed upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1, plus the addition of self-hosted Inter 5.3.0 for cross-platform typography. Verify job `98701114804` independently passed dependency installation, formatting, lint, typecheck, Vitest, Playwright, and the production build; deploy job `98701763882` published Pages deployment `6132593328`. Public artifact/browser/Lighthouse evidence is recorded below and in [test-report.md](test-report.md). Native Site Tools/supported-model traces, manual screen-reader/cross-browser review, complete WCAG conformance, YouTube publication, header-capable-origin verification, and downloaded-file fidelity remain separate gates.
 
 ## End-to-end coverage
 
-Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile project. The 2026-08-28 run collected 78 project runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed in 30.9 seconds. The candidate scenarios cover the historical core plus:
+Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile project. The 2026-08-28 clean local run collected 78 project runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed in 30.9 seconds; CI repeated the same 73/5/0 outcome. The release scenarios cover the historical core plus:
 
 1. landing contract and both start actions;
 2. deterministic demo scene, time, and provenance;
@@ -94,7 +94,7 @@ Playwright is configured for 1440 × 900 Chromium and a Pixel 7-sized mobile pro
 23. parseable finalized JSON and non-empty PDF download; and
 24. saved-demo resume, explicit reset, and iframe/tool-registration blocking.
 
-Pointer drag/rotation, full local user-evidence upload/delete/reload, raw-recovery handling, downloaded SVG/PNG visual fidelity, screen readers, and a cross-client WebMCP matrix remain explicit manual gates below. Automated dialog regressions exist, but assistive-technology behavior still requires manual review. The historical direct public Site Tools smoke below is not a candidate or probabilistic model-eval pass. The repository now includes nine checked `toHaveScreenshot` visual-regression baselines across the required desktop/mobile dimensions; they are automated layout evidence, not a substitute for manual visual review.
+Pointer drag/rotation, full local user-evidence upload/delete/reload, raw-recovery handling, downloaded SVG/PNG visual fidelity, screen readers, and a cross-client WebMCP matrix remain explicit manual gates below. Automated dialog regressions exist, but assistive-technology behavior still requires manual review. The current injected public registry smoke below is not native Site Tools or a probabilistic model-eval pass. The repository includes nine checked `toHaveScreenshot` visual-regression baselines across the required desktop/mobile dimensions; they are automated layout evidence, not a substitute for manual visual review.
 
 ## Deterministic demo fixture
 
@@ -157,7 +157,7 @@ Use a disposable demo fixture for direct mutation tests. Never use personal evid
 
 Use a deployed HTTPS URL because that is the submission environment. At the source-of-truth date, the official OpenAI Site Tools documentation lists GPT-5.6 Sol and GPT-5.6 Terra as supported and notes rollout/workspace limitations; recheck before the final run.
 
-The public URL currently serves the historical build. Deploy the exact candidate first; otherwise record the run only as a historical-baseline check and expect its older tool inventory.
+The public URL serves application commit `df599f37e59e562ffaee919fdc4072eec9265f51`. Record the exact browser/client/model and confirm native `document.modelContext` before calling any result Site Tools evidence.
 
 1. Open [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) in the desktop app’s built-in browser.
 2. Confirm REPLAY’s page status says Site Tools available.
@@ -168,7 +168,9 @@ The public URL currently serves the historical build. Deploy the exact candidate
 7. Verify the agent builds and opens the report preview but does not complete finalization. OpenAI's current client does not expose declarative HTML form tools as Site Tools. It may still use ordinary browser capabilities, but those interactions are not WebMCP calls and must not operate the human-only acknowledgements or final confirmation. Verify the native declarative form lifecycle separately in compatible Chrome.
 8. Reset and repeat every scenario in `evals/webmcp-evals.json` at least five times per currently supported target model, recording exact model/client/build/commit.
 
-The machine-readable eval suite and scoring rules are documented in [webmcp-evals.md](webmcp-evals.md). **Historical evidence only:** a 2026-08-27 `f980d28` public smoke discovered its then-current 17-tool baseline, called `get_case_summary`, visibly added/reverted an observation, transitioned to 18 tools after report preview, verified the non-autosubmitting form, and restored a blank case after reload. The current candidate has an 18-tool baseline and 19 tools after preview because it adds `propose_scene_changes`; its public smoke and supported-model runs are pending. Do not publish direct contract verification as an aggregate model-eval rate or hide any safety failure.
+The machine-readable eval suite and scoring rules are documented in [webmcp-evals.md](webmcp-evals.md). **Historical native evidence only:** a 2026-08-27 `f980d28` public smoke discovered its then-current 17-tool baseline, called `get_case_summary`, visibly added/reverted an observation, transitioned to 18 tools after report preview, verified the non-autosubmitting form, and restored a blank case after reload.
+
+**Current non-native contract evidence:** because the Playwright audit client exposed no native `document.modelContext`, a standards-compatible runtime polyfill exercised the deployed bundle. It verified 18 baseline tools, a schema-v2 summary, a durable branch observation, exact-replay idempotency, changed-intent conflict rejection, and the ordinary-UI report-preview transition to 19 tools. A cache-busted new-document navigation then preserved the durable observation at case version 2 with **Saved locally**, while correctly clearing the transient preview and injected registry; visible UI reset removed the observation and restored the seed-v2 fixture at case version 1. This is neither native Site Tools discovery nor a supported-model result. Do not publish it as an aggregate model-eval rate or hide any safety failure.
 
 ## Accessibility verification
 
@@ -203,8 +205,8 @@ The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so 
 ## Performance and visual verification
 
 - Record interaction responsiveness while dragging, scrubbing, playing at 2×, and overlaying two branches.
-- Historical `f980d28` evidence: Lighthouse 13.4.1 audited the seeded strict preview at **96 performance, 100 accessibility, 100 best practices, and 100 SEO**, and the cache-busted public commit at **100/100/100/100** plus 100 agentic browsing. Those lab metrics are retained in [test-report.md](test-report.md).
-- Rerun Lighthouse against the exact final candidate and record the URL/SHA; do not reuse the historical scores as candidate proof.
+- Current `df599f37e59e562ffaee919fdc4072eec9265f51` evidence: Lighthouse 13.4.1 audited the cache-busted public demo at **100 performance, 100 accessibility, 100 best practices, and 100 SEO**, with FCP 385.565 ms, LCP/TTI 505.565 ms, Speed Index 565.156 ms, TBT 0 ms, and CLS 0. The report hash and environment are retained in [test-report.md](test-report.md).
+- Historical `f980d28` local/public Lighthouse evidence remains preserved but is not substituted for the current audit.
 - Confirm no broken generated image, layout shift, clipped focus ring, unreadable status, or horizontal overflow at 1440 × 900, 1024 × 768, 390 × 844, and 200% zoom.
 - Inspect the five generated images for the criteria in [generated-assets.md](generated-assets.md).
 - Check the console for errors, unhandled rejections, hydration warnings, missing assets/source maps affecting users, and failed requests.

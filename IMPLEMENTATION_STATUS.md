@@ -4,7 +4,7 @@ Last updated: 2026-08-28
 
 ## Current milestone
 
-The end-to-end challenge application and its schema-v2/proposal release candidate are implemented locally. The current working candidate completed a clean local release gate on 2026-08-28. An older public GitHub Pages build has dated verification evidence, but the candidate has not yet been committed, deployed, or reverified at the public URL. Submission completion therefore still depends on a fixed final commit and workflow record, candidate deployment/smoke evidence, supported-model eval traces, manual accessibility/cross-browser/export review, a current public Lighthouse run, and the public demo video.
+The schema-v2/proposal application is implemented, CI-verified, and deployed to GitHub Pages. Application commit [`df599f37e59e562ffaee919fdc4072eec9265f51`](https://github.com/artem-musii/replay-sol/commit/df599f37e59e562ffaee919fdc4072eec9265f51) passed [Actions run `33125071538`](https://github.com/artem-musii/replay-sol/actions/runs/33125071538), produced the verified Pages artifact, and is live at the public URL. Submission completion now depends on supported-model/native Site Tools traces, manual accessibility/cross-browser/export review, a dedicated header-capable origin for production-like response-policy claims, and the public demo video.
 
 ## Implemented product
 
@@ -25,25 +25,20 @@ The end-to-end challenge application and its schema-v2/proposal release candidat
 
 The 2026-08-27 baseline for commit `f980d28` remains preserved in `docs/testing.md` and `docs/deployment.md`. It recorded passing format/lint/typecheck/build, **53/53 Vitest tests across 6 files**, **32/32 Playwright project runs** across desktop/mobile Chromium, automated axe checks, Lighthouse results, a public persistence journey, and a direct Site Tools lifecycle smoke. That evidence is historical: it predates schema v2, proposals, recovery/CAS controls, the framing guard, new export/accessibility regressions, and the current 19-tool inventory.
 
-### Current candidate
+### Current deployed release
 
-The repository now contains additional proposal, persistence, semantic-intent idempotency, staged WebMCP save/commit/compensation, dialog, iframe, evidence-link, override/focus, reset, and export regression coverage. The clean 2026-08-28 local gate recorded:
+The release contains proposal, persistence, semantic-intent idempotency, staged WebMCP save/commit/compensation, dialog, iframe, evidence-link, override/focus, reset, and export regression coverage. The clean 2026-08-28 local gate recorded:
 
 - `npm ci` passing for 287 packages with no deprecation warnings and `npm audit` reporting 0 vulnerabilities after upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1 plus a self-hosted Inter 5.3.0 font dependency; the Node.js floor is 22.13;
 - format, lint with 0 warnings, strict typecheck, production build, and `git diff --check` passing;
 - **119/119 Vitest tests across 14 files**, with coverage of **52.9% statements, 41.46% branches, 49.43% functions, and 54.77% lines**; and
 - **78 Playwright project runs in 30.9 seconds: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 9 checked screenshot baselines.
 
-This is current local deterministic evidence for the working candidate. It is not a deployed-commit, public-browser, Lighthouse, manual accessibility/export, or supported-model result.
+GitHub Actions verify job `98701114804` independently passed dependency installation, formatting, lint, typecheck, **119/119 Vitest tests**, **73 passing and 5 intentionally skipped Playwright project runs**, and the production build. Deploy job `98701763882` published Pages deployment `6132593328` from artifact `9668071269` (SHA-256 `b35ee8311e9f94928ff3fc1a38e93d4d77282271874bb7481d2bae8cd4e9b8c4`). All 43 deployed files returned successfully and byte-matched the workflow artifact.
 
-The current candidate also still needs a dated public record for:
+A cache-busted public Lighthouse 13.4.1 run scored **100 performance, 100 accessibility, 100 best practices, and 100 SEO**, with FCP 385.565 ms, LCP/TTI 505.565 ms, Speed Index 565.156 ms, TBT 0 ms, and CLS 0. A fresh live browser loaded the application and four active evidence images with 200 responses, made no off-origin requests, emitted no console warnings/errors, preserved a human UI observation across a full reload, and returned to deterministic seed-v2 state after explicit reset.
 
-- final commit SHA and workflow run;
-- GitHub Pages asset and route availability;
-- current 18-tool baseline/19-tool reviewed-report lifecycle and declarative form behavior;
-- browser console/network/persistence/export smoke;
-- current public Lighthouse and manual accessibility/cross-browser evidence; and
-- supported-model probabilistic eval traces.
+An injected standards-compatible `document.modelContext` registry harness verified the deployed bundle's 18→19 imperative lifecycle and expected annotations. `get_case_summary` read schema v2 without canonical mutation; a branch-scoped `add_observation` durably advanced to case version 2; exact replay returned the original receipt with `idempotent: true`; changed intent under that request ID returned `IDEMPOTENCY_CONFLICT` without a version increment; and an ordinary-UI report preview added `add_report_note`. A cache-busted new-document navigation retained the durable version-2 observation with **Saved locally**, correctly cleared the transient preview and injected registry, and exposed the client's native manual mode; visible UI reset then removed the observation and restored seed-v2 case version 1. This was a **runtime-polyfilled contract smoke**, not native OpenAI Site Tools discovery, a supported-model trace, or declarative-form activation. Native current-client evidence remains outstanding.
 
 ## Known implementation limits
 
@@ -58,15 +53,13 @@ The current candidate also still needs a dated public record for:
 
 ## Deployment status
 
-The historical public application is available at [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/). Initial deployment evidence used commit `c95df75` and workflow run `33105222174`; the historical audited baseline used `f980d28` and workflow run `33108322846`.
+The current schema-v2/proposal application is available at [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/) from commit `df599f37e59e562ffaee919fdc4072eec9265f51`. Initial deployment evidence used commit `c95df75`; the historical audited baseline used `f980d28` and remains preserved without being conflated with the current release.
 
-The schema-v2/proposal candidate and its versioned v2 evidence assets are not yet proven at that URL. GitHub Pages also shares the `artem-musii.github.io` storage origin with other projects and does not honor `public/_headers`; use the public build only with synthetic/non-sensitive data. The application-level framing guard helps at runtime, while response-level `Permissions-Policy`, COOP/COEP, `X-Content-Type-Options`, and frame policy still require a dedicated header-capable origin.
+GitHub Pages shares the `artem-musii.github.io` storage origin with other projects and does not honor `public/_headers`; use the public build only with synthetic/non-sensitive data. The application-level framing guard helps at runtime, while response-level `Permissions-Policy`, COOP/COEP, `X-Content-Type-Options`, and frame policy still require a dedicated header-capable origin.
 
 ## Manual and external gates
 
-- Preserve the 2026-08-28 clean local-gate record, fix the final SHA, and rerun the workflow in CI if the candidate changes; bind any release claim to that exact commit.
-- Deploy the exact candidate, verify every route/versioned asset, and retain response headers plus console/network evidence.
-- Exercise the 18/19-tool imperative lifecycle, proposal review path, cancellation, and report finalization in current compatible clients. Test declarative activation/cancel separately in compatible Chrome; the current OpenAI Site Tools browser does not expose declarative form tools, and any ordinary browser interaction is not a WebMCP call.
+- Exercise the 18/19-tool imperative lifecycle, proposal review path, cancellation, and report finalization through native current compatible clients. Test declarative activation/cancel separately in compatible Chrome; the current OpenAI Site Tools browser does not expose declarative form tools, and any ordinary browser interaction is not a WebMCP call.
 - Run the full probabilistic eval matrix with each supported Site Tools model/client and retain traces without aggregating away safety failures.
 - Complete keyboard-only and VoiceOver/NVDA review, 200% zoom, reduced motion, pointer editing, upload/annotation/delete/reload, multi-tab conflict/recovery, and downloaded-file inspection.
 - Deploy to a dedicated origin/host honoring `public/_headers` if production-like privacy and response-policy claims are required.

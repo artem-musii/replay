@@ -1,14 +1,14 @@
 # Generated asset disclosure
 
-Last inspected: **2026-08-27**.
+Last inspected locally and on the deployed application: **2026-08-28**.
 
 The current seed-v2 experience uses five original bitmap assets created during development with the Codex built-in image-generation mode. The built-in mode selected the available image model; it did not expose a model identifier in the returned artifact, so this repository does not claim a specific model snapshot. Three earlier evidence assets remain packaged so a saved seed-v1 demo can still resume until the person explicitly resets it. No API key is bundled, and the running application performs no image generation or external evidence upload.
 
 The hero supports product communication. The other four images are fictional, synthetic demo evidence and are visibly badged **Synthetic demo** in the evidence inspector. They do not depict a real incident. The functional road, vehicles, paths, impact marker, damage markers, and branch overlays are authored as semantic SVG rather than generated pixels.
 
-## Active release-candidate files
+## Active release files
 
-The application/seed reference this set locally. Publication and checksum retrieval from the final deployed URL are pending; “active” does not claim that the v2 files are already live on GitHub Pages.
+The application/seed reference this set. All active files are public in Pages deployment `6132593328`; the all-43-file deployment audit returned them successfully and byte-matched them to artifact `9668071269`. A fresh live-browser audit also loaded all four current evidence images with 200 responses.
 
 | File                                                                                        | Purpose                               |  Dimensions |     WebP size | SHA-256                                                            |
 | ------------------------------------------------------------------------------------------- | ------------------------------------- | ----------: | ------------: | ------------------------------------------------------------------ |
@@ -30,7 +30,7 @@ These superseded generation iterations are still distributed because valid saved
 | [`demo-vehicle-a-damage.webp`](../public/assets/generated/demo-vehicle-a-damage.webp) | Seed v1; superseded by `-v2` | 1448 × 1086 | 136,452 bytes | `27da729bfd9efdf78931d15423ef17253aa4d681faec7c6aaa03f2a4b9d5f0e9` |
 | [`demo-vehicle-b-damage.webp`](../public/assets/generated/demo-vehicle-b-damage.webp) | Seed v1; superseded by `-v2` | 1448 × 1086 | 154,638 bytes | `b527745e962d163610cac7f3f6c529b35b9df28f32613165e2165307565cdeac` |
 
-| Active candidate asset          | Local source artifact                           |
+| Active release asset            | Local source artifact                           |
 | ------------------------------- | ----------------------------------------------- |
 | `replay-hero.webp`              | `exec-b9fa34a2-242c-4efa-b729-026fae859dcc.png` |
 | `demo-roundabout-wide-v2.webp`  | `exec-649db0c2-326a-4d78-b2da-a6538f96f005.png` |

@@ -2,7 +2,7 @@
 
 Use a ChatGPT/Codex desktop build, model, and workspace that currently support Site Tools. WebMCP is evolving and availability may vary by client rollout.
 
-Run the current expectations only after deploying the exact schema-v2/proposal candidate. Until then, the public GitHub Pages link serves the historical 17/18-tool build and cannot verify the 18/19-tool contract below.
+The public GitHub Pages link serves the current schema-v2/proposal application from commit `df599f37e59e562ffaee919fdc4072eec9265f51`. The deployment and a runtime-polyfilled 18→19 contract smoke are verified, but native Site Tools discovery/execution and supported-model behavior must still be recorded in a compatible current client.
 
 ## Open a clean fixture
 
@@ -23,7 +23,9 @@ Ask, in order:
 
 Verify after every mutation that the compact result, persisted case, live engine, visible scene/timeline/inspector, case version, and durable attributed activity agree; record browser-paint timing separately rather than assuming it is transactionally coupled to the tool promise. Reads and UI-only calls may add session-only invocation audit without changing the canonical case. Cancellation before primary persistence adds neither layer; cancellation after a resolved staged save must compensate or return/audit `PERSISTENCE_FAILED`.
 
-A direct public-origin smoke run on 2026-08-27 verified the historical `f980d28` 17/18-tool lifecycle, read/mutate/revert behavior, report-preview transition, non-autosubmitting finalization form, and IndexedDB restoration. The current 18/19-tool candidate has not yet received the equivalent public run. Repeat the prompt sequence for each supported model/client; neither source inspection nor the historical smoke is a current model-eval score.
+A direct public-origin native smoke run on 2026-08-27 verified the historical `f980d28` 17/18-tool lifecycle, read/mutate/revert behavior, report-preview transition, non-autosubmitting finalization form, and IndexedDB restoration.
+
+For the current release, the audit client's missing native `document.modelContext` was replaced temporarily with a standards-compatible runtime registry. That **non-native polyfill** verified 18 baseline tools, read/mutate/idempotency/conflict behavior, the ordinary-UI report-preview transition to 19 tools, durable observation persistence across a cache-busted new-document navigation, correct clearing of the transient preview/injected registry, and explicit reset. It is a deployed-bundle contract smoke—not Site Tools discovery, declarative-form proof, or a supported-model score. Repeat the prompt sequence natively for each supported model/client.
 
 ## Safety checks
 

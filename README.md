@@ -14,12 +14,12 @@ _Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The 
 
 ## Try it
 
-| Destination                   | Link                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| Historical live build         | [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)           |
-| Historical deterministic demo | [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) |
-| Public repository             | [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)           |
-| Demo video                    | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.            |
+| Destination             | Link                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| Live build              | [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)           |
+| Live deterministic demo | [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) |
+| Public repository       | [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)           |
+| Demo video              | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.            |
 
 To start without WebMCP, run the app locally and choose **Try the demo case**. Every core workspace feature remains available in an ordinary browser.
 
@@ -187,7 +187,9 @@ npm run build
 
 The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, consistency and interpolation, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
 
-**Historical baseline:** on 2026-08-27, commit `f980d28` recorded lint and strict typecheck passing, **53/53 Vitest tests**, **32/32 Playwright runs** across desktop/mobile Chromium, a successful build, Lighthouse results, and a direct public Site Tools smoke run. Those results remain useful historical evidence but do not verify the schema-v2/proposal release candidate. A clean final gate, candidate deployment, current tool-lifecycle smoke, browser/Lighthouse run, supported-model eval traces, and screen-reader review are pending and must be recorded against the final commit and URL before being claimed as current proof.
+**Current deployed release:** application commit [`df599f37e59e562ffaee919fdc4072eec9265f51`](https://github.com/artem-musii/replay-sol/commit/df599f37e59e562ffaee919fdc4072eec9265f51) passed [GitHub Actions run `33125071538`](https://github.com/artem-musii/replay-sol/actions/runs/33125071538): **119/119 Vitest tests** and **73 passing Playwright runs with 5 intentional mobile screenshot-owner skips**. Pages deployment `6132593328` published artifact `9668071269`; all 43 deployed files byte-match that artifact. A cache-busted public Lighthouse 13.4.1 audit scored **100/100/100/100** for performance, accessibility, best practices, and SEO. A fresh live browser loaded the current app and all active evidence assets with 200 responses, no console warnings/errors or off-origin requests, and preserved an explicit human UI observation across reload before deterministic reset.
+
+An injected standards-compatible `document.modelContext` test harness also exercised the deployed bundle's 18→19 lifecycle: it read the seed-v2 summary, durably added a branch observation, returned the original receipt for an exact idempotent replay, rejected changed intent under the same request ID, and registered `add_report_note` after an ordinary-UI report preview. A cache-busted new-document navigation preserved the durable observation at case version 2 with **Saved locally**, while correctly clearing the transient preview and injected registry; visible UI reset then removed the observation and restored seed-v2 case version 1. That runtime harness is a **polyfill/code-contract smoke, not native Site Tools discovery, a supported-model run, or declarative-form evidence**. The older `f980d28` results remain preserved as historical evidence. Supported-model traces, native current-client Site Tools verification, screen-reader/cross-browser/export review, a dedicated header-capable origin, and the public video remain external gates.
 
 See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, Site Tools steps, and how to record results without conflating deterministic tests with probabilistic evals.
 
@@ -213,7 +215,7 @@ Prompts, dimensions, file sizes, visual-review criteria, and SHA-256 checksums a
 
 `npm run build` creates the static application in `dist/`. GitHub Actions publishes `main` to [GitHub Pages](https://artem-musii.github.io/replay-sol/) over HTTPS. The build injects a restrictive CSP and no-referrer policy in HTML; provider-neutral `_headers` are also included for hosts such as Cloudflare Pages or Netlify that support full response policies.
 
-GitHub Pages does not apply the repository’s `_headers` file, so response-only defenses such as `Permissions-Policy`, COOP/COEP, and `X-Frame-Options` remain deployment limitations. The current application also refuses to render the workspace or register tools when framed; that runtime guard complements but does not replace response headers. The historical Site Tools result predates the current candidate, whose deployment verification is pending. See [docs/deployment.md](docs/deployment.md) for the release record and stricter-host alternative.
+GitHub Pages does not apply the repository’s `_headers` file, so response-only defenses such as `Permissions-Policy`, COOP/COEP, and `X-Frame-Options` remain deployment limitations. The current application also refuses to render the workspace or register tools when framed; that runtime guard complements but does not replace response headers. See [docs/deployment.md](docs/deployment.md) for the exact deployed artifact record, live checks, evidence boundaries, and stricter-host alternative.
 
 ## Project documents
 
