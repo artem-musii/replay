@@ -1,0 +1,226 @@
+import {
+  ArrowRight,
+  Bot,
+  CheckCircle2,
+  CircleDotDashed,
+  FileCheck2,
+  LockKeyhole,
+  MousePointer2,
+  ShieldCheck,
+} from "lucide-react";
+import { BrandMark } from "./BrandMark";
+
+interface LandingPageProps {
+  webMcpSupported: boolean;
+  recentCaseTitle?: string;
+  onOpenDemo: () => void;
+  onStartBlank: () => void;
+  onOpenCollaboration: () => void;
+  onResumeCase?: () => void;
+}
+
+const steps = [
+  {
+    number: "01",
+    title: "Reconstruct",
+    text: "Place vehicles, shape trajectories, and synchronize the scene with a shared timeline.",
+    Icon: MousePointer2,
+  },
+  {
+    number: "02",
+    title: "Resolve uncertainty",
+    text: "Keep observations, memory, disputes, and agent hypotheses visibly separate.",
+    Icon: CircleDotDashed,
+  },
+  {
+    number: "03",
+    title: "Produce a factual report",
+    text: "Export a neutral account where every substantive statement retains its source.",
+    Icon: FileCheck2,
+  },
+];
+
+export function LandingPage({
+  webMcpSupported,
+  recentCaseTitle,
+  onOpenDemo,
+  onStartBlank,
+  onOpenCollaboration,
+  onResumeCase,
+}: LandingPageProps) {
+  return (
+    <main className="landing" id="main-content">
+      <nav className="landing-nav" aria-label="Primary navigation">
+        <a href="#top" className="landing-nav__brand">
+          <BrandMark />
+        </a>
+        <div className="landing-nav__meta">
+          <span className={`compatibility-pill ${webMcpSupported ? "is-supported" : ""}`}>
+            <span className="compatibility-pill__dot" aria-hidden="true" />
+            {webMcpSupported ? "Site Tools ready" : "Manual mode ready"}
+          </span>
+          <a href="#privacy">Privacy</a>
+          <button className="text-button" onClick={onOpenCollaboration}>
+            How collaboration works
+          </button>
+        </div>
+      </nav>
+
+      <section className="landing-hero" id="top">
+        <div className="landing-hero__copy">
+          <p className="eyebrow">
+            <span /> Shared incident reconstruction
+          </p>
+          <h1>A shared black box for incidents that did not have one.</h1>
+          <p className="landing-hero__lede">
+            Reconstruct a minor road incident with an AI agent while preserving the difference
+            between evidence, memory, uncertainty, and inference.
+          </p>
+          <div className="landing-hero__actions">
+            <button className="button button--primary button--large" onClick={onOpenDemo}>
+              Try the demo case <ArrowRight size={17} aria-hidden="true" />
+            </button>
+            <button className="button button--secondary button--large" onClick={onStartBlank}>
+              Start a blank case
+            </button>
+          </div>
+          <ul className="landing-hero__assurances" aria-label="Product assurances">
+            <li>
+              <LockKeyhole size={14} /> Local-first
+            </li>
+            <li>
+              <CheckCircle2 size={14} /> No account
+            </li>
+            <li>
+              <ShieldCheck size={14} /> Human-approved reports
+            </li>
+          </ul>
+          {recentCaseTitle && onResumeCase && (
+            <button className="resume-case" onClick={onResumeCase}>
+              <span>Continue local case</span>
+              <strong>{recentCaseTitle}</strong>
+              <ArrowRight size={15} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <figure className="landing-hero__visual">
+          <div className="landing-hero__frame">
+            <img
+              src={`${import.meta.env.BASE_URL}assets/generated/replay-hero.webp`}
+              width="1672"
+              height="941"
+              alt="Editorial top-down illustration of a roundabout reconstruction with two vehicles, trajectories, evidence photographs, a timeline, and provenance nodes."
+              fetchPriority="high"
+            />
+            <figcaption>
+              <span className="visual-caption__index">CASE 04 / 17:42</span>
+              <span>Scene, time, and provenance in one model</span>
+            </figcaption>
+          </div>
+        </figure>
+      </section>
+
+      <section className="landing-thesis" aria-labelledby="thesis-title">
+        <p className="section-kicker">One inspectable account</p>
+        <h2 id="thesis-title">Chat can describe an incident. REPLAY lets you inspect it.</h2>
+        <p>
+          Geometry, timing, provenance, and competing explanations do not fit safely inside a
+          paragraph. REPLAY gives a person and an agent the same live, structured workspace.
+        </p>
+      </section>
+
+      <section className="landing-steps" aria-label="How REPLAY works">
+        {steps.map(({ number, title, text, Icon }) => (
+          <article className="landing-step" key={number}>
+            <div className="landing-step__heading">
+              <span className="landing-step__number">{number}</span>
+              <Icon size={20} strokeWidth={1.7} aria-hidden="true" />
+            </div>
+            <h3>{title}</h3>
+            <p>{text}</p>
+          </article>
+        ))}
+      </section>
+
+      <section
+        className="collaboration-section"
+        id="collaboration"
+        aria-labelledby="collaboration-title"
+      >
+        <div className="collaboration-section__intro">
+          <p className="section-kicker">Why Site Tools matter</p>
+          <h2 id="collaboration-title">The agent works inside your case, not beside it.</h2>
+          <p>
+            Site Tools expose narrow, validated actions through WebMCP. The agent reads the live
+            case, changes the same state you see, and leaves every mutation visible and undoable.
+          </p>
+        </div>
+        <ol className="collaboration-loop">
+          <li>
+            <span>Human</span>
+            <strong>Corrects Vehicle B on the scene</strong>
+            <small>Direct manipulation</small>
+          </li>
+          <li>
+            <span>REPLAY</span>
+            <strong>Records the override and revalidates</strong>
+            <small>Deterministic command</small>
+          </li>
+          <li>
+            <span>Agent</span>
+            <strong>Reads the change and branches uncertainty</strong>
+            <small>WebMCP Site Tool</small>
+          </li>
+          <li>
+            <span>Human</span>
+            <strong>Compares, confirms, or disputes</strong>
+            <small>Final authority</small>
+          </li>
+        </ol>
+        <div className="collaboration-note">
+          <Bot size={18} aria-hidden="true" />
+          <p>
+            Agent inferences can never become confirmed facts. Report finalization always requires a
+            visible human review.
+          </p>
+        </div>
+      </section>
+
+      <section className="privacy-section" id="privacy" aria-labelledby="privacy-title">
+        <div>
+          <p className="section-kicker">Private by default</p>
+          <h2 id="privacy-title">Your case stays in this browser.</h2>
+        </div>
+        <div className="privacy-section__body">
+          <p>
+            REPLAY stores cases and uploaded evidence locally. There is no account, analytics, or
+            external evidence upload in the core product. Demo photographs are original synthetic
+            assets and never represent a real incident.
+          </p>
+          <p className="safety-copy">
+            REPLAY helps organize and visualize a factual account. Its consistency checks are
+            informational and are not a forensic or legal determination.
+          </p>
+        </div>
+      </section>
+
+      <section className="landing-closing">
+        <div>
+          <p className="section-kicker">A complete case is already waiting</p>
+          <h2>See the human-agent loop in under three minutes.</h2>
+        </div>
+        <button className="button button--primary button--large" onClick={onOpenDemo}>
+          Open Roundabout incident — 17:42 <ArrowRight size={17} />
+        </button>
+      </section>
+
+      <footer className="landing-footer">
+        <BrandMark />
+        <p>
+          Evidence-bound incident documentation. Local-first, open source, and human-controlled.
+        </p>
+        <span>REPLAY · 2026</span>
+      </footer>
+    </main>
+  );
+}

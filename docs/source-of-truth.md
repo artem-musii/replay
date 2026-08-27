@@ -1,0 +1,206 @@
+# REPLAY source of truth
+
+Last verified: **2026-08-27** (Europe/Madrid). This file records external facts, resulting REPLAY decisions, and the current implementation caveats that materially affect those decisions. Detailed verification status remains in `IMPLEMENTATION_STATUS.md` and `docs/testing.md`.
+
+## Authority order
+
+When sources conflict, use this order:
+
+1. The dated [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) for the API shape.
+2. Current [Chrome WebMCP documentation](https://developer.chrome.com/docs/ai/webmcp) for Chrome behavior, origin-trial details, and browser-specific guidance.
+3. [OpenAI Site Tools documentation](https://learn.chatgpt.com/docs/webmcp) for ChatGPT/Codex availability and behavior.
+4. The [official Devpost rules](https://webmcp.devpost.com/rules) and [challenge page](https://webmcp.devpost.com/) for eligibility, deliverables, dates, and judging.
+5. Current OpenAI model documentation for generated assets.
+
+The WebMCP document is a **Draft Community Group Report dated 2026-08-26**, not a W3C Standard or Standards Track document. Feature detection and a fully functional non-WebMCP path are therefore required.
+
+## Current WebMCP API decisions
+
+### Imperative registration
+
+The current registration surface is `document.modelContext.registerTool(...)`:
+
+```ts
+const registration = new AbortController();
+
+if (typeof document !== "undefined" && typeof document.modelContext?.registerTool === "function") {
+  await document.modelContext.registerTool(
+    {
+      name: "get_case_summary",
+      description: "Read a compact summary of the open REPLAY case.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        untrustedContentHint: true,
+      },
+      execute: async (_input, { signal }) => {
+        signal.throwIfAborted();
+        return readCaseSummary();
+      },
+    },
+    { signal: registration.signal },
+  );
+}
+
+// Unregister when the page or relevant component lifecycle ends.
+registration.abort();
+```
+
+Do not use older examples centered on `navigator.modelContext.provideContext(...)` or `navigator.modelContext.unregisterTool(...)`.
+
+Current implications:
+
+- A registration `AbortSignal` unregisters that tool when aborted.
+- The `execute(input, { signal })` callback receives a separate cancellation signal for that invocation. The current registry/adapter/engine checks it before command execution; Dexie persistence is a later non-cancellable save and is not part of one rollback transaction.
+- Chrome documents that, as of Chrome 153, unregistering a tool does not cancel an already in-flight execution. REPLAY must therefore handle invocation cancellation and lifecycle cleanup separately.
+- A call aborted before the synchronous engine commit produces no domain change or activity and returns/throws cancellation. Once the engine commits, later cancellation or persistence failure does not roll back the in-memory command; cross-layer transactional cancellation remains a known gap.
+- `document.modelContext.getTools()` and `executeTool()` are useful for the debug/evaluation surface where supported; they are not needed for normal application behavior.
+
+### Tool annotations
+
+The 2026-08-26 draft defines these optional hints, both defaulting to `false`:
+
+```ts
+annotations: {
+  readOnlyHint: boolean;
+  untrustedContentHint: boolean;
+}
+```
+
+- `readOnlyHint: true` means the tool does not mutate state. It is a hint, not an authorization mechanism.
+- `untrustedContentHint: true` means the output contains data the registering site considers untrusted. Use it for user statements, notes, filenames, evidence metadata, imported content, and hypothesis text.
+- Tool definitions, annotations, and returned data are themselves untrusted from an agent/client perspective. Application authorization and validation remain mandatory.
+
+### Declarative forms
+
+Chrome’s Declarative API derives a tool from an ordinary visible HTML form:
+
+```html
+<form
+  toolname="finalize_factual_report"
+  tooldescription="Prepare the reviewed factual report for manual human finalization."
+>
+  <label for="reviewer-note">Review note</label>
+  <textarea
+    id="reviewer-note"
+    name="reviewerNote"
+    toolparamdescription="A non-sensitive note for the human reviewer."
+  ></textarea>
+  <button type="submit">Finalize factual report</button>
+</form>
+```
+
+REPLAY's implemented form uses `toolname="finalize_factual_report"`, includes `tooldescription`, and omits `toolautosubmit`. Its `toolactivated` listener marks the review as Site Tools-prepared and opens the visible review; `toolcancel` clears the prepared state. A person must complete three acknowledgements, continue to a second confirmation, and click the final control. The reducer independently rejects agent/WebMCP finalization. Browser-native active-state styling and event behavior still require verification in a current compatible browser.
+
+### Registration strategy
+
+- Keep a stable base set while a case workspace is open.
+- Register scene tools only while a scene exists.
+- Register fact/evidence/question tools while factual workspace data is available.
+- Register hypothesis tools, including report-preview construction, only after a baseline branch exists.
+- Register the report-note tool only after a preview exists. Declarative `finalize_factual_report` is owned by the visible report form rather than the imperative registry.
+- Prefer static registration; change the set only at meaningful application-state boundaries.
+- Use narrow, non-overlapping schemas. Do not expose a generic command executor.
+- Reuse the same validated domain commands as the human UI.
+- Return compact results after the canonical command and post-command save. React receives the engine notification immediately, but actual browser paint is not transactionally coupled to the tool promise and remains a live-browser verification point.
+
+### Origin and permissions boundary
+
+Chrome gates WebMCP behind origin isolation and the `tools` Permissions Policy:
+
+- Deploy over HTTPS.
+- Do not set `document.domain` or `Origin-Agent-Cluster: ?0`; either makes the document ineligible.
+- Send `Permissions-Policy: tools=(self)` (the policy defaults to `self`, but REPLAY sets it explicitly).
+- Keep tools in the top-level, same-origin application. REPLAY has no need for cross-origin frames, `exposedTo`, or `getTools({ fromOrigins })`.
+- Do not render code that touches `document.modelContext` during server rendering; register after client hydration.
+
+Chrome lists the origin trial from Chrome 149 and the local flag `chrome://flags/#enable-webmcp-testing`. WebMCP is still evolving, so the manual UI must remain complete when the API is absent.
+
+## OpenAI Site Tools facts
+
+The live [Site Tools page](https://learn.chatgpt.com/docs/webmcp), retrieved 2026-08-27, says:
+
+- Site Tools are ChatGPT’s implementation of the proposed WebMCP standard.
+- ChatGPT Work and Codex can discover tools from the page open in the desktop app’s built-in browser; human and agent share the same live page and signed-in session.
+- Tools belong to their originating page and may disappear after navigation or page closure.
+- GPT-5.6 Sol and GPT-5.6 Terra support Site Tools; GPT-5.6 Luna currently has WebMCP disabled.
+- Site Tools are not currently available in Enterprise or Edu workspaces, and rollout/page availability still applies.
+- Each call receives browser safety review, remains tied to its originating page and registration, and does not make the site or result trustworthy.
+- OpenAI recommends narrow inputs, explicit side effects, existing app authentication/authorization/validation, enough output to verify a result, and preserving the ordinary UI as fallback.
+
+REPLAY consequently treats ChatGPT/Codex testing as a compatibility target, not an availability guarantee.
+
+## Chrome engineering guidance adopted by REPLAY
+
+From Chrome’s best-practice, security, and eval guidance:
+
+- One tool should perform one clear function; overlapping tools reduce selection accuracy.
+- Names and descriptions should distinguish starting a process from completing an action.
+- Validate strictly in code even when the JSON Schema is descriptive.
+- Update the visible interface before reporting success.
+- Set `untrustedContentHint` on externally sourced or user-generated outputs and `readOnlyHint` on non-mutating tools.
+- Keep names, descriptions, parameters, and outputs concise. Chrome’s current guidance suggests about 30 characters for names, 500 for tool descriptions, 150 per parameter description, and 1.5K per individual output.
+- Use deterministic tests for tool logic, registration lifecycle, state effects, and outputs; use probabilistic evals for intent understanding, tool choice, arguments, ordering, and complete journeys.
+- Eval datasets should include both direct and ambiguous intents and should present the complete tool set available in the evaluated state.
+
+## Challenge requirements and judging
+
+The [challenge page](https://webmcp.devpost.com/) and [official rules](https://webmcp.devpost.com/rules) were retrieved 2026-08-27. The rules govern over plugin-generated summaries.
+
+### Dates
+
+- Submission period: **2026-08-25 11:00 PT through 2026-09-03 13:00 PT**.
+- Judging: **2026-09-04 10:00 PT through 2026-09-21 17:00 PT**.
+- Winners: on or around **2026-09-23 14:00 PT**.
+
+### Project and submission checklist
+
+- Build a WebMCP-powered web app in which humans and agents interact, collaborate, and create together.
+- The project must run consistently on its declared platform and match the video/text description.
+- A pre-existing project must be meaningfully extended with WebMCP during the submission period and document that new work.
+- Provide a working live URL accessible in ChatGPT’s in-app browser or WebMCP-enabled Chrome.
+- Provide an English text description explaining fit for WebMCP, UX improvement, newly possible human-agent collaboration, and the WebMCP implementation.
+- Provide a **public YouTube demo under three minutes**, with audio, showing both the working project and how WebMCP is used.
+- Provide a public GitHub, GitLab, or Bitbucket repository with all required source, assets, functional instructions, and a visible open-source license.
+- Use only third-party SDKs, APIs, data, trademarks, music, and other material for which the entrant has the necessary rights.
+- Keep the project available free of charge and without testing restrictions through the end of judging; provide credentials in testing instructions if access is private.
+
+Stage one is a pass/fail viability and required-API fit check. Stage two uses four **equally weighted** criteria:
+
+1. **WebMCP Leverage** — thorough, skillful, working, non-trivial use.
+2. **Execution** — a complete, coherent, runnable product rather than a proof of concept.
+3. **Potential Impact** — a credible, specific problem and audience addressed by what is demonstrated.
+4. **Creativity & Ambition** — novelty and differentiation.
+
+Tie-breaking compares the criteria in listed order, so WebMCP Leverage is the first tie-breaker.
+
+## GPT Image 2 decision
+
+The [GPT Image 2 model page](https://developers.openai.com/api/docs/models/gpt-image-2), retrieved 2026-08-27, identifies `gpt-image-2` as OpenAI’s current state-of-the-art image generation and editing model with text input plus image input/output. The dated snapshot listed is `gpt-image-2-2026-04-21`. The [image generation guide](https://developers.openai.com/api/docs/guides/image-generation) documents current generation/editing use.
+
+REPLAY used GPT Image 2 during development to create the hero and four clearly labelled synthetic demo evidence images. The runtime application does not call an OpenAI image API, require an API key, or send user evidence to OpenAI.
+
+## Product safety facts that must remain visible
+
+REPLAY organizes and visualizes an account; it does not determine legal liability, establish fault, provide legal advice, perform a forensic-certified reconstruction, calculate evidentiary collision physics, assess truthfulness, or replace police, legal, insurance, or professional investigation. Reports must keep confirmed observations, reported details, evidence, unresolved questions, disputes, and agent hypotheses distinct.
+
+## Official source register
+
+| Source                                                                                          | Source date shown          | Verified   | Used for                                                                 |
+| ----------------------------------------------------------------------------------------------- | -------------------------- | ---------- | ------------------------------------------------------------------------ |
+| [WebMCP Draft Community Group Report](https://webmachinelearning.github.io/webmcp/)             | 2026-08-26                 | 2026-08-27 | API dictionaries, annotations, signals, declarative API, security model  |
+| [Chrome WebMCP overview](https://developer.chrome.com/docs/ai/webmcp)                           | Updated 2026-08-07         | 2026-08-27 | availability, origin isolation, permissions policy, fallback             |
+| [Chrome Imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api)             | Updated 2026-08-20         | 2026-08-27 | registration, unregister, cancellation, discovery, cross-origin behavior |
+| [Chrome Declarative API](https://developer.chrome.com/docs/ai/webmcp/declarative-api)           | Published 2026-05-18       | 2026-08-27 | form attributes, manual submit, events, focus styles                     |
+| [Chrome best practices](https://developer.chrome.com/docs/ai/webmcp/best-practices)             | Published 2026-05-18       | 2026-08-27 | tool strategy, schemas, reliability, eval-driven development             |
+| [Chrome tool security](https://developer.chrome.com/docs/ai/webmcp/secure-tools)                | Updated 2026-07-01         | 2026-08-27 | prompt injection, annotations, exposure, output budgets                  |
+| [Chrome WebMCP evals](https://developer.chrome.com/docs/ai/webmcp/evals)                        | Header updated 2026-05-28  | 2026-08-27 | deterministic tests, probabilistic evals, direct/ambiguous datasets      |
+| [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)                                      | Live page                  | 2026-08-27 | ChatGPT/Codex behavior and model/workspace availability                  |
+| [WebMCP Challenge](https://webmcp.devpost.com/)                                                 | Live challenge             | 2026-08-27 | requirements, deadline, judging summary                                  |
+| [Official challenge rules](https://webmcp.devpost.com/rules)                                    | 2026 challenge rules       | 2026-08-27 | dates, eligibility, submission requirements, judging/tie-breaks          |
+| [OpenAI image generation guide](https://developers.openai.com/api/docs/guides/image-generation) | Live API docs              | 2026-08-27 | current generation/editing guidance                                      |
+| [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)                        | Snapshot 2026-04-21 listed | 2026-08-27 | current model identifier and capabilities                                |

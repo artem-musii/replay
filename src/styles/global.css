@@ -1,0 +1,331 @@
+@import "./landing.css";
+@import "./scene.css";
+@import "./inspector.css";
+@import "./debug.css";
+@import "./workspace.css";
+
+:root {
+  font-family: Inter, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  color: oklch(0.245 0.025 210);
+  background: oklch(0.965 0.009 85);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --paper: oklch(0.965 0.009 85);
+  --paper-raised: oklch(0.985 0.006 85);
+  --paper-deep: oklch(0.93 0.013 84);
+  --ink: oklch(0.245 0.025 210);
+  --muted: oklch(0.49 0.018 215);
+  --faint: oklch(0.47 0.015 210);
+  --rule: oklch(0.86 0.014 85);
+  --rule-strong: oklch(0.75 0.019 85);
+  --field: oklch(0.27 0.04 185);
+  --field-hover: oklch(0.33 0.05 185);
+  --confirmed: oklch(0.55 0.095 180);
+  --uncertain: oklch(0.72 0.13 80);
+  --conflict: oklch(0.63 0.14 30);
+  --agent: oklch(0.57 0.105 275);
+  --selection: oklch(0.58 0.13 240);
+  --focus: oklch(0.53 0.17 245);
+  --shadow-soft: 0 18px 50px oklch(0.24 0.02 200 / 0.12);
+  --ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--paper);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+button,
+input,
+select,
+textarea,
+a {
+  scroll-margin-top: 66px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+a {
+  color: inherit;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+::selection {
+  background: oklch(0.78 0.08 190 / 0.55);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  left: 16px;
+  top: 12px;
+  transform: translateY(-160%);
+  background: var(--ink);
+  color: var(--paper-raised);
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 16px;
+  font-weight: 680;
+  font-size: 0.875rem;
+  transition:
+    transform 170ms var(--ease-out),
+    background-color 170ms var(--ease-out),
+    border-color 170ms var(--ease-out),
+    color 170ms var(--ease-out);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.button--large {
+  min-height: 48px;
+  padding-inline: 20px;
+}
+.button--primary {
+  background: var(--field);
+  color: var(--paper-raised);
+}
+.button--primary:hover:not(:disabled) {
+  background: var(--field-hover);
+}
+.button--secondary {
+  background: var(--paper-raised);
+  border-color: var(--rule-strong);
+}
+.button--secondary:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.button--quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.button--quiet:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--paper-deep);
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: currentColor;
+}
+.brand-mark__symbol {
+  width: 27px;
+  height: 27px;
+}
+.brand-mark__word {
+  font-size: 1.03rem;
+  font-weight: 790;
+  letter-spacing: 0.16em;
+}
+.brand-mark--compact .brand-mark__symbol {
+  width: 24px;
+  height: 24px;
+}
+
+.eyebrow,
+.section-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-size: 0.72rem;
+  font-weight: 760;
+  color: var(--muted);
+  margin: 0 0 18px;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.eyebrow > span {
+  width: 24px;
+  height: 1px;
+  background: currentColor;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+.field > span,
+.choice-fieldset > legend {
+  font-size: 0.78rem;
+  font-weight: 720;
+  letter-spacing: 0.02em;
+}
+.field > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.field small {
+  color: var(--faint);
+  font-weight: 530;
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper-raised);
+  border-radius: 9px;
+  padding: 11px 12px;
+  min-height: 44px;
+  transition:
+    border-color 160ms var(--ease-out),
+    box-shadow 160ms var(--ease-out);
+}
+.field textarea {
+  resize: vertical;
+  line-height: 1.55;
+}
+.field input:hover,
+.field select:hover,
+.field textarea:hover {
+  border-color: var(--muted);
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--selection);
+  box-shadow: 0 0 0 3px oklch(0.58 0.13 240 / 0.13);
+  outline: none;
+}
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.field__hint {
+  color: var(--muted);
+}
+
+.fatal-state {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  max-width: 620px;
+  margin: auto;
+  padding: 48px 24px;
+}
+.fatal-state .brand-mark {
+  margin-bottom: 72px;
+}
+.fatal-state h1 {
+  font-size: 2.5rem;
+  line-height: 1.05;
+  margin: 0 0 18px;
+}
+.fatal-state > p:not(.section-kicker) {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.fatal-state__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.app-loading {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.app-loading > span {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--rule-strong);
+  border-top-color: var(--field);
+  border-radius: 50%;
+  animation: loading-spin 850ms linear infinite;
+}
+.app-loading strong {
+  color: var(--ink);
+  letter-spacing: 0.16em;
+  font-size: 0.82rem;
+}
+.app-loading p {
+  margin: 0;
+  font-size: 0.67rem;
+}
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}

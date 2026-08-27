@@ -1,0 +1,291 @@
+.debug-backdrop {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  background: oklch(0.14 0.025 210 / 0.58);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  backdrop-filter: blur(4px);
+}
+.debug-panel {
+  width: min(1080px, 96vw);
+  height: min(760px, 92vh);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  box-shadow: 0 28px 90px oklch(0.14 0.025 210 / 0.4);
+  overflow: hidden;
+}
+.debug-panel > header {
+  padding: 16px 18px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--rule);
+}
+.debug-panel > header p {
+  margin: 0 0 3px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.6rem;
+}
+.debug-panel > header h2 {
+  font-family: Georgia, serif;
+  font-size: 1.3rem;
+  font-weight: 500;
+  margin: 0;
+}
+.debug-support {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+}
+.debug-support.is-supported {
+  color: oklch(0.39 0.085 180);
+  background: oklch(0.96 0.023 180);
+}
+.debug-support.is-fallback {
+  background: var(--paper);
+}
+.debug-support > div {
+  display: grid;
+  gap: 1px;
+}
+.debug-support strong {
+  font-size: 0.66rem;
+}
+.debug-support span {
+  font-size: 0.58rem;
+  color: var(--muted);
+}
+.debug-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+}
+.debug-tool-list {
+  overflow: auto;
+  padding: 7px;
+  border-right: 1px solid var(--rule);
+  background: var(--paper);
+}
+.debug-tool-list > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 8px;
+}
+.debug-tool-list > button:hover {
+  background: var(--paper-deep);
+}
+.debug-tool-list > button.is-selected {
+  border-color: var(--rule-strong);
+  background: var(--paper-raised);
+}
+.debug-tool-list button > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.debug-tool-list strong {
+  font-size: 0.66rem;
+}
+.debug-tool-list small {
+  overflow: hidden;
+  color: var(--muted);
+  font:
+    0.53rem ui-monospace,
+    monospace;
+  text-overflow: ellipsis;
+}
+.tool-state {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.tool-state.is-registered {
+  background: var(--confirmed);
+}
+.tool-state.is-error {
+  background: var(--conflict);
+}
+.tool-state.is-registering {
+  background: var(--uncertain);
+}
+.debug-detail {
+  min-width: 0;
+  overflow: auto;
+  padding: 20px;
+}
+.debug-detail__title {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.debug-detail h3 {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+.debug-detail code {
+  color: var(--selection);
+  font-size: 0.67rem;
+}
+.registration-badge {
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 4px 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.52rem;
+}
+.registration-badge.is-registered {
+  color: var(--confirmed);
+  border-color: var(--confirmed);
+}
+.debug-detail > p {
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 0.74rem;
+  max-width: 720px;
+}
+.annotation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+.annotation-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 0.58rem;
+  color: var(--muted);
+}
+.debug-detail details {
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  margin: 12px 0;
+}
+.debug-detail summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+.debug-detail pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  background: oklch(0.2 0.025 210);
+  color: oklch(0.9 0.025 185);
+  font:
+    0.6rem/1.5 ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.debug-input {
+  display: grid;
+  gap: 5px;
+}
+.debug-input > span {
+  font-size: 0.65rem;
+  font-weight: 730;
+}
+.debug-input textarea {
+  width: 100%;
+  border: 1px solid var(--rule-strong);
+  border-radius: 7px;
+  padding: 9px;
+  background: var(--paper);
+  font:
+    0.64rem/1.5 ui-monospace,
+    monospace;
+  resize: vertical;
+}
+.debug-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 8px;
+}
+.debug-actions .button {
+  min-height: 34px;
+  font-size: 0.66rem;
+}
+.debug-hint {
+  font-size: 0.61rem !important;
+}
+.debug-result {
+  border-left: 3px solid var(--confirmed);
+  background: var(--paper);
+  margin-top: 12px;
+  padding: 9px;
+}
+.debug-result.is-error {
+  border-color: var(--conflict);
+  color: var(--conflict);
+  font-size: 0.66rem;
+}
+.debug-result > span {
+  display: block;
+  font-size: 0.58rem;
+  font-weight: 750;
+  margin-bottom: 5px;
+}
+.debug-panel > footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid var(--rule);
+  padding: 7px 18px;
+  color: var(--muted);
+  font-size: 0.58rem;
+}
+.debug-panel > footer code {
+  color: var(--agent);
+}
+@media (max-width: 720px) {
+  .debug-backdrop {
+    padding: 0;
+  }
+  .debug-panel {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+  .debug-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 190px minmax(0, 1fr);
+  }
+  .debug-tool-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .debug-detail {
+    padding: 14px;
+  }
+}

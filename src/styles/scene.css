@@ -1,0 +1,505 @@
+.scene-panel {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  background: oklch(0.91 0.018 155);
+  overflow: hidden;
+}
+.scene-toolbar {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 0 9px;
+  background: var(--paper-raised);
+  border-bottom: 1px solid var(--rule);
+}
+.scene-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.scene-toolbar__group:last-child {
+  justify-content: flex-end;
+}
+.scene-toolbar__label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+.scene-toolbar__label small {
+  color: var(--muted);
+  font-weight: 520;
+}
+.tool-button {
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: transparent;
+  font-size: 0.69rem;
+  font-weight: 660;
+  color: var(--muted);
+}
+.tool-button:hover {
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+.tool-button.is-active {
+  background: oklch(0.92 0.025 185);
+  color: var(--field);
+}
+.tool-button--icon {
+  width: 30px;
+  padding: 0;
+}
+.zoom-value {
+  width: 38px;
+  text-align: center;
+  font:
+    0.63rem "SFMono-Regular",
+    ui-monospace,
+    monospace;
+  color: var(--muted);
+}
+.scene-stage {
+  position: relative;
+  min-height: 0;
+  cursor: grab;
+  overflow: hidden;
+}
+.scene-stage:active {
+  cursor: grabbing;
+}
+.scene-svg {
+  width: 100%;
+  height: 100%;
+  min-height: 380px;
+  touch-action: none;
+  user-select: none;
+}
+.scene-ground {
+  fill: oklch(0.87 0.028 145);
+}
+.road-surface {
+  fill: oklch(0.43 0.016 225);
+}
+.roundabout-island {
+  fill: oklch(0.78 0.02 80);
+  stroke: oklch(0.9 0.012 80);
+  stroke-width: 15;
+}
+.island-green {
+  fill: oklch(0.59 0.055 145);
+}
+.island-shrub {
+  fill: oklch(0.47 0.067 143);
+}
+.road-edge {
+  fill: none;
+  stroke: oklch(0.86 0.015 85);
+  stroke-width: 6;
+}
+.lane-boundary {
+  fill: none;
+  stroke: oklch(0.81 0.017 85);
+  stroke-width: 2.5;
+  stroke-dasharray: 20 18;
+}
+.stop-line {
+  fill: none;
+  stroke: oklch(0.84 0.014 85);
+  stroke-width: 6;
+}
+.crosswalk {
+  fill: oklch(0.85 0.013 85);
+  opacity: 0.9;
+}
+.direction-arrow {
+  fill: none;
+  stroke: oklch(0.82 0.015 85);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.placement-grid {
+  color: oklch(0.28 0.03 180);
+  pointer-events: none;
+}
+.trajectory {
+  cursor: pointer;
+}
+.trajectory__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+}
+.trajectory__line {
+  fill: none;
+  stroke: var(--selection);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+  pointer-events: none;
+}
+.trajectory--branch-1 .trajectory__line {
+  stroke: var(--agent);
+  stroke-dasharray: 12 9;
+}
+.trajectory--branch-2 .trajectory__line {
+  stroke: var(--uncertain);
+  stroke-dasharray: 3 8;
+}
+.trajectory.is-overlay .trajectory__line {
+  opacity: 0.58;
+}
+.trajectory.is-selected .trajectory__line {
+  stroke-width: 6;
+}
+.trajectory__handle {
+  fill: var(--paper-raised);
+  stroke: var(--selection);
+  stroke-width: 3;
+  cursor: move;
+}
+.trajectory__handle:focus {
+  outline: none;
+  stroke: var(--ink);
+  stroke-width: 4;
+}
+.path-marker-label {
+  font:
+    9px "SFMono-Regular",
+    ui-monospace,
+    monospace;
+  fill: oklch(0.92 0.008 85);
+  letter-spacing: 0.1em;
+  paint-order: stroke;
+  stroke: oklch(0.27 0.025 210);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.scene-vehicle {
+  cursor: move;
+  outline: none;
+}
+.scene-vehicle:focus-visible .vehicle-selection {
+  stroke: var(--focus);
+  stroke-width: 4;
+  stroke-dasharray: 4 4;
+}
+.vehicle-selection {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 3;
+}
+.scene-vehicle.is-selected .vehicle-selection {
+  stroke: var(--selection);
+  stroke-dasharray: 7 5;
+}
+.scene-vehicle.is-agent-active {
+  filter: url(#agent-pulse);
+}
+.scene-vehicle.is-locked {
+  cursor: not-allowed;
+}
+.vehicle-body {
+  stroke: oklch(0.28 0.03 220);
+  stroke-width: 1.8;
+}
+.vehicle-body--blue {
+  fill: oklch(0.48 0.09 245);
+}
+.vehicle-body--silver {
+  fill: oklch(0.76 0.015 235);
+}
+.vehicle-window {
+  fill: oklch(0.33 0.035 215);
+  stroke: oklch(0.77 0.02 215 / 0.55);
+  stroke-width: 1;
+}
+.vehicle-divider,
+.vehicle-front {
+  fill: none;
+  stroke: oklch(0.73 0.025 220 / 0.62);
+  stroke-width: 1.2;
+}
+.vehicle-light {
+  fill: oklch(0.89 0.08 90);
+}
+.vehicle-tail {
+  fill: oklch(0.58 0.16 28);
+}
+.vehicle-label {
+  font:
+    700 12px Inter,
+    system-ui,
+    sans-serif;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--paper-raised);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.damage-glyph {
+  fill: var(--conflict);
+  stroke: var(--paper-raised);
+  stroke-width: 2;
+}
+.damage-glyph__mark {
+  fill: var(--paper-raised);
+}
+.lock-glyph circle {
+  fill: var(--ink);
+}
+.lock-glyph path {
+  fill: none;
+  stroke: var(--paper-raised);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.impact-marker {
+  cursor: pointer;
+}
+.impact-marker > circle:first-child {
+  fill: oklch(0.63 0.14 30 / 0.15);
+  stroke: var(--conflict);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+.impact-marker > circle:nth-child(2) {
+  fill: oklch(0.63 0.14 30 / 0.18);
+  stroke: var(--conflict);
+  stroke-width: 2;
+}
+.impact-marker > path {
+  stroke: var(--conflict);
+  stroke-width: 1.5;
+}
+.impact-marker > text {
+  font:
+    700 9px "SFMono-Regular",
+    ui-monospace,
+    monospace;
+  fill: var(--conflict);
+  letter-spacing: 0.08em;
+  paint-order: stroke;
+  stroke: var(--paper-raised);
+  stroke-width: 3;
+}
+.impact-marker.is-selected > circle:first-child {
+  stroke-width: 4;
+}
+.impact-marker.certainty--reported > circle:first-child {
+  stroke-dasharray: none;
+}
+.impact-marker.certainty--confirmed > circle:first-child,
+.impact-marker.certainty--confirmed > circle:nth-child(2) {
+  stroke: var(--confirmed);
+}
+.impact-marker.certainty--confirmed > path {
+  stroke: var(--confirmed);
+}
+.impact-marker.certainty--confirmed > text {
+  fill: var(--confirmed);
+}
+.impact-marker.certainty--unknown {
+  opacity: 0.65;
+}
+.scene-legend {
+  position: absolute;
+  left: 14px;
+  bottom: 34px;
+  display: flex;
+  gap: 14px;
+  padding: 8px 10px;
+  border: 1px solid oklch(0.74 0.02 165 / 0.6);
+  border-radius: 8px;
+  background: oklch(0.94 0.01 85 / 0.91);
+  color: var(--muted);
+  font-size: 0.61rem;
+  box-shadow: 0 4px 14px oklch(0.2 0.02 200 / 0.08);
+}
+.scene-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-line {
+  width: 16px;
+  border-top: 2px solid var(--selection);
+}
+.legend-line--dashed {
+  border-top-style: dashed;
+  border-color: var(--agent);
+}
+.legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.legend-dot--impact {
+  background: var(--conflict);
+}
+.scene-hint {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: oklch(0.32 0.024 200 / 0.78);
+  font-size: 0.6rem;
+}
+.scene-quick-actions {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  top: 52px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  background: var(--paper-raised);
+  box-shadow: 0 8px 20px oklch(0.2 0.02 200 / 0.12);
+}
+.scene-quick-actions > span {
+  color: var(--muted);
+  font-size: 0.61rem;
+  white-space: nowrap;
+  padding-right: 7px;
+}
+.scene-placement-prompt {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 28px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--conflict);
+  border-radius: 8px;
+  background: oklch(0.96 0.02 35 / 0.96);
+  color: oklch(0.42 0.1 30);
+  font-size: 0.66rem;
+  box-shadow: var(--shadow-soft);
+  pointer-events: none;
+}
+.scene-popover {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  width: min(430px, calc(100% - 30px));
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 11px;
+  background: var(--paper-raised);
+  box-shadow: var(--shadow-soft);
+}
+.scene-popover header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.scene-popover header div {
+  display: grid;
+  gap: 2px;
+}
+.scene-popover header small {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.55rem;
+}
+.scene-popover header strong {
+  font-size: 0.78rem;
+}
+.scene-popover header button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px;
+}
+.scene-popover label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.63rem;
+  font-weight: 700;
+}
+.scene-popover input,
+.scene-popover select {
+  min-height: 36px;
+  width: 100%;
+  border: 1px solid var(--rule-strong);
+  border-radius: 7px;
+  background: var(--paper);
+  padding: 7px 9px;
+  font-size: 0.7rem;
+}
+.scene-popover footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.scene-popover footer > span {
+  color: var(--muted);
+  font-size: 0.57rem;
+}
+.scene-popover .button {
+  min-height: 34px;
+  font-size: 0.67rem;
+}
+
+@media (max-width: 1100px) {
+  .scene-toolbar__label small,
+  .scene-hint {
+    display: none;
+  }
+  .scene-legend {
+    bottom: 12px;
+  }
+}
+
+@media (max-width: 720px) {
+  .scene-toolbar {
+    grid-template-columns: 1fr auto;
+  }
+  .scene-toolbar__label {
+    display: none;
+  }
+  .tool-button span {
+    display: none;
+  }
+  .scene-quick-actions > span {
+    display: none;
+  }
+  .scene-quick-actions {
+    max-width: calc(100% - 18px);
+    overflow-x: auto;
+  }
+}
