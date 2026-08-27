@@ -167,7 +167,7 @@ The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so 
 
 - Record interaction responsiveness while dragging, scrubbing, playing at 2×, and overlaying two branches.
 - Lighthouse 13.4.1 audited the seeded workspace from the strict production preview: **96 performance, 100 accessibility, 100 best practices, and 100 SEO**. Recorded lab metrics were FCP 2.0 s, LCP 2.4 s, Speed Index 2.0 s, total blocking time 10 ms, CLS 0, and interactive 2.4 s.
-- The same Lighthouse version audited the public GitHub Pages workspace at **99 performance, 100 accessibility, 100 best practices, and 100 SEO**. Public lab metrics were FCP 1.8 s, LCP 1.9 s, Speed Index 1.8 s, total blocking time 0 ms, CLS 0, and interactive 1.9 s.
+- The same Lighthouse version audited the cache-busted public application commit at **100 performance, 100 accessibility, 100 best practices, 100 SEO, and 100 agentic browsing**, with no binary failures. Public lab metrics were FCP 0.5 s, LCP 0.5 s, Speed Index 0.7 s, total blocking time 0 ms, CLS 0, and interactive 0.5 s.
 - Confirm no broken generated image, layout shift, clipped focus ring, unreadable status, or horizontal overflow at 1440 × 900, 1024 × 768, 390 × 844, and 200% zoom.
 - Inspect the five generated images for the criteria in [generated-assets.md](generated-assets.md).
 - Check the console for errors, unhandled rejections, hydration warnings, missing assets/source maps affecting users, and failed requests.

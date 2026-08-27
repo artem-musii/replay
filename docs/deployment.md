@@ -5,7 +5,7 @@ Deployment status at **2026-08-27**: **public and verified on GitHub Pages**.
 - Landing: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
 - Deterministic demo: [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo)
 - Repository: [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)
-- Initial verified deployment: commit `c95df75`, GitHub Actions run `33105222174`
+- Final audited application: commit `f980d28`, warning-free GitHub Actions run `33108322846`
 
 REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API.
 
@@ -36,7 +36,7 @@ Every push to `main` runs `.github/workflows/deploy-pages.yml`. The workflow:
 4. builds with `VITE_BASE_PATH=/replay-sol/`; and
 5. uploads and deploys `dist/` through GitHub Pages.
 
-The public release was checked for successful HTTPS responses, base-path assets, favicon, manifest, sitemap, 404 page, deterministic demo loading, IndexedDB persistence after reload, and direct Site Tools behavior. Lighthouse 13.4.1 scored the deployed workspace **99 performance, 100 accessibility, 100 best practices, and 100 SEO**.
+The public release was checked for successful HTTPS responses, base-path assets, favicon, manifest, sitemap, 404 page, deterministic demo loading, IndexedDB persistence after reload, and direct Site Tools behavior. A cache-busted Lighthouse 13.4.1 run against the exact application commit scored **100 performance, 100 accessibility, 100 best practices, 100 SEO, and 100 agentic browsing**, with no binary failures.
 
 The in-app browser discovered 17 baseline tools on the public origin. `get_case_summary`, `add_observation`, and `revert_agent_action` completed against visible shared state. Building a report preview registered the 18th `add_report_note` tool and exposed one declarative `finalize_factual_report` form with no `toolautosubmit`. This is a direct tool-contract smoke result, not a supported-model evaluation pass.
 

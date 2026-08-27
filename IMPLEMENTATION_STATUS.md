@@ -29,7 +29,7 @@ The 2026-08-27 snapshot recorded in `docs/testing.md` reports:
 - Playwright: **32/32 project runs** in 17.1 seconds, comprising 16 scenarios in desktop Chromium and the same 16 in mobile Chrome;
 - automated axe checks found no serious or critical violations in the landing page, blank-case wizard, demo workspace, and human-finalization dialog.
 - Lighthouse 13.4.1 scored the seeded strict production preview **96 performance, 100 accessibility, 100 best practices, and 100 SEO**, with 10 ms total blocking time and zero layout shift.
-- The public GitHub Pages build scored **99 performance, 100 accessibility, 100 best practices, and 100 SEO**, with 0 ms total blocking time and zero layout shift.
+- The exact public application commit scored **100 performance, 100 accessibility, 100 best practices, 100 SEO, and 100 agentic browsing**, with 0 ms total blocking time, zero layout shift, and no binary failures.
 - The public in-app browser discovered the 17-tool baseline, ran `get_case_summary`, visibly applied and safely reverted an `add_observation` mutation, built a report preview, discovered the 18th `add_report_note` tool, and found one declarative `finalize_factual_report` form with no `toolautosubmit`.
 - A separate public-origin journey created a blank case, reloaded, and restored it from IndexedDB.
 
@@ -49,7 +49,7 @@ The direct Site Tools checks prove the tool contracts work in the tested public 
 
 ## Deployment status
 
-Published from [github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol) to [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/) with GitHub Actions. The initial verified deployment used commit `c95df75` and workflow run `33105222174`; subsequent pushes to `main` use the same checked workflow.
+Published from [github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol) to [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/) with GitHub Actions. The initial verified deployment used commit `c95df75` and workflow run `33105222174`; the final audited application used commit `f980d28` and warning-free workflow run `33108322846`.
 
 The landing page, deterministic `#demo`, generated assets, favicon, manifest, 404 page, persistence, baseline/reviewed-report Site Tools lifecycles, and public Lighthouse audit have been verified. GitHub Pages does not honor `public/_headers`: the production HTML therefore includes a restrictive CSP and no-referrer meta policy, while response-only `Permissions-Policy`, COOP/COEP, `X-Content-Type-Options`, and `X-Frame-Options` require a host such as Cloudflare Pages or Netlify. Site Tools worked in the tested top-level GitHub Pages session despite that provider limitation.
 

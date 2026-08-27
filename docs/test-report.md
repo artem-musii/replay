@@ -14,7 +14,7 @@ Environment: macOS, Node.js 22+, Chromium desktop and mobile emulation
 | Vitest             | **53/53** tests across 6 files                                 |
 | Playwright         | **32/32** project runs in 17.1 seconds: 16 desktop + 16 mobile |
 | Axe via Playwright | Zero serious or critical violations in four principal states   |
-| Lighthouse 13.4.1  | Local: **96/100/100/100**; public: **99/100/100/100**          |
+| Lighthouse 13.4.1  | Local: **96/100/100/100**; public: **100/100/100/100**         |
 | Production build   | Passing                                                        |
 | `npm audit`        | Zero known vulnerabilities at the recorded snapshot            |
 
@@ -32,7 +32,7 @@ This is direct browser/tool verification, not a claimed probabilistic model-eval
 
 ## Performance snapshot
 
-The seeded workspace was audited from the strict local production preview. Recorded Lighthouse lab metrics were FCP 2.0 s, LCP 2.4 s, Speed Index 2.0 s, total blocking time 10 ms, CLS 0, and time to interactive 2.4 s. The public GitHub Pages run recorded FCP 1.8 s, LCP 1.9 s, Speed Index 1.8 s, total blocking time 0 ms, CLS 0, and time to interactive 1.9 s. Both final runs had no binary Lighthouse failures. These are lab measurements, not field data.
+The seeded workspace was audited from the strict local production preview. Recorded Lighthouse lab metrics were FCP 2.0 s, LCP 2.4 s, Speed Index 2.0 s, total blocking time 10 ms, CLS 0, and time to interactive 2.4 s. The cache-busted public commit `f980d28` run recorded FCP 0.5 s, LCP 0.5 s, Speed Index 0.7 s, total blocking time 0 ms, CLS 0, and time to interactive 0.5 s. The public run also scored 100 for agentic browsing. Both final runs had no binary Lighthouse failures. These are lab measurements, not field data.
 
 ## Defects found during final E2E expansion
 
