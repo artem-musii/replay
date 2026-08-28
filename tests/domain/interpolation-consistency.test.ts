@@ -80,6 +80,7 @@ describe("trajectory interpolation", () => {
   it("uses a smooth time-aware curve for three or more poses and exposes the same render samples", () => {
     const turning: Trajectory = {
       ...trajectory,
+      interpolationMode: "smooth",
       keyframes: [
         { id: "turn-1", actorId: "actor-test", timeMs: 0, x: 0, y: 0, rotationDeg: 90 },
         { id: "turn-2", actorId: "actor-test", timeMs: 1_000, x: 10, y: 0, rotationDeg: 135 },
@@ -93,6 +94,29 @@ describe("trajectory interpolation", () => {
     const samples = sampleTrajectory(turning, 4);
     expect(samples).toHaveLength(9);
     expect(samples[4]).toEqual(interpolateTrajectory(turning, 1_000));
+  });
+
+  it("keeps explicitly linear trajectories on each keyframe chord without curve overshoot", () => {
+    const turning: Trajectory = {
+      ...trajectory,
+      interpolationMode: "linear",
+      keyframes: [
+        { id: "turn-1", actorId: "actor-test", timeMs: 0, x: 0, y: 0, rotationDeg: 90 },
+        { id: "turn-2", actorId: "actor-test", timeMs: 1_000, x: 10, y: 0, rotationDeg: 135 },
+        { id: "turn-3", actorId: "actor-test", timeMs: 2_000, x: 10, y: 10, rotationDeg: 180 },
+      ],
+    };
+
+    expect(interpolateTrajectory(turning, 500)).toEqual({
+      x: 5,
+      y: 0,
+      rotationDeg: 112.5,
+    });
+    expect(interpolateTrajectory(turning, 1_500)).toEqual({
+      x: 10,
+      y: 5,
+      rotationDeg: 157.5,
+    });
   });
 
   it("keeps newly-created two-point spans inside short and offset case ranges", () => {
@@ -109,8 +133,9 @@ describe("trajectory interpolation", () => {
   it("reads the active branch pose at an incident-relative time", () => {
     const replayCase = createDemoCase();
     expect(getActorPoseAtTime(replayCase, "actor-vehicle-a", 10_000)).toMatchObject({
-      x: 63,
-      y: 59,
+      x: 65,
+      y: 62,
+      rotationDeg: 62,
     });
   });
 });

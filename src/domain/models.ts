@@ -1,5 +1,5 @@
 export const REPLAY_SCHEMA_VERSION = 2 as const;
-export const REPLAY_SEED_VERSION = 4 as const;
+export const REPLAY_SEED_VERSION = 5 as const;
 
 export type ActorKind = "vehicle";
 
@@ -143,6 +143,11 @@ export interface Trajectory {
   id: string;
   actorId: string;
   branchId: string;
+  /**
+   * Position interpolation shared by playback and deterministic checks.
+   * Omission retains smooth interpolation for saved legacy trajectories.
+   */
+  interpolationMode?: "linear" | "smooth" | undefined;
   keyframes: ActorKeyframe[];
   visible: boolean;
   locked: boolean;

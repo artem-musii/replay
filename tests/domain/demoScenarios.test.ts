@@ -7,16 +7,59 @@ import {
   isDemoScenarioId,
   type DemoScenarioId,
 } from "../../src/domain/demoScenarios";
+import {
+  analyzeVehicleFootprintRelation,
+  createSceneMetricCalibration,
+} from "../../src/domain/physics";
+import { getActorPoseAtTime } from "../../src/domain/interpolation";
 import { validateCaseReferences } from "../../src/domain/importExport";
 import { containsLiabilityConclusion } from "../../src/domain/languageSafety";
+import type { ReplayCase } from "../../src/domain/models";
 import { ReplayCaseSchema } from "../../src/domain/schema";
 import { createDemoCase } from "../../src/domain/seed";
+import { validateConsistency } from "../../src/domain/consistency";
 
 const NEW_SCENARIO_IDS = [
   "straight-road-rear-end",
   "t-junction-crossing",
   "parking-account-contradiction",
 ] as const;
+
+const CLEAN_SCENARIO_IDS = [
+  "roundabout-calibrated",
+  "straight-road-rear-end",
+  "t-junction-crossing",
+] as const;
+
+function linkedImpactRelation(replayCase: ReplayCase, timeMs: number) {
+  const impact = replayCase.timelineEvents.find(
+    (event) => event.branchId === replayCase.activeBranchId && event.type === "impact",
+  );
+  const first = replayCase.actors.find((actor) => actor.id === impact?.linkedActorIds[0]);
+  const second = replayCase.actors.find((actor) => actor.id === impact?.linkedActorIds[1]);
+  const firstPose = first
+    ? getActorPoseAtTime(replayCase, first.id, timeMs, replayCase.activeBranchId)
+    : undefined;
+  const secondPose = second
+    ? getActorPoseAtTime(replayCase, second.id, timeMs, replayCase.activeBranchId)
+    : undefined;
+  if (!impact || !first || !second || !firstPose || !secondPose) {
+    throw new Error(`Scenario ${replayCase.id} requires one two-vehicle impact`);
+  }
+
+  return {
+    impact,
+    relation: analyzeVehicleFootprintRelation(
+      { pose: firstPose, dimensions: first.dimensions },
+      { pose: secondPose, dimensions: second.dimensions },
+      createSceneMetricCalibration({
+        sceneBounds: replayCase.environment.bounds,
+        widthMeters: replayCase.environment.calibration.widthMeters,
+        heightMeters: replayCase.environment.calibration.heightMeters,
+      }),
+    ),
+  };
+}
 
 describe("deterministic demo scenario library", () => {
   it("publishes stable metadata for four distinct road accounts", () => {
@@ -134,6 +177,46 @@ describe("deterministic demo scenario library", () => {
     }
   });
 
+  it.each(CLEAN_SCENARIO_IDS)(
+    "makes the %s impact exact or shallow contact without material overlap elsewhere",
+    (id) => {
+      const replayCase = createDemoScenario(id);
+      const atImpact = linkedImpactRelation(
+        replayCase,
+        replayCase.timelineEvents.find((event) => event.type === "impact")?.timeMs ?? -1,
+      );
+
+      expect(atImpact.relation.overlaps).toBe(true);
+      expect(atImpact.relation.separationM).toBe(0);
+      expect(atImpact.relation.penetrationDepthM).toBeLessThanOrEqual(0.01);
+
+      let maximumUnmarkedPenetrationM = 0;
+      for (
+        let timeMs = replayCase.timeRangeMs.start;
+        timeMs <= replayCase.timeRangeMs.end;
+        timeMs += 25
+      ) {
+        if (timeMs === atImpact.impact.timeMs) continue;
+        const { relation } = linkedImpactRelation(replayCase, timeMs);
+        expect(relation.overlaps, `${id} unexpectedly contacts at ${String(timeMs)} ms`).toBe(
+          false,
+        );
+        maximumUnmarkedPenetrationM = Math.max(
+          maximumUnmarkedPenetrationM,
+          relation.penetrationDepthM,
+        );
+      }
+      expect(maximumUnmarkedPenetrationM).toBeLessThanOrEqual(0.1);
+
+      const geometryRuleIds = validateConsistency(replayCase, { scope: "geometry" }).map(
+        (issue) => issue.ruleId,
+      );
+      expect(geometryRuleIds).not.toContain("geometry.impact-excessive-penetration");
+      expect(geometryRuleIds).not.toContain("geometry.unmarked-footprint-overlap");
+      expect(geometryRuleIds).not.toContain("geometry.unmarked-footprint-contact");
+    },
+  );
+
   it("surfaces the parking account's metric movement contradiction for WebMCP review", () => {
     const replayCase = createDemoScenario("parking-account-contradiction");
     const account = replayCase.claims.find((claim) => claim.id.endsWith("stationary-account"));
@@ -150,6 +233,12 @@ describe("deterministic demo scenario library", () => {
         (issue) => issue.scope === "motion" && issue.affectedIds.includes(aislePath?.id ?? ""),
       ),
     ).toBe(true);
+    expect(replayCase.consistencyIssues.map((issue) => issue.ruleId)).toEqual(
+      expect.arrayContaining([
+        "geometry.impact-excessive-penetration",
+        "geometry.unmarked-footprint-overlap",
+      ]),
+    );
     expect(replayCase.questions.some((question) => question.importance === "blocking")).toBe(true);
   });
 

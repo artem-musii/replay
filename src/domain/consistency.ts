@@ -16,6 +16,8 @@ import {
   analyzeVehicleFootprintRelation,
   createOrientedVehicleFootprint,
   createSceneMetricCalibration,
+  impactPenetrationToleranceMeters,
+  impactSeparationToleranceMeters,
   normalizedSceneDistanceMeters,
   normalizedScenePointToMeters,
   type MetricPoint,
@@ -215,6 +217,12 @@ const FOOTPRINT_SAMPLE_SPACING_M = 0.5;
 const SWEEP_SAMPLE_SPACING_M = 0.75;
 const SWEEP_HEADING_STEP_DEG = 5;
 const MAX_SWEEP_SAMPLES_PER_SEGMENT = 256;
+const CONTACT_SWEEP_SPACING_M = 0.25;
+const CONTACT_SWEEP_HEADING_STEP_DEG = 2;
+const MAX_CONTACT_PAIR_SAMPLES = 4_096;
+const CONTACT_PENETRATION_TOLERANCE_M = 0.1;
+const UNMARKED_CONTACT_MIN_DURATION_MS = 50;
+const CONTACT_ADJACENT_SAMPLE_OFFSETS_MS = [1, 10, 50] as const;
 const SPEED_REVIEW_BUFFER = 1.35;
 
 interface MotionAdvisoryContext {
@@ -483,6 +491,225 @@ function distanceFromPointToFootprint(
   );
 }
 
+function cappedSortedTimes(times: Set<number>): number[] {
+  const sorted = [...times].sort((first, second) => first - second);
+  if (sorted.length <= MAX_CONTACT_PAIR_SAMPLES) return sorted;
+  const capped = new Set<number>();
+  for (let index = 0; index < MAX_CONTACT_PAIR_SAMPLES; index += 1) {
+    const sourceIndex = Math.round(
+      (index * (sorted.length - 1)) / Math.max(1, MAX_CONTACT_PAIR_SAMPLES - 1),
+    );
+    const timeMs = sorted[sourceIndex];
+    if (timeMs !== undefined) capped.add(timeMs);
+  }
+  return [...capped].sort((first, second) => first - second);
+}
+
+function pairContactScanTimes(
+  replayCase: ReplayCase,
+  firstTrajectory: Trajectory | undefined,
+  secondTrajectory: Trajectory | undefined,
+  matchingImpacts: TimelineEvent[],
+  calibration: SceneMetricCalibration,
+): number[] {
+  const { start, end } = replayCase.timeRangeMs;
+  const boundaries = new Set<number>([start, end]);
+  for (const trajectory of [firstTrajectory, secondTrajectory]) {
+    if (!trajectory) continue;
+    for (const keyframe of trajectory.keyframes) {
+      if (keyframe.timeMs >= start && keyframe.timeMs <= end) boundaries.add(keyframe.timeMs);
+    }
+  }
+  for (const event of matchingImpacts) {
+    boundaries.add(event.timeMs);
+    for (const offsetMs of CONTACT_ADJACENT_SAMPLE_OFFSETS_MS) {
+      boundaries.add(Math.max(start, event.timeMs - offsetMs));
+      boundaries.add(Math.min(end, event.timeMs + offsetMs));
+    }
+  }
+
+  const orderedBoundaries = [...boundaries]
+    .filter((timeMs) => timeMs >= start && timeMs <= end)
+    .sort((first, second) => first - second);
+  const times = new Set(orderedBoundaries);
+  for (let index = 0; index < orderedBoundaries.length - 1; index += 1) {
+    const fromTimeMs = orderedBoundaries[index];
+    const toTimeMs = orderedBoundaries[index + 1];
+    if (fromTimeMs === undefined || toTimeMs === undefined || toTimeMs <= fromTimeMs) continue;
+    const firstTravelM = firstTrajectory
+      ? estimatedSegmentTravelMeters(firstTrajectory, fromTimeMs, toTimeMs, calibration)
+      : 0;
+    const secondTravelM = secondTrajectory
+      ? estimatedSegmentTravelMeters(secondTrajectory, fromTimeMs, toTimeMs, calibration)
+      : 0;
+    const firstHeadingChange = firstTrajectory
+      ? shortestHeadingDifference(
+          interpolateTrajectory(firstTrajectory, fromTimeMs).rotationDeg,
+          interpolateTrajectory(firstTrajectory, toTimeMs).rotationDeg,
+        )
+      : 0;
+    const secondHeadingChange = secondTrajectory
+      ? shortestHeadingDifference(
+          interpolateTrajectory(secondTrajectory, fromTimeMs).rotationDeg,
+          interpolateTrajectory(secondTrajectory, toTimeMs).rotationDeg,
+        )
+      : 0;
+    const divisions = Math.min(
+      MAX_SWEEP_SAMPLES_PER_SEGMENT,
+      Math.max(
+        1,
+        Math.ceil((firstTravelM + secondTravelM) / CONTACT_SWEEP_SPACING_M),
+        Math.ceil((firstHeadingChange + secondHeadingChange) / CONTACT_SWEEP_HEADING_STEP_DEG),
+      ),
+    );
+    for (let division = 1; division < divisions; division += 1) {
+      times.add(fromTimeMs + ((toTimeMs - fromTimeMs) * division) / divisions);
+    }
+  }
+  return cappedSortedTimes(times);
+}
+
+function unmarkedFootprintOverlapIssues(
+  replayCase: ReplayCase,
+  branchId: string,
+  calibration: SceneMetricCalibration,
+): ConsistencyIssue[] {
+  const issues: ConsistencyIssue[] = [];
+  const actors = replayCase.actors.filter(hasPositiveDimensions);
+  const impacts = branchEvents(replayCase, branchId).filter((event) => event.type === "impact");
+  const branch = replayCase.branches.find((candidate) => candidate.id === branchId);
+  const trajectoryByActor = new Map<string, Trajectory>();
+  if (branch) {
+    const trajectoryIds = new Set(branch.trajectoryIds);
+    for (const trajectory of replayCase.trajectories) {
+      if (trajectory.branchId === branchId && trajectoryIds.has(trajectory.id)) {
+        trajectoryByActor.set(trajectory.actorId, trajectory);
+      }
+    }
+  }
+
+  for (let firstIndex = 0; firstIndex < actors.length - 1; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < actors.length; secondIndex += 1) {
+      const first = actors[firstIndex];
+      const second = actors[secondIndex];
+      if (!first || !second) continue;
+      const matchingImpacts = impacts.filter(
+        (event) =>
+          event.linkedActorIds.includes(first.id) && event.linkedActorIds.includes(second.id),
+      );
+      const firstTrajectory = trajectoryByActor.get(first.id);
+      const secondTrajectory = trajectoryByActor.get(second.id);
+      const sampleTimes = pairContactScanTimes(
+        replayCase,
+        firstTrajectory,
+        secondTrajectory,
+        matchingImpacts,
+        calibration,
+      );
+      const recordedContactTimes = new Set(matchingImpacts.map((event) => event.timeMs));
+      let firstUnmarkedTimeMs: number | undefined;
+      let lastUnmarkedTimeMs: number | undefined;
+      let maximumPenetrationM = 0;
+      let currentTouchStartMs: number | undefined;
+      let currentTouchEndMs: number | undefined;
+      let longestTouchStartMs: number | undefined;
+      let longestTouchEndMs: number | undefined;
+
+      const finishTouchRun = () => {
+        if (currentTouchStartMs === undefined || currentTouchEndMs === undefined) return;
+        const currentDuration = currentTouchEndMs - currentTouchStartMs;
+        const longestDuration =
+          longestTouchStartMs === undefined || longestTouchEndMs === undefined
+            ? -1
+            : longestTouchEndMs - longestTouchStartMs;
+        if (currentDuration > longestDuration) {
+          longestTouchStartMs = currentTouchStartMs;
+          longestTouchEndMs = currentTouchEndMs;
+        }
+        currentTouchStartMs = undefined;
+        currentTouchEndMs = undefined;
+      };
+
+      for (const timeMs of sampleTimes) {
+        if (recordedContactTimes.has(timeMs)) {
+          finishTouchRun();
+          continue;
+        }
+        const firstPose = firstTrajectory
+          ? interpolateTrajectory(firstTrajectory, timeMs)
+          : first.pose;
+        const secondPose = secondTrajectory
+          ? interpolateTrajectory(secondTrajectory, timeMs)
+          : second.pose;
+        const relation = analyzeVehicleFootprintRelation(
+          { pose: firstPose, dimensions: first.dimensions },
+          { pose: secondPose, dimensions: second.dimensions },
+          calibration,
+        );
+        if (relation.overlaps) {
+          currentTouchStartMs ??= timeMs;
+          currentTouchEndMs = timeMs;
+        } else {
+          finishTouchRun();
+        }
+        if (!relation.overlaps || relation.penetrationDepthM <= CONTACT_PENETRATION_TOLERANCE_M) {
+          continue;
+        }
+        firstUnmarkedTimeMs ??= timeMs;
+        lastUnmarkedTimeMs = timeMs;
+        maximumPenetrationM = Math.max(maximumPenetrationM, relation.penetrationDepthM);
+      }
+      finishTouchRun();
+
+      if (firstUnmarkedTimeMs !== undefined && lastUnmarkedTimeMs !== undefined) {
+        const timeDescription =
+          firstUnmarkedTimeMs === lastUnmarkedTimeMs
+            ? `${(firstUnmarkedTimeMs / 1_000).toFixed(3)} s`
+            : `${(firstUnmarkedTimeMs / 1_000).toFixed(3)}–${(lastUnmarkedTimeMs / 1_000).toFixed(3)} s`;
+        issues.push(
+          issue(
+            "geometry.unmarked-footprint-overlap",
+            "geometry",
+            "warning",
+            "Vehicle footprints overlap outside a recorded contact instant",
+            `${first.label} and ${second.label} have intersecting oriented footprints around ${timeDescription}, outside the exact timestamp of any impact event linked to both vehicles. The adaptive sweep targets no more than ${CONTACT_SWEEP_SPACING_M.toFixed(2)} m of combined travel or ${String(CONTACT_SWEEP_HEADING_STEP_DEG)}° of combined heading change between samples; its observed maximum overlap depth is ${maximumPenetrationM.toFixed(2)} m. This usually means the timed paths pass through one another or an impact event is missing; it is a deterministic geometry warning, not proof that physical contact occurred.`,
+            [branchId, first.id, second.id],
+            [
+              "Correct the timed trajectories so the footprints do not pass through one another",
+              "Add a source-supported contact event if a separate impact occurred",
+              "Keep the conflict visibly unresolved if the source material is insufficient",
+            ],
+          ),
+        );
+        continue;
+      }
+
+      if (
+        longestTouchStartMs !== undefined &&
+        longestTouchEndMs !== undefined &&
+        longestTouchEndMs - longestTouchStartMs >= UNMARKED_CONTACT_MIN_DURATION_MS
+      ) {
+        issues.push(
+          issue(
+            "geometry.unmarked-footprint-contact",
+            "geometry",
+            "warning",
+            "Vehicle footprints remain in contact outside a recorded impact instant",
+            `${first.label} and ${second.label} have touching oriented-footprint boundaries from approximately ${(longestTouchStartMs / 1_000).toFixed(3)}–${(longestTouchEndMs / 1_000).toFixed(3)} s without a linked impact at those timestamps. Sustained boundary contact can indicate that one path slides along another vehicle or that a separate contact event is missing; it is a deterministic geometry warning, not proof that physical contact occurred.`,
+            [branchId, first.id, second.id],
+            [
+              "Separate the timed footprints after the recorded impact",
+              "Add a source-supported contact event if sustained contact was reported",
+              "Preserve the uncertainty if the available evidence cannot resolve it",
+            ],
+          ),
+        );
+      }
+    }
+  }
+  return issues;
+}
+
 function geometryIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = [];
   const actorIds = new Set(replayCase.actors.map((actor) => actor.id));
@@ -626,6 +853,7 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
   }
 
   for (const branchId of branchIds) {
+    issues.push(...unmarkedFootprintOverlapIssues(replayCase, branchId, calibration));
     const impacts = branchEvents(replayCase, branchId).filter((event) => event.type === "impact");
     for (const impact of impacts) {
       const linkedActors = impact.linkedActorIds
@@ -656,8 +884,7 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
               { pose: secondPose, dimensions: second.dimensions },
               calibration,
             );
-            const calibrationToleranceM = Math.max(
-              0.25,
+            const calibrationToleranceM = impactSeparationToleranceMeters(
               replayCase.environment.calibration.uncertaintyMeters,
             );
             if (!relation.overlaps && relation.separationM > calibrationToleranceM) {
@@ -673,6 +900,27 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
                     "Review the impact timestamp",
                     "Adjust a trajectory",
                     "Keep the discrepancy explicitly unresolved",
+                  ],
+                ),
+              );
+            }
+            const maximumReasonablePenetrationM = impactPenetrationToleranceMeters(
+              first.dimensions,
+              second.dimensions,
+            );
+            if (relation.overlaps && relation.penetrationDepthM > maximumReasonablePenetrationM) {
+              issues.push(
+                issue(
+                  "geometry.impact-excessive-penetration",
+                  "geometry",
+                  "warning",
+                  "Vehicle footprints interpenetrate too deeply at impact",
+                  `At the recorded impact time, ${first.label} and ${second.label} overlap by ${relation.penetrationDepthM.toFixed(2)} m in the oriented-footprint model. That exceeds the ${maximumReasonablePenetrationM.toFixed(2)} m visual-contact allowance (10% of the narrower vehicle width, with a 0.15 m floor). Calibration uncertainty can move a possible pose; it does not make visible rigid-body interpenetration physically plausible. Timed reconstruction paths should meet at contact, not pass through each other; this remains a geometry advisory rather than a collision-dynamics conclusion.`,
+                  [branchId, impact.id, first.id, second.id],
+                  [
+                    "Reduce the overlap at the impact keyframes",
+                    "Review the impact timestamp and vehicle dimensions",
+                    "Preserve the discrepancy if the source evidence requires it",
                   ],
                 ),
               );

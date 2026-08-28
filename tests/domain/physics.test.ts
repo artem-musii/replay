@@ -97,7 +97,7 @@ describe("oriented vehicle footprints", () => {
     expect(relation.penetrationDepthM).toBe(0);
   });
 
-  it("recognizes the seeded impact as footprint overlap despite center-only separation", () => {
+  it("recognizes the seeded impact as boundary contact without rigid-body penetration", () => {
     const replayCase = createDemoCase();
     const first = replayCase.actors.find((actor) => actor.id === "actor-vehicle-a");
     const second = replayCase.actors.find((actor) => actor.id === "actor-vehicle-b");
@@ -119,7 +119,7 @@ describe("oriented vehicle footprints", () => {
     );
     expect(relation.overlaps).toBe(true);
     expect(relation.separationM).toBe(0);
-    expect(relation.penetrationDepthM).toBeGreaterThan(0);
+    expect(relation.penetrationDepthM).toBeCloseTo(0, 8);
   });
 });
 
@@ -225,7 +225,7 @@ describe("compact branch motion analysis", () => {
     });
     expect(analysis.totals).toMatchObject({
       trajectoryCount: 2,
-      segmentCount: 8,
+      segmentCount: 24,
       impactPairCount: 1,
       overlappingImpactPairCount: 1,
     });
@@ -233,7 +233,7 @@ describe("compact branch motion analysis", () => {
       "actor-vehicle-a",
       "actor-vehicle-b",
     ]);
-    expect(analysis.advisories.every((item) => item.code === "motion.heading-mismatch")).toBe(true);
+    expect(analysis.advisories).toEqual([]);
     expect(analysis.impactFootprints[0]).toMatchObject({
       eventId: "event-impact",
       timeMs: 10_000,
@@ -241,6 +241,7 @@ describe("compact branch motion analysis", () => {
       overlaps: true,
       separationM: 0,
     });
+    expect(analysis.impactFootprints[0]?.penetrationDepthM).toBeCloseTo(0, 8);
   });
 
   it("rejects an unknown branch", () => {

@@ -14,7 +14,7 @@ test.describe("REPLAY primary journey", () => {
     await openLanding(page);
 
     await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Try the demo case/ })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Open a clean demo" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "Start a blank case" })).toBeEnabled();
     await expect(page.getByText("Local-first", { exact: true })).toBeVisible();
     await expect(page.getByText("No account", { exact: true })).toBeVisible();
@@ -29,7 +29,7 @@ test.describe("REPLAY primary journey", () => {
   }) => {
     await openDemo(page);
 
-    await expect(page.locator(".workspace-case-title")).toContainText("Demo case");
+    await expect(page.locator(".workspace-case-title")).toContainText("Demo run");
     await expect(page.locator(".workspace-case-title")).toContainText("v1");
     await expect(page.getByLabel("Incident scene editor")).toBeVisible();
     await expect(page.getByRole("button", { name: /^Vehicle A, position/ })).toBeVisible();
@@ -46,7 +46,7 @@ test.describe("REPLAY primary journey", () => {
     await expect(page.getByText("5 unresolved", { exact: true })).toBeVisible();
   });
 
-  test("scrubbing and playback keep the timeline and vehicle geometry synchronized", async ({
+  test("impact focus exposes boundary contact and playback pauses for geometry review", async ({
     page,
   }) => {
     await openDemo(page);
@@ -54,27 +54,45 @@ test.describe("REPLAY primary journey", () => {
     const vehicleA = page.getByRole("button", { name: /^Vehicle A, position/ });
     const scrubber = page.getByRole("slider", { name: "Timeline position" });
     const output = page.getByLabel("Current timeline position");
+    const contactReadout = page.locator(".scene-contact-readout");
     const initialTransform = await vehicleA.getAttribute("transform");
 
-    await scrubber.fill("10000");
+    await expect(contactReadout).toHaveAttribute("data-contact-state", "clear");
+    await expect(contactReadout).toContainText("Vehicle footprints clear");
+
+    await page.getByRole("button", { name: /Approximate impact at 10\.0 seconds/ }).click();
+    await expect(scrubber).toHaveValue("10000");
     await expect(output).toContainText("0:10.0");
     await expect(vehicleA).not.toHaveAttribute("transform", initialTransform ?? "");
     const impactTransform = await vehicleA.getAttribute("transform");
+    await expect(contactReadout).toHaveAttribute("data-contact-state", "recorded");
+    await expect(contactReadout).toContainText("Impact event geometry · footprints meet");
+    await expect(contactReadout).toContainText("event status: uncertain");
+    await expect(contactReadout).toContainText("modeled penetration 0.00 m");
 
     const timeline = page.getByLabel("Incident timeline");
     await timeline.getByRole("button", { name: "Go to start", exact: true }).click();
     await expect(output).toContainText("0:00.0");
     await expect(vehicleA).toHaveAttribute("transform", initialTransform ?? "");
+    await expect(contactReadout).toHaveAttribute("data-contact-state", "clear");
 
+    await scrubber.fill("9500");
     await page.getByLabel("Playback speed").selectOption("2");
     await timeline.getByRole("button", { name: "Play reconstruction", exact: true }).click();
     await expect(
       timeline.getByRole("button", { name: "Pause reconstruction", exact: true }),
     ).toBeVisible();
-    await expect
-      .poll(async () => vehicleA.getAttribute("transform"), { timeout: 4_000 })
-      .not.toBe(initialTransform);
-    await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await scrubber.inputValue())).toBe(10_000);
+    await expect(
+      timeline.getByRole("button", { name: "Play reconstruction", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".toast")).toContainText(
+      "Paused at the impact event for geometry review.",
+    );
+    await expect(contactReadout).toHaveAttribute("data-contact-state", "recorded");
+
+    await timeline.getByRole("button", { name: "Play reconstruction", exact: true }).click();
+    await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(10_000);
     await timeline.getByRole("button", { name: "Pause reconstruction", exact: true }).click();
     await expect(vehicleA).not.toHaveAttribute("transform", impactTransform ?? "");
   });
@@ -163,7 +181,7 @@ test.describe("REPLAY primary journey", () => {
     );
     await expect(page.getByText("Synthetic demo", { exact: true })).toBeVisible();
     await expect(
-      page.getByText(/illustrative and must not be treated as independently verified/),
+      page.getByText(/not a calibrated scene photograph and is not registered/),
     ).toBeVisible();
     await expect(
       page.getByRole("img", { name: /Preview of Roundabout incident overview/ }),
@@ -461,7 +479,7 @@ test.describe("REPLAY primary journey", () => {
     await openLanding(page);
     await expect(page.getByText("Manual mode ready", { exact: true })).toBeVisible();
 
-    await page.getByRole("button", { name: /Try the demo case/ }).click();
+    await page.getByRole("button", { name: "Open a clean demo" }).click();
     await expect(page.locator("main.workspace")).toBeVisible();
     const siteToolsButton = page.locator("button.webmcp-status");
     await expect(siteToolsButton).toContainText("Manual mode");

@@ -194,6 +194,7 @@ function trajectory(
     id,
     actorId,
     branchId,
+    interpolationMode: "linear",
     keyframes: points.map(([timeMs, x, y, rotationDeg], index) => ({
       id: objectId("keyframe", key, `${suffix}-${String(index + 1)}`),
       actorId,
@@ -412,7 +413,7 @@ function buildRearEndScenario(): ReplayCase {
   actorB.vehicleClass = "compact-car";
   actorB.dimensionsSource = "manufacturer";
   actorB.wheelbaseMeters = 2.61;
-  actorB.pose = { x: 59.5, y: 56, rotationDeg: 90 };
+  actorB.pose = { x: 59.3, y: 56, rotationDeg: 90 };
 
   const trajectoryA = trajectory(
     key,
@@ -436,9 +437,9 @@ function buildRearEndScenario(): ReplayCase {
     [
       [0, 12, 56, 90],
       [4_000, 32, 56, 90],
-      [8_000, 50.5, 56, 90],
-      [12_000, 56.5, 56, 90],
-      [16_000, 59.5, 56, 90],
+      [8_000, 50.485, 56, 90],
+      [12_000, 56.3, 56, 90],
+      [16_000, 59.3, 56, 90],
     ],
     now,
   );
@@ -554,7 +555,7 @@ function buildRearEndScenario(): ReplayCase {
       "Approximate reported contact",
       [actorA.id, actorB.id],
       now,
-      { linkedClaimIds: [contactClaimId], location: { x: 52.75, y: 56 } },
+      { linkedClaimIds: [contactClaimId], location: { x: 52.64, y: 56 } },
     ),
     timelineEvent(
       key,
@@ -643,14 +644,14 @@ function buildTJunctionScenario(): ReplayCase {
   actorA.vehicleClass = "van";
   actorA.dimensionsSource = "manufacturer";
   actorA.wheelbaseMeters = 3.1;
-  actorA.pose = { x: 70, y: 42, rotationDeg: 90 };
+  actorA.pose = { x: 50.515, y: 42, rotationDeg: 90 };
 
   actorB.label = "Side-road vehicle";
   actorB.dimensions = { width: 1.82, length: 4.58 };
   actorB.vehicleClass = "saloon";
   actorB.dimensionsSource = "manufacturer";
   actorB.wheelbaseMeters = 2.72;
-  actorB.pose = { x: 54, y: 30, rotationDeg: 0 };
+  actorB.pose = { x: 56.5, y: 30, rotationDeg: 19.65 };
 
   const trajectoryA = trajectory(
     key,
@@ -660,9 +661,8 @@ function buildTJunctionScenario(): ReplayCase {
     [
       [0, 20, 42, 90],
       [5_000, 35, 42, 90],
-      [10_000, 52, 42, 90],
-      [14_000, 63, 42, 90],
-      [18_000, 70, 42, 90],
+      [10_000, 50.515, 42, 90],
+      [18_000, 50.515, 42, 90],
     ],
     now,
   );
@@ -675,8 +675,8 @@ function buildTJunctionScenario(): ReplayCase {
       [0, 54, 82, 0],
       [5_000, 54, 65, 0],
       [10_000, 54, 42, 0],
-      [14_000, 54, 34, 0],
-      [18_000, 54, 30, 0],
+      [14_000, 55.5, 34, 15],
+      [18_000, 56.5, 30, 19.65],
     ],
     now,
   );
@@ -789,7 +789,7 @@ function buildTJunctionScenario(): ReplayCase {
       "Approximate reported crossing contact",
       [actorA.id, actorB.id],
       now,
-      { linkedClaimIds: [contactClaimId], location: { x: 53, y: 42 } },
+      { linkedClaimIds: [contactClaimId], location: { x: 53.09, y: 42 } },
     ),
     timelineEvent(
       key,

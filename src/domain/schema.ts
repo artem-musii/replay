@@ -185,6 +185,7 @@ export const TrajectorySchema = z
     id,
     actorId: id,
     branchId: id,
+    interpolationMode: z.enum(["linear", "smooth"]).optional(),
     keyframes: z.array(ActorKeyframeSchema).min(1).max(2_000),
     visible: z.boolean(),
     locked: z.boolean(),

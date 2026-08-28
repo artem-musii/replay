@@ -57,6 +57,79 @@ function ruleIds(replayCase: ReplayCase, scope: "all" | "scene" | "geometry" | "
 }
 
 describe("calibrated deterministic consistency advisories", () => {
+  it("adaptively catches a complete vehicle pass-through between 100 ms endpoints", () => {
+    const replayCase = createBlankCase(
+      {
+        title: "Fast crossing",
+        sceneType: "straight-road",
+        roadCondition: "dry",
+        vehicleCount: 2,
+      },
+      { caseId: "case-fast-crossing", now: NOW },
+    );
+    replayCase.timeRangeMs = { start: 0, end: 100 };
+    const branch = replayCase.branches[0];
+    const first = replayCase.actors[0];
+    const second = replayCase.actors[1];
+    if (!branch || !first || !second) throw new Error("Fast crossing needs two actors");
+    first.pose = { x: 60, y: 50, rotationDeg: 90 };
+    second.pose = { x: 40, y: 50, rotationDeg: 270 };
+    replayCase.trajectories = [
+      {
+        id: "trajectory-fast-first",
+        actorId: first.id,
+        branchId: branch.id,
+        interpolationMode: "linear",
+        keyframes: [
+          { id: "first-0", actorId: first.id, timeMs: 0, x: 40, y: 50, rotationDeg: 90 },
+          {
+            id: "first-100",
+            actorId: first.id,
+            timeMs: 100,
+            x: 60,
+            y: 50,
+            rotationDeg: 90,
+          },
+        ],
+        visible: true,
+        locked: false,
+        createdBy: "human",
+        changeHistory: [],
+      },
+      {
+        id: "trajectory-fast-second",
+        actorId: second.id,
+        branchId: branch.id,
+        interpolationMode: "linear",
+        keyframes: [
+          {
+            id: "second-0",
+            actorId: second.id,
+            timeMs: 0,
+            x: 60,
+            y: 50,
+            rotationDeg: 270,
+          },
+          {
+            id: "second-100",
+            actorId: second.id,
+            timeMs: 100,
+            x: 40,
+            y: 50,
+            rotationDeg: 270,
+          },
+        ],
+        visible: true,
+        locked: false,
+        createdBy: "human",
+        changeHistory: [],
+      },
+    ];
+    branch.trajectoryIds = replayCase.trajectories.map((trajectory) => trajectory.id);
+
+    expect(ruleIds(replayCase, "geometry")).toContain("geometry.unmarked-footprint-overlap");
+  });
+
   it("exports the exact posted-speed, road-condition, and wheelbase profile", () => {
     const replayCase = blankCase("straight-road", "wet");
     replayCase.environment.postedSpeedLimitKph = 50;

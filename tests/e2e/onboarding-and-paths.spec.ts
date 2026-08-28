@@ -4,7 +4,8 @@ import { installModelContextPolyfill, openDemo, openLanding } from "./helpers";
 
 async function openVehicleAPath(page: Page): Promise<Locator> {
   const vehicle = page.getByRole("button", { name: /^Vehicle A, position/ });
-  await vehicle.click();
+  await vehicle.focus();
+  await vehicle.press("Enter");
   await page.getByRole("button", { name: "Edit path" }).click();
   const editor = page.getByRole("region", { name: "Vehicle A" });
   await expect(
@@ -126,16 +127,17 @@ test.describe("onboarding and path authoring", () => {
   test("adds, synchronizes, and removes an explicit path point", async ({ page }) => {
     await openDemo(page);
     let editor = await openVehicleAPath(page);
-    await expect(editor.locator(".keyframe-editor")).toHaveCount(5);
+    const initialPointCount = await editor.locator(".keyframe-editor").count();
+    expect(initialPointCount).toBeGreaterThan(5);
     const versionBefore = Number(
       (await page.locator(".workspace-case-title small").textContent())?.replace("v", ""),
     );
 
-    await page.getByRole("slider", { name: "Timeline position" }).fill("9000");
-    await editor.getByRole("button", { name: "Add point at 9.0s" }).click();
+    await page.getByRole("slider", { name: "Timeline position" }).fill("7000");
+    await editor.getByRole("button", { name: "Add point at 7.0s" }).click();
     editor = page.getByRole("region", { name: "Vehicle A" });
-    await expect(editor.locator(".keyframe-editor")).toHaveCount(6);
-    await expect(editor.locator(".keyframe-editor.is-active")).toContainText("9.0s");
+    await expect(editor.locator(".keyframe-editor")).toHaveCount(initialPointCount + 1);
+    await expect(editor.locator(".keyframe-editor.is-active")).toContainText("7.0s");
     await expect(page.locator(".timeline-keyframe.is-selected")).toHaveCount(1);
     await expect(page.locator(".trajectory__handle.is-active")).toHaveCount(1);
 
@@ -143,7 +145,7 @@ test.describe("onboarding and path authoring", () => {
       .locator(".keyframe-editor.is-active")
       .getByRole("button", { name: /Remove point/ })
       .click();
-    await expect(editor.locator(".keyframe-editor")).toHaveCount(5);
+    await expect(editor.locator(".keyframe-editor")).toHaveCount(initialPointCount);
     await expect(page.locator(".workspace-case-title small")).toHaveText(
       `v${String(versionBefore + 2)}`,
     );
@@ -376,11 +378,16 @@ test.describe("onboarding and path authoring", () => {
   test("supports quick and direct pointer rotation with compass headings", async ({ page }) => {
     await openDemo(page);
     const vehicle = page.getByRole("button", { name: /^Vehicle A, position/ });
-    await vehicle.click();
+    await vehicle.focus();
+    await vehicle.press("Enter");
     const editor = page.getByRole("region", { name: "Vehicle A" });
+    const rotationInput = editor.getByLabel("Rotation °");
+    const initialRotation = Number(await rotationInput.inputValue());
 
     await editor.getByRole("button", { name: "Rotate Vehicle A right 15 degrees" }).click();
-    await expect(editor.getByLabel("Rotation °")).toHaveValue("161");
+    await expect
+      .poll(async () => Number(await rotationInput.inputValue()))
+      .toBeCloseTo(initialRotation + 15, 5);
     await expect(
       page.getByRole("button", { name: /Vehicle A, position.*orientation 161 degrees/ }),
     ).toBeVisible();

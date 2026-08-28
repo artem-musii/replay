@@ -97,7 +97,7 @@ export function LandingPage({
           </p>
           <div className="landing-hero__actions">
             <button className="button button--primary button--large" onClick={onOpenDemo}>
-              Try the demo case <ArrowRight size={17} aria-hidden="true" />
+              Open a clean demo <ArrowRight size={17} aria-hidden="true" />
             </button>
             <button className="button button--secondary button--large" onClick={onStartBlank}>
               Start a blank case
@@ -302,7 +302,7 @@ export function LandingPage({
           <h2>See the human-agent loop in under three minutes.</h2>
         </div>
         <button className="button button--primary button--large" onClick={onOpenDemo}>
-          Open Roundabout incident — 17:42 <ArrowRight size={17} />
+          Open a fresh Roundabout incident — 17:42 <ArrowRight size={17} />
         </button>
       </section>
 

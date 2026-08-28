@@ -28,9 +28,7 @@ describe("App local vault recovery", () => {
     persistence.loadLocalVault
       .mockRejectedValueOnce(new Error("IndexedDB is unavailable."))
       .mockResolvedValueOnce({ retainedRecoveryRecords: [] });
-    persistence.loadCaseById
-      .mockRejectedValueOnce(new Error("IndexedDB is unavailable."))
-      .mockResolvedValueOnce({ retainedRecoveryRecords: [] });
+    persistence.loadCaseById.mockResolvedValue({ retainedRecoveryRecords: [] });
 
     render(<App />);
 
@@ -49,6 +47,6 @@ describe("App local vault recovery", () => {
     ).toBeVisible();
     expect(screen.queryByText("Local vault could not be opened")).not.toBeInTheDocument();
     expect(persistence.loadLocalVault).toHaveBeenCalledTimes(2);
-    expect(persistence.loadCaseById).toHaveBeenCalledTimes(2);
+    expect(persistence.loadCaseById).not.toHaveBeenCalled();
   });
 });

@@ -131,16 +131,16 @@ describe("Timeline", () => {
     fireEvent.pointerMove(track, { pointerId: 11, clientX: 912, buttons: 1 });
 
     expect(onMoveKeyframe).not.toHaveBeenCalled();
-    expect(onTimeChange.mock.calls).toEqual([[6_100], [9_900]]);
-    expect(keyframe.style.left).toBe("49.5%");
+    expect(onTimeChange.mock.calls).toEqual([[6_100], [8_900]]);
+    expect(keyframe.style.left).toBe("44.5%");
 
     fireEvent.pointerUp(track, { pointerId: 11, clientX: 912, buttons: 0 });
 
     expect(onMoveKeyframe).toHaveBeenCalledOnce();
     expect(onMoveKeyframe).toHaveBeenCalledWith(
       "trajectory-a-baseline",
-      "trajectory-a-baseline-keyframe-3",
-      9_900,
+      "trajectory-a-baseline-keyframe-5",
+      8_900,
     );
   });
 
@@ -158,8 +158,8 @@ describe("Timeline", () => {
     fireEvent.pointerDown(keyframe, { pointerId: 13, clientX: 412, buttons: 1 });
     fireEvent.pointerMove(track, { pointerId: 13, clientX: 612, buttons: 1 });
 
-    expect(onTimeChange).toHaveBeenCalledWith(9_900);
-    expect(keyframe.style.left).toBe("49.5%");
+    expect(onTimeChange).toHaveBeenCalledWith(8_900);
+    expect(keyframe.style.left).toBe("44.5%");
 
     fireEvent.pointerCancel(track, { pointerId: 13 });
 

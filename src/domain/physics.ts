@@ -176,6 +176,19 @@ export interface FootprintRelation {
   centerDistanceM: number;
 }
 
+/** Shared visual/validation allowance for shallow modeled contact at an impact instant. */
+export function impactPenetrationToleranceMeters(
+  first: SceneActor["dimensions"],
+  second: SceneActor["dimensions"],
+): number {
+  return Math.max(0.15, Math.min(first.width, second.width) * 0.1);
+}
+
+/** Shared gap allowance derived from the scene calibration uncertainty. */
+export function impactSeparationToleranceMeters(uncertaintyMeters: number): number {
+  return Math.max(0.25, Number.isFinite(uncertaintyMeters) ? uncertaintyMeters : 0.25);
+}
+
 function dot(point: MetricPoint, axis: MetricVector): number {
   return point.xM * axis.xM + point.yM * axis.yM;
 }

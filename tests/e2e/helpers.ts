@@ -12,9 +12,18 @@ export async function openLanding(page: Page): Promise<void> {
 
 export async function openDemo(page: Page): Promise<void> {
   await openLanding(page);
-  await page.getByRole("button", { name: /Try the demo case/ }).click();
+  await page.getByRole("button", { name: "Open a clean demo" }).click();
   await expect(page.locator("main.workspace")).toBeVisible();
   await expect(page.getByText("Roundabout incident — 17:42", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/#case\/case-demo-roundabout-calibrated-run-/);
+}
+
+export function currentDemoRunId(page: Page): string {
+  const hash = new URL(page.url()).hash;
+  if (!hash.startsWith("#case/")) {
+    throw new Error(`Expected a case-specific demo route, received ${hash || "an empty hash"}.`);
+  }
+  return decodeURIComponent(hash.slice("#case/".length));
 }
 
 export async function waitForLocalSave(page: Page): Promise<void> {

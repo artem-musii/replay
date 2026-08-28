@@ -71,7 +71,7 @@ interface WorkspaceProps {
   initialCase: ReplayCase;
   isDemo: boolean;
   onHome: (latestCase: ReplayCase) => void;
-  onResetDemo: () => Promise<boolean>;
+  onResetDemo: () => boolean | Promise<boolean>;
   onImportCase: (replayCase: ReplayCase) => void;
   startWithTour?: boolean;
   onTourStarted?: () => void;
@@ -248,6 +248,11 @@ export function Workspace({
   const [replayCase, setReplayCase] = useState(() => engine.getState());
   const replayCaseRef = useRef(replayCase);
   const [currentTimeMs, setCurrentTimeMs] = useState(initialCase.timeRangeMs.start);
+  const currentTimeMsRef = useRef(initialCase.timeRangeMs.start);
+  const setPlayheadTime = useCallback((timeMs: number) => {
+    currentTimeMsRef.current = timeMs;
+    setCurrentTimeMs(timeMs);
+  }, []);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [activeTab, setActiveTab] = useState<InspectorTab>("facts");
@@ -272,6 +277,7 @@ export function Workspace({
   const [confirmingLeaseTakeover, setConfirmingLeaseTakeover] = useState(false);
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const evidenceUrlsRef = useRef<Record<string, string>>({});
+  const autoPausedImpactIdsRef = useRef(new Set<string>());
   const pendingEvidenceBlobDeletionsRef = useRef(
     new Map<string, { evidenceId: string; blobKey: string }>(),
   );
@@ -468,13 +474,25 @@ export function Workspace({
       if (inspectorModes.has(state.workspaceMode as InspectorTab))
         setActiveTab(state.workspaceMode as InspectorTab);
       const activity = state.activity.find((item) => item.id === result.activityId);
+      if (
+        activity?.actionType === "workspace.focus" &&
+        state.selectedItem?.type === "timeline-event"
+      ) {
+        const selectedEvent = state.timelineEvents.find(
+          (event) => event.id === state.selectedItem?.id,
+        );
+        if (selectedEvent) {
+          setPlayheadTime(selectedEvent.timeMs);
+          setIsPlaying(false);
+        }
+      }
       if (activity?.actionType !== "workspace.focus") setReportPreview(undefined);
       void enqueueCaseSave(state, {
         expectedCaseVersion: state.caseVersion - 1,
         writerId,
       }).catch(() => undefined);
     });
-  }, [engine, enqueueCaseSave, saveCoordinator, writeAccess, writerId]);
+  }, [engine, enqueueCaseSave, saveCoordinator, setPlayheadTime, writeAccess, writerId]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
@@ -560,19 +578,40 @@ export function Workspace({
     const tick = (now: number) => {
       const elapsed = (now - previous) * playbackSpeed;
       previous = now;
-      setCurrentTimeMs((current) => {
-        const next = current + elapsed;
-        if (next >= replayCaseRef.current.timeRangeMs.end) {
-          window.setTimeout(() => setIsPlaying(false), 0);
-          return replayCaseRef.current.timeRangeMs.end;
-        }
-        return next;
-      });
+      const current = currentTimeMsRef.current;
+      const next = current + elapsed;
+      const crossedImpact = replayCaseRef.current.timelineEvents
+        .filter(
+          (event) =>
+            event.branchId === replayCaseRef.current.activeBranchId &&
+            event.type === "impact" &&
+            event.timeMs > current + 0.5 &&
+            event.timeMs <= next &&
+            !autoPausedImpactIdsRef.current.has(event.id),
+        )
+        .sort((first, second) => first.timeMs - second.timeMs)[0];
+      if (crossedImpact) {
+        autoPausedImpactIdsRef.current.add(crossedImpact.id);
+        setPlayheadTime(crossedImpact.timeMs);
+        setIsPlaying(false);
+        setToast({
+          kind: "info",
+          message: "Paused at the impact event for geometry review.",
+          detail: "Press play again to continue through the recorded post-impact positions.",
+        });
+        return;
+      }
+      if (next >= replayCaseRef.current.timeRangeMs.end) {
+        setPlayheadTime(replayCaseRef.current.timeRangeMs.end);
+        setIsPlaying(false);
+        return;
+      }
+      setPlayheadTime(next);
       animationFrame = requestAnimationFrame(tick);
     };
     animationFrame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animationFrame);
-  }, [isPlaying, playbackSpeed]);
+  }, [isPlaying, playbackSpeed, setPlayheadTime]);
 
   const revealAffected = useCallback((ids: readonly string[]) => {
     setActiveAgentIds([...ids]);
@@ -792,6 +831,13 @@ export function Workspace({
 
   function selectItem(type: WorkspaceItemType, itemId: string, keyframeId?: string): void {
     setSelectedKeyframeId(keyframeId);
+    if (type === "timeline-event") {
+      const event = replayCaseRef.current.timelineEvents.find((item) => item.id === itemId);
+      if (event) {
+        setPlayheadTime(event.timeMs);
+        setIsPlaying(false);
+      }
+    }
     runCommand(
       {
         type: "workspace.focus",
@@ -1115,6 +1161,7 @@ export function Workspace({
     const state = engine.getState();
     const timelineEvent = state.timelineEvents.find((item) => item.id === eventId);
     if (!timelineEvent) return;
+    if (timelineEvent.type === "impact") autoPausedImpactIdsRef.current.delete(eventId);
     runCommand(
       {
         type: "timeline.upsert",
@@ -1144,6 +1191,7 @@ export function Workspace({
     const state = engine.getState();
     const timelineEvent = state.timelineEvents.find((item) => item.id === eventId);
     if (!timelineEvent) return;
+    if (timelineEvent.type === "impact") autoPausedImpactIdsRef.current.delete(eventId);
     const location = update.location
       ? {
           x: Math.max(0, Math.min(100, update.location.x)),
@@ -1796,7 +1844,12 @@ export function Workspace({
               }
             : {})}
           onTimeChange={(time) => {
-            setCurrentTimeMs(time);
+            for (const event of replayCaseRef.current.timelineEvents) {
+              if (event.type === "impact" && event.timeMs >= time) {
+                autoPausedImpactIdsRef.current.delete(event.id);
+              }
+            }
+            setPlayheadTime(time);
             setIsPlaying(false);
           }}
           onPlayingChange={setIsPlaying}
@@ -1944,7 +1997,7 @@ function LeaseTakeoverDialog({
         aria-describedby="take-over-lease-description"
         tabIndex={-1}
       >
-        <div className="dialog-icon is-destructive">
+        <div className="dialog-icon">
           <CircleAlert size={20} aria-hidden="true" />
         </div>
         <h2 id="take-over-lease-title">Take over editing?</h2>
@@ -2017,10 +2070,10 @@ function DemoResetDialog({
         <div className="dialog-icon is-destructive">
           <RotateCcw size={20} aria-hidden="true" />
         </div>
-        <h2 id="reset-demo-title">Reset the deterministic demo?</h2>
+        <h2 id="reset-demo-title">Start a fresh demo copy?</h2>
         <p id="reset-demo-description">
-          This permanently removes the saved demo case and its local evidence, then opens the
-          original deterministic seed. Export anything you need before continuing.
+          REPLAY will save this run and open a new deterministic copy. Your current demo work stays
+          available as a local case, and browser Back returns to this exact run.
         </p>
         <footer>
           <button
@@ -2032,11 +2085,11 @@ function DemoResetDialog({
             Cancel
           </button>
           <button
-            className="button button--danger"
+            className="button button--primary"
             disabled={resetting}
             onClick={() => void confirmReset()}
           >
-            {resetting ? "Resetting…" : "Reset demo"}
+            {resetting ? "Opening…" : "Start fresh copy"}
           </button>
         </footer>
       </section>
@@ -2082,7 +2135,7 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
         <BrandMark compact />
       </button>
       <div className="workspace-case-title">
-        <span>{props.isDemo ? "Demo case" : "Local case"}</span>
+        <span>{props.isDemo ? "Demo run" : "Local case"}</span>
         <h1>{props.replayCase.title}</h1>
         <small>v{props.replayCase.caseVersion}</small>
       </div>
@@ -2148,7 +2201,7 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
           </button>
           {props.isDemo && (
             <button onClick={(event) => runMenuAction(event, props.onResetDemo)}>
-              <RotateCcw size={14} /> Reset deterministic demo
+              <RotateCcw size={14} /> Start fresh demo copy
             </button>
           )}
           <button onClick={(event) => runMenuAction(event, props.onDebug)}>

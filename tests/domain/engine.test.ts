@@ -134,6 +134,7 @@ describe("ReplayEngine command guarantees", () => {
 
   it("rejects stale versions without changing state", () => {
     const engine = createEngine();
+    const originalPose = engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose;
     const result = engine.execute({
       type: "actor.update-pose",
       actor: "agent",
@@ -148,11 +149,14 @@ describe("ReplayEngine command guarantees", () => {
       caseVersion: 1,
       error: { code: "VERSION_CONFLICT" },
     });
-    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(74);
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose).toEqual(
+      originalPose,
+    );
   });
 
   it("returns a structured lock error and leaves locked geometry untouched", () => {
     const engine = createEngine();
+    const originalPose = engine.state.actors.find((actor) => actor.id === "actor-vehicle-b")?.pose;
     expect(
       engine.execute({
         type: "lock.set",
@@ -187,8 +191,8 @@ describe("ReplayEngine command guarantees", () => {
       },
     });
     expect(engine.state.caseVersion).toBe(2);
-    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-b")?.pose).toMatchObject(
-      { x: 80, y: 52 },
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-b")?.pose).toEqual(
+      originalPose,
     );
   });
 
@@ -439,6 +443,7 @@ describe("ReplayEngine command guarantees", () => {
 describe("command history", () => {
   it("undoes and redoes mutations while retaining an accurate activity feed", () => {
     const engine = createEngine();
+    const originalX = engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x;
     engine.execute({
       type: "actor.update-pose",
       actor: "human",
@@ -450,7 +455,9 @@ describe("command history", () => {
 
     const undo = engine.undo();
     expect(undo).toMatchObject({ ok: true, caseVersion: 3 });
-    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(74);
+    expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-a")?.pose.x).toBe(
+      originalX,
+    );
     expect(engine.state.activity.some((event) => event.actionType === "history.undo")).toBe(true);
 
     const redo = engine.redo();

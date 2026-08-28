@@ -155,6 +155,9 @@
   min-height: 0;
   cursor: grab;
   overflow: hidden;
+  /* Unlike hidden overflow, clip cannot be programmatically scrolled when an
+     SVG marker receives focus, so scene overlays stay anchored to the stage. */
+  overflow: clip;
 }
 .scene-stage:active {
   cursor: grabbing;
@@ -385,6 +388,7 @@
   stroke: transparent;
   stroke-width: 24px;
   vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 .scene-vehicle:focus-visible {
   outline: none;
@@ -415,6 +419,23 @@
 }
 .scene-vehicle.is-agent-active {
   filter: url(#agent-pulse);
+}
+.scene-vehicle.has-contact-state .vehicle-selection {
+  opacity: 1;
+  stroke-width: 4;
+}
+.scene-vehicle.is-contact-recorded .vehicle-selection {
+  stroke: var(--selection);
+  stroke-dasharray: none;
+}
+.scene-vehicle.is-contact-touching .vehicle-selection {
+  stroke: oklch(0.6 0.13 75);
+  stroke-dasharray: 5 4;
+}
+.scene-vehicle.is-contact-unmarked .vehicle-selection,
+.scene-vehicle.is-contact-excessive .vehicle-selection {
+  stroke: var(--conflict);
+  stroke-dasharray: 4 3;
 }
 .vehicle-authorship-badge {
   fill: var(--agent);
@@ -490,6 +511,33 @@
 }
 .vehicle-tail {
   fill: oklch(0.58 0.16 28);
+}
+.vehicle-identity-badge {
+  color: var(--ink);
+  pointer-events: none;
+}
+.vehicle-identity-badge circle {
+  fill: oklch(0.96 0.01 85 / 0.96);
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.vehicle-identity-badge text {
+  fill: currentColor;
+  font:
+    800 11px "SFMono-Regular",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.02em;
+}
+.scene-vehicle.is-contact-recorded .vehicle-identity-badge {
+  color: var(--selection);
+}
+.scene-vehicle.is-contact-touching .vehicle-identity-badge {
+  color: oklch(0.48 0.11 65);
+}
+.scene-vehicle.is-contact-unmarked .vehicle-identity-badge,
+.scene-vehicle.is-contact-excessive .vehicle-identity-badge {
+  color: var(--conflict);
 }
 .vehicle-label {
   font:
@@ -567,6 +615,117 @@
 }
 .impact-marker.certainty--unknown {
   opacity: 0.65;
+}
+.contact-geometry-marker {
+  pointer-events: none;
+  color: oklch(0.6 0.13 75);
+}
+.contact-geometry-marker.is-recorded {
+  color: var(--selection);
+}
+.contact-geometry-marker.is-unmarked,
+.contact-geometry-marker.is-excessive {
+  color: var(--conflict);
+}
+.contact-geometry-marker > circle:first-child {
+  fill: currentColor;
+  fill-opacity: 0.1;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+}
+.contact-geometry-marker > circle:nth-child(2) {
+  fill: var(--paper-raised);
+  stroke: currentColor;
+  stroke-width: 3;
+}
+.contact-geometry-marker > path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.contact-geometry-marker > text {
+  fill: currentColor;
+  font:
+    760 13px "SFMono-Regular",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.07em;
+  paint-order: stroke;
+  stroke: var(--paper-raised);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.scene-contact-readout {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 14px;
+  width: min(390px, calc(100% - 28px));
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid oklch(0.67 0.025 190 / 0.72);
+  border-radius: 9px;
+  background: oklch(0.96 0.01 85 / 0.94);
+  color: var(--muted);
+  box-shadow: 0 5px 18px oklch(0.2 0.02 200 / 0.1);
+  pointer-events: none;
+}
+.scene-contact-readout.has-selection-actions {
+  top: 62px;
+}
+.scene-contact-readout > i {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+}
+.scene-contact-readout > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.scene-contact-readout strong,
+.scene-contact-readout small {
+  line-height: 1.3;
+}
+.scene-contact-readout strong {
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+.scene-contact-readout small {
+  color: currentColor;
+  font-size: 0.62rem;
+}
+.scene-contact-readout.is-recorded {
+  border-color: color-mix(in oklch, var(--selection), white 42%);
+  color: var(--selection);
+}
+.scene-contact-readout.is-touching {
+  border-color: oklch(0.68 0.11 75);
+  color: oklch(0.48 0.11 65);
+}
+.scene-contact-readout.is-calibration-gap {
+  border-color: oklch(0.68 0.11 75);
+  background: oklch(0.97 0.02 85 / 0.96);
+  color: oklch(0.48 0.11 65);
+}
+.scene-contact-readout.is-unmarked,
+.scene-contact-readout.is-excessive,
+.scene-contact-readout.is-impact-gap {
+  border-color: color-mix(in oklch, var(--conflict), white 35%);
+  background: oklch(0.97 0.025 50 / 0.96);
+  color: var(--conflict);
+}
+.scene-contact-readout.is-unmarked > i,
+.scene-contact-readout.is-excessive > i,
+.scene-contact-readout.is-impact-gap > i {
+  background: currentColor;
 }
 .scene-legend {
   position: absolute;
@@ -834,6 +993,18 @@
   .path-marker-label,
   .impact-marker > text,
   .proposal-scene-actor text {
+    display: none;
+  }
+  .scene-contact-readout {
+    top: 8px;
+    left: 8px;
+    width: calc(100% - 16px);
+  }
+  .scene-contact-readout.has-selection-actions {
+    top: 56px;
+  }
+  .scene-contact-readout small,
+  .contact-geometry-marker > text {
     display: none;
   }
 }

@@ -762,7 +762,7 @@
     min-width: 74px;
   }
   .timeline__scroll {
-    grid-template-columns: var(--timeline-label-width) minmax(max(520px, 32.5rem), 1fr);
+    grid-template-columns: var(--timeline-label-width) minmax(max(1000px, 62.5rem), 1fr);
     --timeline-label-width: max(82px, 5.125rem);
   }
   .timeline__track-label,
@@ -806,10 +806,8 @@
     margin-top: -8px;
   }
   .timeline-keyframe {
-    width: 40px;
-    height: 40px;
-    margin-left: -15px;
-    margin-top: -15px;
+    width: 24px;
+    height: 24px;
   }
 }
 

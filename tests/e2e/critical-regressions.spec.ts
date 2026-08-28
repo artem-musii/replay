@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Download, type Page } from "@playwright/test";
 
 import {
+  currentDemoRunId,
   inspectorTab,
   installModelContextPolyfill,
   openDemo,
@@ -85,17 +86,20 @@ async function openCaseOptions(page: Page): Promise<void> {
   await page.getByLabel("Case options").click();
 }
 
-async function persistedDemoVersion(page: Page): Promise<number | undefined> {
+async function persistedCaseVersion(
+  page: Page,
+  caseId = currentDemoRunId(page),
+): Promise<number | undefined> {
   return page.evaluate(
-    () =>
+    (persistedCaseId) =>
       new Promise<number | undefined>((resolve, reject) => {
         const open = indexedDB.open("replay-local-vault-v2");
         open.onerror = () => reject(open.error ?? new Error("Could not open the local vault."));
         open.onsuccess = () => {
           const database = open.result;
           const transaction = database.transaction("cases", "readonly");
-          const get = transaction.objectStore("cases").get("case-demo-roundabout");
-          get.onerror = () => reject(get.error ?? new Error("Could not read the saved demo."));
+          const get = transaction.objectStore("cases").get(persistedCaseId);
+          get.onerror = () => reject(get.error ?? new Error("Could not read the saved case."));
           get.onsuccess = () => {
             const record = get.result as { payload?: { caseVersion?: unknown } } | undefined;
             const version = record?.payload?.caseVersion;
@@ -104,6 +108,51 @@ async function persistedDemoVersion(page: Page): Promise<number | undefined> {
           };
         };
       }),
+    caseId,
+  );
+}
+
+async function seedPollutedLegacyDemo(page: Page, sourceCaseId: string): Promise<void> {
+  await page.evaluate(
+    ({ sourceId }) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("replay-local-vault-v2");
+        open.onerror = () => reject(open.error ?? new Error("Could not open the local vault."));
+        open.onsuccess = () => {
+          const database = open.result;
+          const transaction = database.transaction("cases", "readwrite");
+          const cases = transaction.objectStore("cases");
+          const get = cases.get(sourceId);
+          get.onerror = () => reject(get.error ?? new Error("Could not read the source demo."));
+          get.onsuccess = () => {
+            const serialized = JSON.stringify(get.result);
+            if (!serialized) {
+              reject(new Error("The source demo was not persisted."));
+              return;
+            }
+            const legacyCaseId = "case-demo-roundabout";
+            const record = JSON.parse(serialized.replaceAll(sourceId, legacyCaseId)) as {
+              id: string;
+              updatedAt: string;
+              payload: { id: string; caseVersion: number; updatedAt: string };
+            };
+            const pollutedAt = "2099-01-01T00:00:00.000Z";
+            record.id = legacyCaseId;
+            record.updatedAt = pollutedAt;
+            record.payload.id = record.id;
+            record.payload.caseVersion = 77;
+            record.payload.updatedAt = pollutedAt;
+            cases.put(record);
+          };
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = () =>
+            reject(transaction.error ?? new Error("Could not seed the polluted legacy demo."));
+        };
+      }),
+    { sourceId: sourceCaseId },
   );
 }
 
@@ -323,6 +372,7 @@ test.describe("production-critical regressions", () => {
 
   test("imports a structured transfer under a fresh local case identity", async ({ page }) => {
     await openDemo(page);
+    const sourceCaseId = currentDemoRunId(page);
     const [sourceDownload] = await Promise.all([
       page.waitForEvent("download"),
       (async () => {
@@ -354,12 +404,13 @@ test.describe("production-critical regressions", () => {
       id: string;
     };
     expect(copy.id).toMatch(/^case-import-/);
-    expect(copy.id).not.toBe("case-demo-roundabout");
+    expect(copy.id).not.toBe(sourceCaseId);
   });
 
   test("exports a parseable finalized case and a non-empty PDF", async ({ page }) => {
     test.slow();
     await openDemo(page);
+    const demoRunId = currentDemoRunId(page);
     await inspectorTab(page, "Report").click();
     await page.getByRole("button", { name: "Build report preview" }).click();
 
@@ -394,7 +445,7 @@ test.describe("production-critical regressions", () => {
       }>;
     };
     expect(exported).toMatchObject({
-      id: "case-demo-roundabout",
+      id: demoRunId,
       schemaVersion: 2,
       caseVersion: 2,
     });
@@ -438,7 +489,7 @@ test.describe("production-critical regressions", () => {
   }) => {
     await installModelContextPolyfill(page);
     await openDemo(page);
-    await expect.poll(() => persistedDemoVersion(page)).toBe(1);
+    await expect.poll(() => persistedCaseVersion(page)).toBe(1);
     await failCaseMetadataWrites(page);
 
     await inspectorTab(page, "Facts").click();
@@ -501,7 +552,7 @@ test.describe("production-critical regressions", () => {
     await saveFailure.getByRole("button", { name: "Retry local save" }).click();
     await expect(saveFailure).toHaveCount(0);
     await expect(page.locator(".save-status")).toContainText("Saved locally");
-    await expect.poll(() => persistedDemoVersion(page)).toBe(3);
+    await expect.poll(() => persistedCaseVersion(page)).toBe(3);
   });
 
   test("keeps uploaded evidence bytes until its deletion tombstone is durable", async ({
@@ -542,8 +593,12 @@ test.describe("production-critical regressions", () => {
     await expect.poll(() => localEvidenceBlobCount(page)).toBe(0);
   });
 
-  test("resumes a saved demo and reset restores the deterministic seed", async ({ page }) => {
+  test("resumes a demo run and starts a fresh copy without overwriting the saved run", async ({
+    page,
+  }) => {
     await openDemo(page);
+    const originalRunId = currentDemoRunId(page);
+    const originalRunUrl = page.url();
     await inspectorTab(page, "Facts").click();
     await page
       .getByRole("button", {
@@ -551,21 +606,22 @@ test.describe("production-critical regressions", () => {
       })
       .click();
     await page.getByRole("button", { name: "Confirm as human-reviewed" }).click();
-    await expect.poll(() => persistedDemoVersion(page)).toBe(3);
+    await expect.poll(() => persistedCaseVersion(page, originalRunId)).toBe(3);
 
     await page.reload();
-    await expect(page).toHaveURL(/#demo$/);
+    await expect(page).toHaveURL(originalRunUrl);
     await expect(page.locator("main.workspace")).toBeVisible();
     await expect(page.locator(".workspace-case-title")).toContainText("v3");
     await inspectorTab(page, "Facts").click();
     await expect(page.getByText("5 confirmed", { exact: true })).toBeVisible();
 
     await openCaseOptions(page);
-    const resetDemo = page.getByRole("button", { name: "Reset deterministic demo" });
-    await resetDemo.click();
+    const startFreshDemo = page.getByRole("button", { name: "Start fresh demo copy" });
+    await startFreshDemo.click();
     let confirmation = page.getByRole("alertdialog", {
-      name: "Reset the deterministic demo?",
+      name: "Start a fresh demo copy?",
     });
+    await expect(confirmation).toContainText("Your current demo work stays available");
     await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(confirmation).toHaveCount(0);
@@ -573,9 +629,12 @@ test.describe("production-critical regressions", () => {
     await expect(caseOptions).toBeFocused();
 
     await caseOptions.click();
-    await page.getByRole("button", { name: "Reset deterministic demo" }).click();
-    confirmation = page.getByRole("alertdialog", { name: "Reset the deterministic demo?" });
-    await confirmation.getByRole("button", { name: "Reset demo" }).click();
+    await page.getByRole("button", { name: "Start fresh demo copy" }).click();
+    confirmation = page.getByRole("alertdialog", { name: "Start a fresh demo copy?" });
+    await confirmation.getByRole("button", { name: "Start fresh copy" }).click();
+    await expect(page).toHaveURL(/#case\/case-demo-roundabout-calibrated-run-/);
+    const freshRunId = currentDemoRunId(page);
+    expect(freshRunId).not.toBe(originalRunId);
     await expect(page.locator(".workspace-case-title")).toContainText("v1");
     await expect(page.locator(".workspace-conflict")).toHaveCount(0);
     await expect(page.getByText("4 confirmed", { exact: true })).toBeVisible();
@@ -585,13 +644,56 @@ test.describe("production-critical regressions", () => {
         name: /Vehicle A was leaving the roundabout when Vehicle B made contact.*Reported/,
       }),
     ).toBeVisible();
-    await expect.poll(() => persistedDemoVersion(page)).toBe(1);
+    await expect.poll(() => persistedCaseVersion(page, freshRunId)).toBe(1);
+    await expect.poll(() => persistedCaseVersion(page, originalRunId)).toBe(3);
+
+    await page.goBack();
+    await expect(page.locator("main.workspace")).toBeVisible();
+    expect(currentDemoRunId(page)).toBe(originalRunId);
+    await expect(page.locator(".workspace-case-title")).toContainText("v3");
+    await page.goForward();
+    await expect(page.locator("main.workspace")).toBeVisible();
+    expect(currentDemoRunId(page)).toBe(freshRunId);
+    await expect(page.locator(".workspace-case-title")).toContainText("v1");
 
     await page.reload();
+    expect(currentDemoRunId(page)).toBe(freshRunId);
     await expect(page.locator("main.workspace")).toBeVisible();
     await expect(page.locator(".workspace-case-title")).toContainText("v1");
     await inspectorTab(page, "Facts").click();
     await expect(page.getByText("4 confirmed", { exact: true })).toBeVisible();
+
+    await page.goto(originalRunUrl);
+    await expect(page.locator("main.workspace")).toBeVisible();
+    expect(currentDemoRunId(page)).toBe(originalRunId);
+    await expect(page.locator(".workspace-case-title")).toContainText("v3");
+    await inspectorTab(page, "Facts").click();
+    await expect(page.getByText("5 confirmed", { exact: true })).toBeVisible();
+  });
+
+  test("opens a clean unique run from bare #demo despite a polluted legacy demo", async ({
+    page,
+  }) => {
+    await openDemo(page);
+    const firstRunId = currentDemoRunId(page);
+    await expect.poll(() => persistedCaseVersion(page, firstRunId)).toBe(1);
+    await seedPollutedLegacyDemo(page, firstRunId);
+    await expect.poll(() => persistedCaseVersion(page, "case-demo-roundabout")).toBe(77);
+
+    await page.goto("/#demo");
+    await expect(page.locator("main.workspace")).toBeVisible();
+    const cleanRunId = currentDemoRunId(page);
+    expect(cleanRunId).not.toBe(firstRunId);
+    expect(cleanRunId).not.toBe("case-demo-roundabout");
+    await expect(page.locator(".workspace-case-title")).toContainText("Demo run");
+    await expect(page.locator(".workspace-case-title")).toContainText("v1");
+    await expect(page.locator(".workspace-conflict")).toHaveCount(0);
+    await expect(page.locator(".scene-contact-readout")).toHaveAttribute(
+      "data-contact-state",
+      "clear",
+    );
+    await expect.poll(() => persistedCaseVersion(page, cleanRunId)).toBe(1);
+    await expect.poll(() => persistedCaseVersion(page, "case-demo-roundabout")).toBe(77);
   });
 
   test("does not infer another editor from a delayed single-page lease check", async ({ page }) => {
@@ -613,11 +715,13 @@ test.describe("production-critical regressions", () => {
     await expect(page.locator(".save-status")).toContainText("Saved locally");
   });
 
-  test("lets a visible page take over a hidden editing lease and reload saved work", async ({
+  test("isolates bare demo runs but keeps same-run editing leases exclusive", async ({
     context,
     page,
   }) => {
     await openDemo(page);
+    const originalRunId = currentDemoRunId(page);
+    const originalRunUrl = page.url();
     await expect(page.locator(".workspace-conflict")).toHaveCount(0);
     await inspectorTab(page, "Facts").click();
     await page
@@ -626,10 +730,16 @@ test.describe("production-critical regressions", () => {
       })
       .click();
     await page.getByRole("button", { name: "Confirm as human-reviewed" }).click();
-    await expect.poll(() => persistedDemoVersion(page)).toBe(3);
+    await expect.poll(() => persistedCaseVersion(page, originalRunId)).toBe(3);
 
     const contender = await context.newPage();
     await contender.goto("/#demo");
+    await expect(contender.locator("main.workspace")).toBeVisible();
+    expect(currentDemoRunId(contender)).not.toBe(originalRunId);
+    await expect(contender.locator(".workspace-conflict")).toHaveCount(0);
+    await expect(contender.locator(".workspace-case-title")).toContainText("v1");
+
+    await contender.goto(originalRunUrl);
     await expect(contender.locator("main.workspace")).toBeVisible();
     const conflict = contender.locator(".workspace-conflict");
     await expect(conflict).toContainText("Another page context still owns this case");

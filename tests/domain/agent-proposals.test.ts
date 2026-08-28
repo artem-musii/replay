@@ -90,6 +90,7 @@ describe("agent proposal command workflow", () => {
 
   it("accepts a multi-object proposal atomically through a human UI decision", () => {
     const engine = createEngine();
+    const originalActorPose = actorPose(engine, "actor-vehicle-a");
     const trajectory = engine.state.trajectories.find(
       (candidate) => candidate.id === "trajectory-b-baseline",
     );
@@ -125,7 +126,7 @@ describe("agent proposal command workflow", () => {
       ],
     });
     expect(createResult.ok).toBe(true);
-    expect(actorPose(engine, "actor-vehicle-a")).toEqual({ x: 74, y: 54, rotationDeg: 80 });
+    expect(actorPose(engine, "actor-vehicle-a")).toEqual(originalActorPose);
 
     const acceptResult = engine.execute({
       type: "proposal.accept",
@@ -219,6 +220,7 @@ describe("agent proposal command workflow", () => {
 
   it("preserves a human manual adjustment as a new revision before acceptance", () => {
     const engine = createEngine();
+    const originalActorPose = actorPose(engine, "actor-vehicle-a");
     expect(
       engine.execute({
         type: "proposal.create",
@@ -251,7 +253,7 @@ describe("agent proposal command workflow", () => {
       ],
     });
     expect(adjusted.ok).toBe(true);
-    expect(actorPose(engine, "actor-vehicle-a")).toEqual({ x: 74, y: 54, rotationDeg: 80 });
+    expect(actorPose(engine, "actor-vehicle-a")).toEqual(originalActorPose);
     expect(engine.state.proposals[0]?.revisions).toMatchObject([
       { revisionNumber: 1, createdBy: "agent", origin: "webmcp" },
       { revisionNumber: 2, createdBy: "human", origin: "ui", authorshipTrusted: true },

@@ -549,6 +549,7 @@ function applyTrajectorySet(
       id: trajectoryId,
       actorId: actor.id,
       branchId: branch.id,
+      interpolationMode: "linear",
       keyframes,
       visible: command.visible ?? true,
       locked: false,

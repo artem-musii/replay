@@ -12,8 +12,15 @@ import {
   Unlock,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { interpolateTrajectory, sampleTrajectory } from "../domain/interpolation";
+import {
+  analyzeVehicleFootprintRelation,
+  createSceneMetricCalibration,
+  impactPenetrationToleranceMeters,
+  impactSeparationToleranceMeters,
+  type FootprintRelation,
+} from "../domain/physics";
 import {
   getRoadTemplate,
   normalizedToView,
@@ -26,6 +33,7 @@ import type {
   ActorPose,
   DamageRegion,
   DamageMarker,
+  Point,
   ReplayCase,
   RoadSceneType,
   SceneActor,
@@ -73,6 +81,77 @@ interface DragState {
 
 const VIEW_WIDTH = SCENE_VIEW_WIDTH;
 const VIEW_HEIGHT = SCENE_VIEW_HEIGHT;
+const IMPACT_ALIGNMENT_WINDOW_MS = 50;
+const CONTACT_VISUAL_TOLERANCE_M = 0.1;
+const CONTACT_SEPARATION_EPSILON_M = 0.01;
+
+type ContactDisplayState =
+  "clear" | "recorded" | "touching" | "unmarked" | "excessive" | "calibration-gap" | "impact-gap";
+
+interface CurrentPairGeometry {
+  first: SceneActor;
+  second: SceneActor;
+  firstPose: ActorPose;
+  secondPose: ActorPose;
+  relation: FootprintRelation;
+  matchingImpact?: TimelineEvent | undefined;
+  state: Exclude<ContactDisplayState, "clear" | "calibration-gap" | "impact-gap"> | "clear";
+}
+
+interface VehicleViewGeometry {
+  bodyMatrix: string;
+  corners: readonly [Point, Point, Point, Point];
+  forwardPerMeter: Point;
+  rightPerMeter: Point;
+  forwardUnit: Point;
+  halfLengthPixels: number;
+}
+
+function vehicleViewGeometry(
+  dimensions: SceneActor["dimensions"],
+  rotationDeg: number,
+  pixelsPerMeterX: number,
+  pixelsPerMeterY: number,
+): VehicleViewGeometry {
+  const radians = (rotationDeg * Math.PI) / 180;
+  const forwardPerMeter = {
+    x: Math.sin(radians) * pixelsPerMeterX,
+    y: -Math.cos(radians) * pixelsPerMeterY,
+  };
+  const rightPerMeter = {
+    x: Math.cos(radians) * pixelsPerMeterX,
+    y: Math.sin(radians) * pixelsPerMeterY,
+  };
+  const halfLengthM = dimensions.length / 2;
+  const halfWidthM = dimensions.width / 2;
+  const corner = (forwardSign: -1 | 1, rightSign: -1 | 1): Point => ({
+    x: forwardPerMeter.x * halfLengthM * forwardSign + rightPerMeter.x * halfWidthM * rightSign,
+    y: forwardPerMeter.y * halfLengthM * forwardSign + rightPerMeter.y * halfWidthM * rightSign,
+  });
+  const forwardLength = Math.hypot(forwardPerMeter.x, forwardPerMeter.y);
+  return {
+    bodyMatrix: [
+      rightPerMeter.x * (dimensions.width / 40),
+      rightPerMeter.y * (dimensions.width / 40),
+      -forwardPerMeter.x * (dimensions.length / 86),
+      -forwardPerMeter.y * (dimensions.length / 86),
+      0,
+      0,
+    ].join(" "),
+    corners: [corner(1, -1), corner(1, 1), corner(-1, 1), corner(-1, -1)],
+    forwardPerMeter,
+    rightPerMeter,
+    forwardUnit:
+      forwardLength > 0
+        ? { x: forwardPerMeter.x / forwardLength, y: forwardPerMeter.y / forwardLength }
+        : { x: 0, y: -1 },
+    halfLengthPixels: forwardLength * halfLengthM,
+  };
+}
+
+function polygonPoints(points: readonly Point[]): string {
+  return points.map((point) => `${point.x},${point.y}`).join(" ");
+}
 
 function toView(x: number, y: number) {
   return normalizedToView({ x, y });
@@ -85,6 +164,72 @@ function toNormalized(x: number, y: number) {
 function formatSceneSeconds(timeMs: number): string {
   const normalizedTimeMs = Math.round(timeMs);
   return (normalizedTimeMs / 1000).toFixed(normalizedTimeMs % 100 === 0 ? 1 : 3);
+}
+
+function actorBadge(label: string): string {
+  const vehicleSuffix = /\bvehicle\s+([a-z0-9]{1,3})\b/i.exec(label)?.[1];
+  if (vehicleSuffix) return vehicleSuffix.toUpperCase();
+  const initials = label
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0] ?? "")
+    .join("")
+    .toUpperCase();
+  return initials || "V";
+}
+
+function contactReadout(
+  state: ContactDisplayState,
+  pair: CurrentPairGeometry | undefined,
+  currentTimeMs: number,
+  actorCount: number,
+): { title: string; detail: string } {
+  const time = `${formatSceneSeconds(currentTimeMs)} s`;
+  const labels = pair ? `${pair.first.label} ↔ ${pair.second.label}` : "Vehicle footprints";
+  if (state === "recorded" && pair) {
+    const certainty = pair.matchingImpact?.certainty ?? "unknown";
+    return {
+      title: "Impact event geometry · footprints meet",
+      detail: `${labels} · event status: ${certainty} · modeled penetration ${pair.relation.penetrationDepthM.toFixed(2)} m at ${time}`,
+    };
+  }
+  if (state === "excessive" && pair) {
+    const certainty = pair.matchingImpact?.certainty ?? "unknown";
+    return {
+      title: "Geometry conflict at impact event",
+      detail: `${labels} interpenetrate by ${pair.relation.penetrationDepthM.toFixed(2)} m at ${time} · event status: ${certainty}`,
+    };
+  }
+  if (state === "unmarked" && pair) {
+    return {
+      title: "Unmarked vehicle overlap",
+      detail: `${labels} interpenetrate by ${pair.relation.penetrationDepthM.toFixed(2)} m at ${time}`,
+    };
+  }
+  if (state === "touching" && pair) {
+    return {
+      title: "Footprints touch without a contact event",
+      detail: `${labels} · ${pair.relation.penetrationDepthM.toFixed(2)} m overlap depth at ${time}`,
+    };
+  }
+  if (state === "impact-gap" && pair) {
+    const certainty = pair.matchingImpact?.certainty ?? "unknown";
+    return {
+      title: "Impact event has no footprint contact",
+      detail: `${labels} have a ${pair.relation.separationM.toFixed(2)} m gap at ${time} · event status: ${certainty}`,
+    };
+  }
+  if (state === "calibration-gap" && pair) {
+    return {
+      title: "Impact geometry remains calibration-dependent",
+      detail: `${labels} have a ${pair.relation.separationM.toFixed(2)} m modeled gap at ${time}; review the scene calibration before treating it as a conflict`,
+    };
+  }
+  return {
+    title: "Vehicle footprints clear",
+    detail: `${String(actorCount)} configured vehicle ${actorCount === 1 ? "footprint" : "footprints"} checked at ${time}; no modeled overlap`,
+  };
 }
 
 export function SceneCanvas({
@@ -121,10 +266,8 @@ export function SceneCanvas({
   const [damageRegion, setDamageRegion] = useState<DamageRegion>("unknown");
   const [damageDescription, setDamageDescription] = useState("");
   const roadTemplate = getRoadTemplate(replayCase.environment.sceneType);
-  const metresToPixels = Math.min(
-    VIEW_WIDTH / replayCase.environment.calibration.widthMeters,
-    VIEW_HEIGHT / replayCase.environment.calibration.heightMeters,
-  );
+  const pixelsPerMeterX = VIEW_WIDTH / replayCase.environment.calibration.widthMeters;
+  const pixelsPerMeterY = VIEW_HEIGHT / replayCase.environment.calibration.heightMeters;
 
   const displayedBranchIds = comparisonBranchIds.length
     ? new Set([replayCase.activeBranchId, ...comparisonBranchIds])
@@ -194,11 +337,147 @@ export function SceneCanvas({
   const impact = replayCase.timelineEvents.find(
     (event) => event.branchId === replayCase.activeBranchId && event.type === "impact",
   );
+  const activeImpacts = useMemo(
+    () =>
+      replayCase.timelineEvents.filter(
+        (event) => event.branchId === replayCase.activeBranchId && event.type === "impact",
+      ),
+    [replayCase.activeBranchId, replayCase.timelineEvents],
+  );
+  const currentPairGeometry = useMemo<CurrentPairGeometry[]>(() => {
+    const calibration = createSceneMetricCalibration({
+      sceneBounds: replayCase.environment.bounds,
+      widthMeters: replayCase.environment.calibration.widthMeters,
+      heightMeters: replayCase.environment.calibration.heightMeters,
+    });
+    const relations: CurrentPairGeometry[] = [];
+    for (let firstIndex = 0; firstIndex < replayCase.actors.length - 1; firstIndex += 1) {
+      for (
+        let secondIndex = firstIndex + 1;
+        secondIndex < replayCase.actors.length;
+        secondIndex += 1
+      ) {
+        const first = replayCase.actors[firstIndex];
+        const second = replayCase.actors[secondIndex];
+        if (!first || !second) continue;
+        const firstPose = actorPoses[first.id];
+        const secondPose = actorPoses[second.id];
+        if (!firstPose || !secondPose) continue;
+        const relation = analyzeVehicleFootprintRelation(
+          { pose: firstPose, dimensions: first.dimensions },
+          { pose: secondPose, dimensions: second.dimensions },
+          calibration,
+        );
+        const matchingImpact = activeImpacts.find(
+          (event) =>
+            Math.abs(event.timeMs - currentTimeMs) <= IMPACT_ALIGNMENT_WINDOW_MS &&
+            event.linkedActorIds.includes(first.id) &&
+            event.linkedActorIds.includes(second.id),
+        );
+        const penetrationToleranceM = matchingImpact
+          ? impactPenetrationToleranceMeters(first.dimensions, second.dimensions)
+          : CONTACT_VISUAL_TOLERANCE_M;
+        const materialOverlap =
+          relation.overlaps && relation.penetrationDepthM > penetrationToleranceM;
+        const state: CurrentPairGeometry["state"] = materialOverlap
+          ? matchingImpact
+            ? "excessive"
+            : "unmarked"
+          : relation.overlaps
+            ? matchingImpact
+              ? "recorded"
+              : "touching"
+            : "clear";
+        relations.push({
+          first,
+          second,
+          firstPose,
+          secondPose,
+          relation,
+          ...(matchingImpact ? { matchingImpact } : {}),
+          state,
+        });
+      }
+    }
+    return relations;
+  }, [activeImpacts, actorPoses, currentTimeMs, replayCase.actors, replayCase.environment]);
+  const pairStatePriority: Record<CurrentPairGeometry["state"], number> = {
+    clear: 0,
+    touching: 1,
+    recorded: 2,
+    unmarked: 3,
+    excessive: 4,
+  };
+  const primaryPairGeometry = [...currentPairGeometry].sort(
+    (first, second) => pairStatePriority[second.state] - pairStatePriority[first.state],
+  )[0];
+  const nearbyImpact = activeImpacts.find(
+    (event) => Math.abs(event.timeMs - currentTimeMs) <= IMPACT_ALIGNMENT_WINDOW_MS,
+  );
+  const impactPairGeometry = nearbyImpact
+    ? currentPairGeometry.find(
+        (pair) =>
+          nearbyImpact.linkedActorIds.includes(pair.first.id) &&
+          nearbyImpact.linkedActorIds.includes(pair.second.id),
+      )
+    : undefined;
+  const contactDisplayState: ContactDisplayState =
+    primaryPairGeometry && primaryPairGeometry.state !== "clear"
+      ? primaryPairGeometry.state
+      : nearbyImpact && impactPairGeometry && !impactPairGeometry.relation.overlaps
+        ? impactPairGeometry.relation.separationM >
+          impactSeparationToleranceMeters(replayCase.environment.calibration.uncertaintyMeters)
+          ? "impact-gap"
+          : impactPairGeometry.relation.separationM > CONTACT_SEPARATION_EPSILON_M
+            ? "calibration-gap"
+            : "clear"
+        : "clear";
+  const contactDisplayPair =
+    contactDisplayState === "impact-gap" || contactDisplayState === "calibration-gap"
+      ? impactPairGeometry
+      : primaryPairGeometry;
+  const focusedImpactIdRef = useRef<string | undefined>(undefined);
+  const nearbyImpactId = nearbyImpact?.id;
+  const nearbyImpactX = nearbyImpact?.location?.x;
+  const nearbyImpactY = nearbyImpact?.location?.y;
+  const shouldFocusImpact = impactPairGeometry?.relation.overlaps === true;
+  useEffect(() => {
+    if (
+      !shouldFocusImpact ||
+      nearbyImpactId === undefined ||
+      nearbyImpactX === undefined ||
+      nearbyImpactY === undefined
+    ) {
+      focusedImpactIdRef.current = undefined;
+      return;
+    }
+    if (focusedImpactIdRef.current === nearbyImpactId) return;
+    const point = toView(nearbyImpactX, nearbyImpactY);
+    focusedImpactIdRef.current = nearbyImpactId;
+    setZoom((current) => Math.max(current, 2.2));
+    setPan({ x: VIEW_WIDTH / 2 - point.x, y: VIEW_HEIGHT / 2 - point.y });
+  }, [nearbyImpactId, nearbyImpactX, nearbyImpactY, shouldFocusImpact]);
+  const contactStateByActor = new Map<string, CurrentPairGeometry["state"]>();
+  const labelDirectionByActor = new Map<string, -1 | 1>();
+  for (const pair of currentPairGeometry) {
+    if (pair.state === "clear") continue;
+    for (const actor of [pair.first, pair.second]) {
+      const existing = contactStateByActor.get(actor.id) ?? "clear";
+      if (pairStatePriority[pair.state] > pairStatePriority[existing]) {
+        contactStateByActor.set(actor.id, pair.state);
+      }
+    }
+    labelDirectionByActor.set(pair.first.id, -1);
+    labelDirectionByActor.set(pair.second.id, 1);
+  }
   const selectedActor = replayCase.actors.find((actor) => actor.id === selectedId);
   const selectedTrajectory = replayCase.trajectories.find(
     (trajectory) => trajectory.id === selectedId,
   );
   const selectedEvent = replayCase.timelineEvents.find((event) => event.id === selectedId);
+  const activeBranch = replayCase.branches.find(
+    (branch) => branch.id === replayCase.activeBranchId,
+  );
 
   function isActorEditLocked(actor: SceneActor): boolean {
     const activeTrajectory = replayCase.trajectories.find(
@@ -481,6 +760,12 @@ export function SceneCanvas({
   }
 
   const viewBox = `${-pan.x + (VIEW_WIDTH - VIEW_WIDTH / zoom) / 2} ${-pan.y + (VIEW_HEIGHT - VIEW_HEIGHT / zoom) / 2} ${VIEW_WIDTH / zoom} ${VIEW_HEIGHT / zoom}`;
+  const contactReadoutContent = contactReadout(
+    contactDisplayState,
+    contactDisplayPair,
+    currentTimeMs,
+    replayCase.actors.length,
+  );
 
   return (
     <section
@@ -660,7 +945,9 @@ export function SceneCanvas({
           </details>
         </div>
         <div className="scene-toolbar__label">
-          <span>{roadTemplate.label}</span>
+          <span>
+            {roadTemplate.label} · {activeBranch?.name ?? "Active reconstruction"}
+          </span>
           <small>
             {replayCase.environment.calibration.widthMeters} ×{" "}
             {replayCase.environment.calibration.heightMeters} m ·{" "}
@@ -802,28 +1089,22 @@ export function SceneCanvas({
             const actor = replayCase.actors.find((candidate) => candidate.id === change.actorId);
             if (change.kind === "actor-pose") {
               const point = toView(change.proposedPose.x, change.proposedPose.y);
-              const bodyWidth = (actor?.dimensions.width ?? 1.8) * metresToPixels;
-              const bodyLength = (actor?.dimensions.length ?? 4.3) * metresToPixels;
+              const dimensions = actor?.dimensions ?? { width: 1.8, length: 4.3 };
+              const geometry = vehicleViewGeometry(
+                dimensions,
+                change.proposedPose.rotationDeg,
+                pixelsPerMeterX,
+                pixelsPerMeterY,
+              );
               return (
                 <g
                   key={change.id}
                   className="proposal-scene-actor"
-                  transform={`translate(${point.x} ${point.y}) rotate(${change.proposedPose.rotationDeg})`}
+                  transform={`translate(${point.x} ${point.y})`}
                   aria-hidden="true"
                 >
-                  <rect
-                    x={-bodyWidth / 2}
-                    y={-bodyLength / 2}
-                    width={bodyWidth}
-                    height={bodyLength}
-                    rx={Math.min(bodyWidth / 2, 8)}
-                  />
-                  <text
-                    x="0"
-                    y={bodyLength / 2 + 22}
-                    textAnchor="middle"
-                    transform={`rotate(${-change.proposedPose.rotationDeg} 0 ${bodyLength / 2 + 22})`}
-                  >
+                  <polygon points={polygonPoints(geometry.corners)} />
+                  <text x="0" y={geometry.halfLengthPixels + 22} textAnchor="middle">
                     Proposed {actor?.label ?? "vehicle"}
                   </text>
                 </g>
@@ -991,15 +1272,6 @@ export function SceneCanvas({
               );
             })}
 
-          {impact?.location && (
-            <ImpactMarker
-              event={impact}
-              selected={selectedId === impact.id}
-              placementMode={placingImpact}
-              onSelect={() => onSelect("timeline-event", impact.id)}
-            />
-          )}
-
           {[...replayCase.actors]
             .sort(
               (first, second) => Number(first.id === selectedId) - Number(second.id === selectedId),
@@ -1023,7 +1295,8 @@ export function SceneCanvas({
                       (replayCase.environment.bounds.maxY - replayCase.environment.bounds.minY)) *
                     replayCase.environment.calibration.heightMeters
                   }
-                  metresToPixels={metresToPixels}
+                  pixelsPerMeterX={pixelsPerMeterX}
+                  pixelsPerMeterY={pixelsPerMeterY}
                   rotation={pose.rotationDeg}
                   selected={selectedId === actor.id}
                   editLocked={isActorEditLocked(actor)}
@@ -1037,6 +1310,8 @@ export function SceneCanvas({
                           ? "human"
                           : "legacy"
                   }
+                  contactState={contactStateByActor.get(actor.id) ?? "clear"}
+                  labelDirection={labelDirectionByActor.get(actor.id) ?? 1}
                   placementMode={placingImpact}
                   onPointerDown={startNearestSceneDrag}
                   onRotatePointerDown={(event) => {
@@ -1047,7 +1322,58 @@ export function SceneCanvas({
                 />
               );
             })}
+
+          {activeImpacts.map((impactEvent) =>
+            impactEvent.location ? (
+              <ImpactMarker
+                key={impactEvent.id}
+                event={impactEvent}
+                selected={selectedId === impactEvent.id}
+                showLabel={selectedId === impactEvent.id && contactDisplayState === "clear"}
+                zoom={zoom}
+                placementMode={placingImpact}
+                onSelect={() => onSelect("timeline-event", impactEvent.id)}
+              />
+            ) : null,
+          )}
+
+          {currentPairGeometry
+            .filter(
+              (pair) =>
+                pair.state !== "clear" && !(pair.state === "recorded" && pair.matchingImpact),
+            )
+            .map((pair) => {
+              const first = toView(pair.firstPose.x, pair.firstPose.y);
+              const second = toView(pair.secondPose.x, pair.secondPose.y);
+              const marker = pair.matchingImpact?.location
+                ? toView(pair.matchingImpact.location.x, pair.matchingImpact.location.y)
+                : { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+              return (
+                <ContactGeometryMarker
+                  key={`${pair.first.id}-${pair.second.id}`}
+                  x={marker.x}
+                  y={marker.y}
+                  state={pair.state}
+                  zoom={zoom}
+                />
+              );
+            })}
         </svg>
+
+        <div
+          className={`scene-contact-readout is-${contactDisplayState}${selectedId ? " has-selection-actions" : ""}`}
+          data-contact-state={contactDisplayState}
+          aria-label={`${contactReadoutContent.title}. ${contactReadoutContent.detail}. Geometry only; not proof of physical contact.`}
+        >
+          <i aria-hidden="true" />
+          <span>
+            <strong>{contactReadoutContent.title}</strong>
+            <small>{contactReadoutContent.detail}</small>
+          </span>
+        </div>
+        <span className="visually-hidden" role="status" aria-live="polite">
+          {contactReadoutContent.title}
+        </span>
 
         <div className="scene-legend" aria-label="Scene legend">
           <span>
@@ -1376,12 +1702,15 @@ interface VehicleProps {
   y: number;
   worldX: number;
   worldY: number;
-  metresToPixels: number;
+  pixelsPerMeterX: number;
+  pixelsPerMeterY: number;
   rotation: number;
   selected: boolean;
   editLocked: boolean;
   agentActive: boolean;
   authorship: "human" | "agent" | "accepted-proposal" | "legacy";
+  contactState: CurrentPairGeometry["state"];
+  labelDirection: -1 | 1;
   placementMode: boolean;
   onPointerDown: (event: React.PointerEvent<SVGGElement>) => void;
   onRotatePointerDown: (event: React.PointerEvent<SVGCircleElement>) => void;
@@ -1395,12 +1724,15 @@ function Vehicle({
   y,
   worldX,
   worldY,
-  metresToPixels,
+  pixelsPerMeterX,
+  pixelsPerMeterY,
   rotation,
   selected,
   editLocked,
   agentActive,
   authorship,
+  contactState,
+  labelDirection,
   placementMode,
   onPointerDown,
   onRotatePointerDown,
@@ -1409,19 +1741,54 @@ function Vehicle({
 }: VehicleProps) {
   const blue = actor.colorToken.includes("blue");
   const damage = actor.damageMarkers;
-  const bodyWidth = actor.dimensions.width * metresToPixels;
-  const bodyLength = actor.dimensions.length * metresToPixels;
-  const bodyScaleX = bodyWidth / 40;
-  const bodyScaleY = bodyLength / 86;
-  const hitWidth = Math.max(84, bodyWidth + 48);
-  const hitLength = Math.max(126, bodyLength + 48);
-  const labelY = bodyLength / 2 + 22;
-  const rotationLineY = -bodyLength / 2 - 5;
-  const rotationHandleY = -bodyLength / 2 - 38;
+  const geometry = vehicleViewGeometry(
+    actor.dimensions,
+    rotation,
+    pixelsPerMeterX,
+    pixelsPerMeterY,
+  );
+  const labelSide = -labelDirection;
+  const badgeDistance = geometry.halfLengthPixels + 20;
+  const labelDistance = geometry.halfLengthPixels + 48;
+  const badgePoint = {
+    x: geometry.forwardUnit.x * badgeDistance * labelSide,
+    y: geometry.forwardUnit.y * badgeDistance * labelSide,
+  };
+  const labelPoint = {
+    x: geometry.forwardUnit.x * labelDistance * labelSide,
+    y: geometry.forwardUnit.y * labelDistance * labelSide,
+  };
+  const rotationLineStart = {
+    x: geometry.forwardUnit.x * (geometry.halfLengthPixels + 5),
+    y: geometry.forwardUnit.y * (geometry.halfLengthPixels + 5),
+  };
+  const rotationHandle = {
+    x: geometry.forwardUnit.x * (geometry.halfLengthPixels + 38),
+    y: geometry.forwardUnit.y * (geometry.halfLengthPixels + 38),
+  };
+  const viewOffset = (forwardM: number, rightM: number): Point => ({
+    x: geometry.forwardPerMeter.x * forwardM + geometry.rightPerMeter.x * rightM,
+    y: geometry.forwardPerMeter.y * forwardM + geometry.rightPerMeter.y * rightM,
+  });
+  const halfLengthM = actor.dimensions.length / 2;
+  const halfWidthM = actor.dimensions.width / 2;
+  const damageOffsetByRegion: Record<DamageMarker["region"], Point> = {
+    front: viewOffset(halfLengthM, 0),
+    "front-left": viewOffset(halfLengthM * 0.82, -halfWidthM),
+    "front-right": viewOffset(halfLengthM * 0.82, halfWidthM),
+    "left-side": viewOffset(0, -halfWidthM),
+    "right-side": viewOffset(0, halfWidthM),
+    "rear-left": viewOffset(-halfLengthM * 0.82, -halfWidthM),
+    "rear-right": viewOffset(-halfLengthM * 0.82, halfWidthM),
+    rear: viewOffset(-halfLengthM, 0),
+    unknown: { x: 0, y: 0 },
+  };
+  const authorshipPoint = viewOffset(halfLengthM, 0);
+  const lockPoint = geometry.corners[1];
   return (
     <g
-      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}${authorship === "agent" ? " is-agent-authored" : ""}${authorship === "accepted-proposal" ? " is-accepted-agent-proposal" : ""}`}
-      transform={`translate(${x} ${y}) rotate(${rotation})`}
+      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}${authorship === "agent" ? " is-agent-authored" : ""}${authorship === "accepted-proposal" ? " is-accepted-agent-proposal" : ""}${contactState !== "clear" ? ` has-contact-state is-contact-${contactState}` : ""}`}
+      transform={`translate(${x} ${y})`}
       tabIndex={0}
       role="button"
       aria-label={`${actor.label}, position ${worldX.toFixed(1)} metres east and ${worldY.toFixed(1)} metres south of the calibrated scene origin, ${actor.dimensions.length.toFixed(2)} by ${actor.dimensions.width.toFixed(2)} metres, orientation ${Math.round(rotation)} degrees${editLocked ? ", locked. Unlock the vehicle and its path to edit" : ". Use arrow keys to move and bracket keys to rotate"}.`}
@@ -1434,39 +1801,36 @@ function Vehicle({
       }}
       onKeyDown={onKeyDown}
     >
-      <rect
-        className="vehicle-hit"
-        x={-hitWidth / 2}
-        y={-hitLength / 2}
-        width={hitWidth}
-        height={hitLength}
-        rx="24"
-      />
-      <rect
-        className="vehicle-selection"
-        x={-bodyWidth / 2 - 5}
-        y={-bodyLength / 2 - 5}
-        width={bodyWidth + 10}
-        height={bodyLength + 10}
-        rx={Math.min(bodyWidth / 2 + 5, 14)}
-      />
+      <title>{actor.label}</title>
+      <polygon className="vehicle-selection" points={polygonPoints(geometry.corners)} />
       {selected && !editLocked && (
         <g className="vehicle-rotation-control" aria-hidden="true">
-          <line x1="0" y1={rotationLineY} x2="0" y2={rotationHandleY + 6} />
+          <line
+            x1={rotationLineStart.x}
+            y1={rotationLineStart.y}
+            x2={rotationHandle.x - geometry.forwardUnit.x * 6}
+            y2={rotationHandle.y - geometry.forwardUnit.y * 6}
+          />
           <circle
             className="vehicle-rotation-control__hit"
-            cx="0"
-            cy={rotationHandleY}
+            cx={rotationHandle.x}
+            cy={rotationHandle.y}
             r="34"
             onPointerDown={onRotatePointerDown}
           />
-          <circle className="vehicle-rotation-control__knob" cx="0" cy={rotationHandleY} r="10" />
+          <circle
+            className="vehicle-rotation-control__knob"
+            cx={rotationHandle.x}
+            cy={rotationHandle.y}
+            r="10"
+          />
           <path
-            d={`M-4 ${String(rotationHandleY - 1)}a5 5 0 0 1 8 0M4 ${String(rotationHandleY - 1)}l-1-5 5 2`}
+            d="M-4-1a5 5 0 0 1 8 0M4-1l-1-5 5 2"
+            transform={`translate(${rotationHandle.x} ${rotationHandle.y})`}
           />
         </g>
       )}
-      <g filter="url(#vehicle-shadow)" transform={`scale(${bodyScaleX} ${bodyScaleY})`}>
+      <g filter="url(#vehicle-shadow)" transform={`matrix(${geometry.bodyMatrix})`}>
         <rect
           className={blue ? "vehicle-body vehicle-body--blue" : "vehicle-body vehicle-body--silver"}
           x="-20"
@@ -1483,22 +1847,26 @@ function Vehicle({
         <rect className="vehicle-tail" x="-14" y="35" width="7" height="3" rx="1" />
         <rect className="vehicle-tail" x="7" y="35" width="7" height="3" rx="1" />
       </g>
-      <text
-        className="vehicle-label"
-        x="0"
-        y={labelY}
-        textAnchor="middle"
-        transform={`rotate(${-rotation} 0 ${labelY})`}
+      <g
+        className="vehicle-identity-badge"
+        transform={`translate(${badgePoint.x} ${badgePoint.y})`}
       >
-        {actor.label}
-      </text>
+        <circle r="12" />
+        <text x="0" y="4" textAnchor="middle">
+          {actorBadge(actor.label)}
+        </text>
+      </g>
+      {selected && (
+        <text className="vehicle-label" x={labelPoint.x} y={labelPoint.y} textAnchor="middle">
+          {actor.label}
+        </text>
+      )}
       {(authorship === "agent" || authorship === "accepted-proposal") && (
         <text
           className="vehicle-authorship-badge"
-          x="0"
-          y={-bodyLength / 2 - 11}
+          x={authorshipPoint.x + geometry.forwardUnit.x * 11}
+          y={authorshipPoint.y + geometry.forwardUnit.y * 11}
           textAnchor="middle"
-          transform={`rotate(${-rotation} 0 ${-bodyLength / 2 - 11})`}
         >
           {authorship === "agent" ? "AGENT" : "HUMAN ACCEPTED"}
         </text>
@@ -1506,39 +1874,16 @@ function Vehicle({
       {damage.map((marker) => (
         <DamageGlyph
           key={marker.id}
-          marker={marker}
-          bodyWidth={bodyWidth}
-          bodyLength={bodyLength}
+          x={damageOffsetByRegion[marker.region].x}
+          y={damageOffsetByRegion[marker.region].y}
         />
       ))}
-      {editLocked && <LockGlyph x={bodyWidth / 2 + 5} y={-bodyLength / 2 - 6} />}
+      {editLocked && <LockGlyph x={lockPoint.x + 5} y={lockPoint.y - 6} />}
     </g>
   );
 }
 
-function DamageGlyph({
-  marker,
-  bodyWidth,
-  bodyLength,
-}: {
-  marker: DamageMarker;
-  bodyWidth: number;
-  bodyLength: number;
-}) {
-  const halfWidth = bodyWidth / 2;
-  const halfLength = bodyLength / 2;
-  const positionByRegion: Record<DamageMarker["region"], [number, number]> = {
-    front: [0, -halfLength],
-    "front-left": [-halfWidth, -halfLength * 0.82],
-    "front-right": [halfWidth, -halfLength * 0.82],
-    "left-side": [-halfWidth, 0],
-    "right-side": [halfWidth, 0],
-    "rear-left": [-halfWidth, halfLength * 0.82],
-    "rear-right": [halfWidth, halfLength * 0.82],
-    rear: [0, halfLength],
-    unknown: [0, 0],
-  };
-  const [x, y] = positionByRegion[marker.region];
+function DamageGlyph({ x, y }: { x: number; y: number }) {
   return (
     <g transform={`translate(${x} ${y})`}>
       <circle className="damage-glyph" r="6" />
@@ -1547,14 +1892,55 @@ function DamageGlyph({
   );
 }
 
+function ContactGeometryMarker({
+  x,
+  y,
+  state,
+  zoom,
+}: {
+  x: number;
+  y: number;
+  state: CurrentPairGeometry["state"];
+  zoom: number;
+}) {
+  const label =
+    state === "recorded"
+      ? "CONTACT"
+      : state === "touching"
+        ? "TOUCHING"
+        : state === "excessive"
+          ? "DEEP OVERLAP"
+          : "UNMARKED OVERLAP";
+  return (
+    <g
+      className={`contact-geometry-marker is-${state}`}
+      transform={`translate(${x} ${y}) scale(${1 / zoom})`}
+      aria-hidden="true"
+    >
+      <circle r="31" />
+      <circle r="9" />
+      <path d="M-18 0h36M0-18v36" />
+      {state !== "recorded" && (
+        <text x="38" y="5">
+          {label}
+        </text>
+      )}
+    </g>
+  );
+}
+
 function ImpactMarker({
   event,
   selected,
+  showLabel,
+  zoom,
   placementMode,
   onSelect,
 }: {
   event: TimelineEvent;
   selected: boolean;
+  showLabel: boolean;
+  zoom: number;
   placementMode: boolean;
   onSelect: () => void;
 }) {
@@ -1563,7 +1949,7 @@ function ImpactMarker({
   return (
     <g
       className={`impact-marker certainty--${event.certainty}${selected ? " is-selected" : ""}`}
-      transform={`translate(${point.x} ${point.y})`}
+      transform={`translate(${point.x} ${point.y}) scale(${1 / zoom})`}
       tabIndex={placementMode ? -1 : 0}
       role="button"
       aria-label={`Approximate impact at ${formatSceneSeconds(event.timeMs)} seconds, ${event.certainty}`}
@@ -1581,9 +1967,11 @@ function ImpactMarker({
       <circle r="22" />
       <circle r="9" />
       <path d="M-28 0h56M0-28v56" />
-      <text x="30" y="-13">
-        Approximate impact
-      </text>
+      {showLabel && (
+        <text x="30" y="-13">
+          Impact · {formatSceneSeconds(event.timeMs)}s
+        </text>
+      )}
     </g>
   );
 }

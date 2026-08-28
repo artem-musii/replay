@@ -181,25 +181,28 @@ export function interpolateTrajectory(trajectory: Trajectory, timeMs: number): A
     return { x: last.x, y: last.y, rotationDeg: normalizeDegrees(last.rotationDeg) };
   }
 
-  let lower = first;
-  let upper = last;
-  let lowerIndex = 0;
-  let upperIndex = trajectory.keyframes.length - 1;
-  for (let index = 1; index < trajectory.keyframes.length; index += 1) {
-    const candidate = trajectory.keyframes[index];
-    if (!candidate) continue;
-    if (candidate.timeMs >= timeMs) {
-      upper = candidate;
-      lower = trajectory.keyframes[index - 1] ?? first;
-      lowerIndex = index - 1;
-      upperIndex = index;
-      break;
-    }
+  let lowerBound = 1;
+  let upperBound = trajectory.keyframes.length - 1;
+  while (lowerBound < upperBound) {
+    const midpoint = Math.floor((lowerBound + upperBound) / 2);
+    const candidate = trajectory.keyframes[midpoint];
+    if (candidate && candidate.timeMs < timeMs) lowerBound = midpoint + 1;
+    else upperBound = midpoint;
   }
+  const upperIndex = lowerBound;
+  const lowerIndex = upperIndex - 1;
+  const lower = trajectory.keyframes[lowerIndex] ?? first;
+  const upper = trajectory.keyframes[upperIndex] ?? last;
 
   const duration = upper.timeMs - lower.timeMs;
   const progress = duration === 0 ? 0 : clamp((timeMs - lower.timeMs) / duration, 0, 1);
-  const position = hermitePosition(trajectory, lowerIndex, upperIndex, progress);
+  const position =
+    trajectory.interpolationMode === "linear"
+      ? {
+          x: lower.x + (upper.x - lower.x) * progress,
+          y: lower.y + (upper.y - lower.y) * progress,
+        }
+      : hermitePosition(trajectory, lowerIndex, upperIndex, progress);
   return {
     ...position,
     rotationDeg: interpolateRotation(lower.rotationDeg, upper.rotationDeg, progress),

@@ -72,6 +72,7 @@ function trajectory(
     id,
     actorId,
     branchId: "branch-baseline",
+    interpolationMode: "smooth",
     keyframes: points.map(([timeMs, x, y, rotationDeg], index) => ({
       id: `${id}-keyframe-${String(index + 1)}`,
       actorId,
@@ -148,7 +149,9 @@ function evidence(
     capturedAt: "2026-05-17T15:44:00.000Z",
     createdAt: CREATED_AT,
     notes:
-      "Synthetic demo evidence. Content is illustrative and must not be treated as independently verified.",
+      id === "evidence-overview"
+        ? "Synthetic illustrative overview. It is not a calibrated scene photograph and is not registered to the reconstruction coordinates; use the timed metric geometry for positions."
+        : "Synthetic demo evidence. Content is illustrative and must not be treated as independently verified.",
     tags,
     annotations: [],
     annotationLinks: [],
@@ -239,18 +242,34 @@ function buildDemoCase(): ReplayCase {
 
   const trajectories: Trajectory[] = [
     trajectory("trajectory-a-baseline", "actor-vehicle-a", [
-      [0, 28, 50, 146],
-      [6_000, 35, 65, 125],
-      [8_000, 50, 72, 78],
-      [10_000, 63, 59, 62],
-      [16_000, 74, 54, 80],
+      [0, 28, 50, 146.00796028785578],
+      [2_000, 34.1915717149675, 61.82416172947324, 138.5455349382937],
+      [4_000, 40.00511514490247, 68.89877090270534, 118.9956574127815],
+      [6_000, 46.422872717353705, 71.26129921120089, 90.1080088186585],
+      [8_000, 54.427086859869966, 68.94921834646428, 70.41888662772948],
+      [9_000, 59.33106590351146, 66.05190937772906, 65.20410275462541],
+      [9_500, 62.06223980118462, 64.1699869923989, 63.39802436508319],
+      [10_000, 65, 62, 62],
+      [10_500, 67.9363643933261, 59.91801351965969, 65.30564296349309],
+      [11_000, 70.66134610467125, 58.26783685526854, 68.84573055389671],
+      [12_000, 75.5265230139792, 56.071720063632625, 76.39730188591892],
+      [14_000, 83.2632615069896, 54.75808225403853, 89.84205062252306],
+      [16_000, 89, 55, 90],
     ]),
     trajectory("trajectory-b-baseline", "actor-vehicle-b", [
-      [0, 34, 61, 133],
-      [6_000, 43, 73, 109],
-      [8_000, 56, 72, 59],
-      [10_000, 66, 56, 60],
-      [16_000, 80, 52, 85],
+      [0, 33.43140001707971, 55.10600264084333, 140.3233742900752],
+      [2_000, 39.438801998231774, 65.44876825685739, 130.803538376981],
+      [4_000, 45.27895234888766, 69.71453185441243, 100.60740924050492],
+      [6_000, 50.96907839876261, 68.5349659248217, 73.58587785390364],
+      [8_000, 57.89650625770585, 64.40689101843749, 65.73031240006605],
+      [9_000, 62.45868601507999, 61.13632442484663, 62.75746138310603],
+      [9_500, 65.0705756608028, 59.13105618437583, 61.27196616465932],
+      [10_000, 67.91837531271479, 56.86283339943973, 62],
+      [10_500, 71.06615461423446, 55.01629469650408, 69.57254352241915],
+      [11_000, 74.02547748321842, 53.613485388065506, 75.61518197627868],
+      [12_000, 79.41645327660102, 51.959747145115685, 84.6710804104884],
+      [14_000, 88.2935199281569, 51.71524470403451, 88.617378060465],
+      [16_000, 95, 51.42142857142857, 88.24299849529098],
     ]),
   ];
 
@@ -292,7 +311,7 @@ function buildDemoCase(): ReplayCase {
         certainty: "uncertain",
         linkedClaimIds: ["claim-initial-statement", "claim-impact-location"],
         linkedEvidenceIds: ["evidence-overview"],
-        location: { x: 64.5, y: 57.5 },
+        location: { x: 66.47553294047583, y: 59.40686638956397 },
       },
     ),
     event("event-stop-a", 16_000, "actor-stop", "Vehicle A final position", ["actor-vehicle-a"], {
@@ -324,7 +343,7 @@ function buildDemoCase(): ReplayCase {
       "evidence-overview",
       "Roundabout incident overview — synthetic demo.webp",
       "3cfb45061b48ffc5e04bb8299c5e558c07d1e21df772045f9b60e3006a810295",
-      ["overview", "final-positions", "synthetic-demo"],
+      ["overview", "illustrative-scene", "synthetic-demo"],
       {
         linkedClaimIds: ["claim-initial-statement"],
         linkedEventIds: [
@@ -404,7 +423,7 @@ function buildDemoCase(): ReplayCase {
         dimensionsSource: "manufacturer",
         wheelbaseMeters: 2.6,
         colorToken: "vehicle-muted-blue",
-        pose: { x: 74, y: 54, rotationDeg: 80 },
+        pose: { x: 89, y: 55, rotationDeg: 90 },
         lastEditedBy: "human",
         lastEditedAt: CREATED_AT,
         locked: false,
@@ -430,7 +449,7 @@ function buildDemoCase(): ReplayCase {
         dimensionsSource: "manufacturer",
         wheelbaseMeters: 2.58,
         colorToken: "vehicle-silver",
-        pose: { x: 80, y: 52, rotationDeg: 85 },
+        pose: { x: 95, y: 51.42142857142857, rotationDeg: 88.24299849529098 },
         lastEditedBy: "human",
         lastEditedAt: CREATED_AT,
         locked: false,
@@ -455,7 +474,7 @@ function buildDemoCase(): ReplayCase {
         id: "branch-baseline",
         name: "Baseline reconstruction",
         description:
-          "Shared starting reconstruction based on the known final positions and approximate contact time.",
+          "Shared starting reconstruction based on reported final positions and an approximate contact time.",
         sharedClaimIds: claims.map((item) => item.id),
         assumptions: [],
         trajectoryIds: trajectories.map((item) => item.id),

@@ -2,17 +2,13 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import {
   createBlankCase,
-  createDemoCase,
   createDemoScenario,
+  DEMO_SCENARIO_IDS,
+  importReplayCase,
   type DemoScenarioId,
   type ReplayCase,
 } from "./domain";
-import {
-  deleteCaseLocally,
-  loadCaseById,
-  loadLocalVault,
-  type RetainedRecoveryRecord,
-} from "./persistence/database";
+import { loadCaseById, loadLocalVault, type RetainedRecoveryRecord } from "./persistence/database";
 import { detectWebMCPSupport } from "./webmcp";
 import { BlankCaseWizard, type BlankCaseInput } from "./components/BlankCaseWizard";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -26,6 +22,39 @@ const Workspace = lazy(async () => {
 type View = "landing" | "wizard" | "workspace";
 
 const DEMO_CASE_ID = "case-demo-roundabout";
+const DEMO_CASE_ROUTE_PREFIX = "#case/";
+const DEFAULT_DEMO_SCENARIO: DemoScenarioId = "roundabout-calibrated";
+
+function demoRunId(scenarioId: DemoScenarioId): string {
+  return `case-demo-${scenarioId}-run-${crypto.randomUUID()}`;
+}
+
+function createDemoRun(scenarioId: DemoScenarioId): ReplayCase {
+  const createdAt = new Date().toISOString();
+  const replayCase = importReplayCase(createDemoScenario(scenarioId), {
+    trustHumanAttestations: true,
+    rekeyCaseId: demoRunId(scenarioId),
+  });
+  return { ...replayCase, createdAt, updatedAt: createdAt };
+}
+
+function caseIdFromHash(hash: string): string | undefined {
+  if (!hash.startsWith(DEMO_CASE_ROUTE_PREFIX)) return undefined;
+  try {
+    const value = decodeURIComponent(hash.slice(DEMO_CASE_ROUTE_PREFIX.length)).trim();
+    return value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function caseHash(caseId: string): string {
+  return `${DEMO_CASE_ROUTE_PREFIX}${encodeURIComponent(caseId)}`;
+}
+
+function demoScenarioFromCaseId(caseId: string): DemoScenarioId | undefined {
+  return DEMO_SCENARIO_IDS.find((scenarioId) => caseId.startsWith(`case-demo-${scenarioId}-run-`));
+}
 
 function mergeRecoveryRecords(
   ...recordGroups: RetainedRecoveryRecord[][]
@@ -81,43 +110,75 @@ export function App() {
   const [view, setView] = useState<View>("landing");
   const [activeCase, setActiveCase] = useState<ReplayCase>();
   const [recentCase, setRecentCase] = useState<ReplayCase>();
-  const [savedDemoCase, setSavedDemoCase] = useState<ReplayCase>();
+  const [activeDemoScenarioId, setActiveDemoScenarioId] = useState<DemoScenarioId>();
   const [workspaceKey, setWorkspaceKey] = useState(0);
   const [hydrating, setHydrating] = useState(true);
   const [recoveryRecords, setRecoveryRecords] = useState<RetainedRecoveryRecord[]>([]);
   const [vaultLoadError, setVaultLoadError] = useState<string>();
   const [vaultLoadAttempt, setVaultLoadAttempt] = useState(0);
   const [demoResetError, setDemoResetError] = useState<string>();
+  const [routeLoadError, setRouteLoadError] = useState<string>();
   const [startWorkspaceTour, setStartWorkspaceTour] = useState(false);
   const resettingDemoRef = useRef(false);
+  const routeLoadTokenRef = useRef(0);
   const webMcpSupported = detectWebMCPSupport().available;
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([loadLocalVault(), loadCaseById(DEMO_CASE_ID)]).then(
-      ([localVault, demoVault]) => {
-        if (cancelled) return;
+    const requestedHash = window.location.hash;
+    const loadToken = ++routeLoadTokenRef.current;
+    void (async () => {
+      const localVault = await loadLocalVault();
+      const routeCaseId = caseIdFromHash(requestedHash);
+      const routeVault = routeCaseId ? await loadCaseById(routeCaseId) : undefined;
+      return { localVault, routeCaseId, routeVault };
+    })().then(
+      ({ localVault, routeCaseId, routeVault }) => {
+        if (
+          cancelled ||
+          routeLoadTokenRef.current !== loadToken ||
+          window.location.hash !== requestedHash
+        ) {
+          return;
+        }
         const loaded = localVault.replayCase;
-        const savedDemo = demoVault.replayCase;
         setRecoveryRecords(
           mergeRecoveryRecords(
             localVault.retainedRecoveryRecords,
-            demoVault.retainedRecoveryRecords,
+            routeVault?.retainedRecoveryRecords ?? [],
           ),
         );
         setRecentCase(loaded);
-        setSavedDemoCase(savedDemo);
-        if (window.location.hash === "#demo") {
-          setActiveCase(savedDemo ?? createDemoCase());
+        if (requestedHash === "#demo") {
+          const demo = createDemoRun(DEFAULT_DEMO_SCENARIO);
+          setActiveCase(demo);
+          setActiveDemoScenarioId(DEFAULT_DEMO_SCENARIO);
           setView("workspace");
-        } else if (window.location.hash === "#workspace" && loaded) {
+          window.history.replaceState(
+            {},
+            "",
+            `${window.location.pathname}${window.location.search}${caseHash(demo.id)}`,
+          );
+        } else if (routeCaseId && routeVault?.replayCase) {
+          setActiveCase(routeVault.replayCase);
+          setActiveDemoScenarioId(demoScenarioFromCaseId(routeVault.replayCase.id));
+          setView("workspace");
+        } else if (routeCaseId) {
+          setRouteLoadError(
+            "That saved demo run is not available in this browser. Open a fresh demo or use a valid exported case file.",
+          );
+          setActiveCase(undefined);
+          setActiveDemoScenarioId(undefined);
+          setView("landing");
+        } else if (requestedHash === "#workspace" && loaded) {
           setActiveCase(loaded);
+          setActiveDemoScenarioId(demoScenarioFromCaseId(loaded.id));
           setView("workspace");
         }
         setHydrating(false);
       },
       (error: unknown) => {
-        if (cancelled) return;
+        if (cancelled || routeLoadTokenRef.current !== loadToken) return;
         setVaultLoadError(
           error instanceof Error
             ? `REPLAY could not open the local vault. ${error.message}`
@@ -133,18 +194,80 @@ export function App() {
 
   useEffect(() => {
     const handlePopState = () => {
+      const requestedHash = window.location.hash;
+      const loadToken = ++routeLoadTokenRef.current;
+      setRouteLoadError(undefined);
       if (window.location.hash === "#demo") {
-        setActiveCase(savedDemoCase ?? createDemoCase());
+        const demo = createDemoRun(DEFAULT_DEMO_SCENARIO);
+        setActiveCase(demo);
+        setActiveDemoScenarioId(DEFAULT_DEMO_SCENARIO);
+        setWorkspaceKey((value) => value + 1);
+        window.history.replaceState(
+          {},
+          "",
+          `${window.location.pathname}${window.location.search}${caseHash(demo.id)}`,
+        );
         setView("workspace");
+        setHydrating(false);
+      } else if (caseIdFromHash(window.location.hash)) {
+        const caseId = caseIdFromHash(window.location.hash);
+        if (!caseId) return;
+        if (activeCase?.id === caseId) {
+          setView("workspace");
+          setHydrating(false);
+          return;
+        }
+        setHydrating(true);
+        void loadCaseById(caseId).then(
+          (result) => {
+            if (routeLoadTokenRef.current !== loadToken || window.location.hash !== requestedHash) {
+              return;
+            }
+            if (!result.replayCase) {
+              setActiveCase(undefined);
+              setActiveDemoScenarioId(undefined);
+              setRouteLoadError(
+                "That saved demo run is not available in this browser. Open a fresh demo or use a valid exported case file.",
+              );
+              setView("landing");
+              setHydrating(false);
+              return;
+            }
+            setActiveCase(result.replayCase);
+            setActiveDemoScenarioId(demoScenarioFromCaseId(result.replayCase.id));
+            setWorkspaceKey((value) => value + 1);
+            setView("workspace");
+            setHydrating(false);
+          },
+          (error: unknown) => {
+            if (routeLoadTokenRef.current !== loadToken) return;
+            setActiveCase(undefined);
+            setActiveDemoScenarioId(undefined);
+            setRouteLoadError(
+              error instanceof Error
+                ? `REPLAY could not open that saved run. ${error.message}`
+                : "REPLAY could not open that saved run.",
+            );
+            setView("landing");
+            setHydrating(false);
+          },
+        );
       } else if (window.location.hash === "#workspace" && recentCase) {
         setActiveCase(recentCase);
+        setActiveDemoScenarioId(demoScenarioFromCaseId(recentCase.id));
         setView("workspace");
-      } else if (window.location.hash === "#new") setView("wizard");
-      else setView("landing");
+        setHydrating(false);
+      } else if (window.location.hash === "#new") {
+        setView("wizard");
+        setHydrating(false);
+      } else {
+        setView("landing");
+        setHydrating(false);
+      }
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [recentCase, savedDemoCase]);
+  }, [activeCase?.id, recentCase]);
 
   function navigate(next: View, replace = false, workspaceHash = "#workspace"): void {
     const hash = next === "workspace" ? workspaceHash : next === "wizard" ? "#new" : "";
@@ -154,7 +277,11 @@ export function App() {
     setView(next);
   }
 
-  function openCase(replayCase: ReplayCase, replace = false, demo = false): void {
+  function openCase(
+    replayCase: ReplayCase,
+    replace = false,
+    demoScenarioId?: DemoScenarioId,
+  ): void {
     const storage = Reflect.get(navigator, "storage") as
       { persist?: () => Promise<boolean> } | undefined;
     if (typeof storage?.persist === "function") {
@@ -162,28 +289,30 @@ export function App() {
     }
     setActiveCase(replayCase);
     setRecentCase(replayCase);
-    if (replayCase.id === DEMO_CASE_ID) setSavedDemoCase(replayCase);
+    const resolvedDemoScenarioId = demoScenarioId ?? demoScenarioFromCaseId(replayCase.id);
+    setActiveDemoScenarioId(resolvedDemoScenarioId);
     setDemoResetError(undefined);
+    setRouteLoadError(undefined);
     setWorkspaceKey((value) => value + 1);
-    navigate("workspace", replace, demo ? "#demo" : "#workspace");
+    navigate("workspace", replace, resolvedDemoScenarioId ? caseHash(replayCase.id) : "#workspace");
   }
 
-  async function resetDemo(): Promise<boolean> {
+  function openFreshDemo(scenarioId: DemoScenarioId, replace = false): void {
+    openCase(createDemoRun(scenarioId), replace, scenarioId);
+  }
+
+  function resetDemo(): boolean {
     if (resettingDemoRef.current) return false;
     resettingDemoRef.current = true;
     setDemoResetError(undefined);
     try {
-      await deleteCaseLocally(DEMO_CASE_ID);
-      setRecoveryRecords((records) =>
-        records.filter((record) => retainedRecordId(record.record) !== DEMO_CASE_ID),
-      );
-      openCase(createDemoCase(), true, true);
+      openFreshDemo(activeDemoScenarioId ?? DEFAULT_DEMO_SCENARIO);
       return true;
     } catch (error) {
       setDemoResetError(
         error instanceof Error
-          ? `The saved demo could not be cleared. ${error.message}`
-          : "The saved demo could not be cleared. Your existing local copy was left unchanged.",
+          ? `A fresh demo copy could not be opened. ${error.message}`
+          : "A fresh demo copy could not be opened. The current saved run was left unchanged.",
       );
       return false;
     } finally {
@@ -246,7 +375,7 @@ export function App() {
       >
         Skip to main content
       </a>
-      {recoveryRecords.length > 0 && !demoResetError && (
+      {recoveryRecords.length > 0 && !demoResetError && !routeLoadError && (
         <aside className="vault-recovery-notice" role="alert">
           <div>
             <strong>Local recovery copy retained</strong>
@@ -266,7 +395,7 @@ export function App() {
           </button>
         </aside>
       )}
-      {demoResetError && (
+      {demoResetError && !routeLoadError && (
         <aside className="vault-recovery-notice" role="alert">
           <div>
             <strong>Demo reset did not finish</strong>
@@ -280,28 +409,35 @@ export function App() {
           </button>
         </aside>
       )}
+      {routeLoadError && (
+        <aside className="vault-recovery-notice" role="alert">
+          <div>
+            <strong>Saved run unavailable</strong>
+            <span>{routeLoadError}</span>
+          </div>
+          <button aria-label="Dismiss saved run error" onClick={() => setRouteLoadError(undefined)}>
+            ×
+          </button>
+        </aside>
+      )}
       {view === "landing" && (
         <LandingPage
           webMcpSupported={webMcpSupported}
           {...(recentCase
             ? { recentCaseTitle: recentCase.title, onResumeCase: () => openCase(recentCase) }
             : {})}
-          onOpenDemo={() => openCase(savedDemoCase ?? createDemoCase(), false, true)}
+          onOpenDemo={() => openFreshDemo(DEFAULT_DEMO_SCENARIO)}
           onOpenGuidedDemo={() => {
             setStartWorkspaceTour(true);
-            openCase(savedDemoCase ?? createDemoCase(), false, true);
+            openFreshDemo(DEFAULT_DEMO_SCENARIO);
           }}
           onStartBlank={() => navigate("wizard")}
           onOpenCollaboration={() =>
             document.getElementById("collaboration")?.scrollIntoView({ behavior: "smooth" })
           }
           onOpenScenario={(scenarioId: DemoScenarioId) => {
-            if (scenarioId === "roundabout-calibrated") {
-              openCase(savedDemoCase ?? createDemoCase(), false, true);
-              return;
-            }
             setStartWorkspaceTour(false);
-            openCase(createDemoScenario(scenarioId));
+            openFreshDemo(scenarioId);
           }}
         />
       )}
@@ -325,11 +461,10 @@ export function App() {
             <Workspace
               key={`${activeCase.id}-${workspaceKey}`}
               initialCase={activeCase}
-              isDemo={activeCase.id === DEMO_CASE_ID}
+              isDemo={Boolean(activeDemoScenarioId) || activeCase.id === DEMO_CASE_ID}
               onHome={(latestCase) => {
                 setActiveCase(latestCase);
                 setRecentCase(latestCase);
-                if (latestCase.id === DEMO_CASE_ID) setSavedDemoCase(latestCase);
                 navigate("landing");
               }}
               onResetDemo={resetDemo}

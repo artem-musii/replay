@@ -7,6 +7,7 @@ import {
   createDemoCase,
   exportReplayCase,
   importReplayCase,
+  REPLAY_SEED_VERSION,
   ReplayCaseSchema,
   ReplayImportError,
   validateCaseReferences,
@@ -19,7 +20,7 @@ describe("versioned case schemas and seeds", () => {
 
     expect(first).toEqual(second);
     expect(first.schemaVersion).toBe(2);
-    expect(first.seedVersion).toBe(4);
+    expect(first.seedVersion).toBe(REPLAY_SEED_VERSION);
     expect(ReplayCaseSchema.parse(first)).toEqual(first);
     expect(validateCaseReferences(first)).toEqual([]);
   });
@@ -32,6 +33,8 @@ describe("versioned case schemas and seeds", () => {
     ).toBe(false);
     expect(ruleIds).not.toContain("geometry.actor-outside-scene");
     expect(ruleIds).not.toContain("geometry.keyframe-outside-scene");
+    expect(ruleIds).not.toContain("geometry.impact-excessive-penetration");
+    expect(ruleIds).not.toContain("geometry.unmarked-footprint-overlap");
     expect(ruleIds).not.toContain("damage.contact-direction-hint");
     expect(JSON.stringify(replayCase).toLowerCase()).not.toContain("at fault");
     expect(replayCase.evidence.every((asset) => asset.syntheticDemoAsset)).toBe(true);
@@ -46,19 +49,28 @@ describe("versioned case schemas and seeds", () => {
       (trajectory) => trajectory.id === "trajectory-b-baseline",
     )!;
 
-    expect(
-      vehicleB.keyframes.map(({ timeMs, x, y, rotationDeg }) => [timeMs, x, y, rotationDeg]),
-    ).toEqual([
-      [0, 34, 61, 133],
-      [6_000, 43, 73, 109],
-      [8_000, 56, 72, 59],
-      [10_000, 66, 56, 60],
-      [16_000, 80, 52, 85],
-    ]);
-    expect(vehicleB.keyframes[3]!.x).toBeGreaterThan(vehicleA.keyframes[3]!.x);
-    expect(Math.abs(vehicleB.keyframes[3]!.rotationDeg - vehicleA.keyframes[3]!.rotationDeg)).toBe(
-      2,
+    expect(vehicleA.interpolationMode).toBe("smooth");
+    expect(vehicleB.interpolationMode).toBe("smooth");
+    expect(vehicleA.keyframes).toHaveLength(13);
+    expect(vehicleB.keyframes).toHaveLength(13);
+    expect(vehicleB.keyframes.map((keyframe) => keyframe.timeMs)).toEqual(
+      vehicleA.keyframes.map((keyframe) => keyframe.timeMs),
     );
+    expect(vehicleB.keyframes.map((keyframe) => keyframe.x)).toEqual(
+      [...vehicleB.keyframes.map((keyframe) => keyframe.x)].sort((first, second) => first - second),
+    );
+    expect(vehicleA.keyframes.map((keyframe) => keyframe.x)).toEqual(
+      [...vehicleA.keyframes.map((keyframe) => keyframe.x)].sort((first, second) => first - second),
+    );
+
+    const impactIndex = vehicleA.keyframes.findIndex((keyframe) => keyframe.timeMs === 10_000);
+    expect(impactIndex).toBeGreaterThan(0);
+    expect(vehicleB.keyframes[impactIndex]!.x).toBeGreaterThan(vehicleA.keyframes[impactIndex]!.x);
+    expect(
+      Math.abs(
+        vehicleB.keyframes[impactIndex]!.rotationDeg - vehicleA.keyframes[impactIndex]!.rotationDeg,
+      ),
+    ).toBe(0);
   });
 
   it("rejects unknown persisted fields", () => {
