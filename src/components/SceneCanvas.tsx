@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
+import { interpolateTrajectory } from "../domain/interpolation";
 import type {
   ActorPose,
   DamageRegion,
@@ -26,9 +27,12 @@ interface SceneCanvasProps {
   replayCase: ReplayCase;
   currentTimeMs: number;
   selectedId?: string;
+  selectedKeyframeId?: string;
   comparisonBranchIds?: string[];
   activeAgentIds?: string[];
   onSelect: (type: "actor" | "trajectory" | "timeline-event", id: string) => void;
+  onSelectKeyframe: (trajectoryId: string, keyframeId: string) => void;
+  onEditStart: () => void;
   onMoveActor: (actorId: string, pose: ActorPose) => void;
   onMoveKeyframe: (trajectoryId: string, keyframeId: string, x: number, y: number) => void;
   onCreateTrajectory: (actorId: string) => void;
@@ -40,8 +44,9 @@ interface SceneCanvasProps {
 }
 
 interface DragState {
-  kind: "actor" | "keyframe" | "pan";
+  kind: "actor" | "rotation" | "keyframe" | "pan";
   id: string;
+  pointerId: number;
   moved?: boolean;
   trajectoryId?: string;
   previewPose?: ActorPose;
@@ -66,46 +71,65 @@ function toNormalized(x: number, y: number) {
   return { x: Math.max(0, Math.min(100, x / 10)), y: Math.max(0, Math.min(100, y / 7)) };
 }
 
-function poseAtTime(
-  trajectory: Trajectory | undefined,
-  fallback: ActorPose,
-  timeMs: number,
-): ActorPose {
-  if (!trajectory?.keyframes.length) return fallback;
-  const frames = [...trajectory.keyframes].sort((a, b) => a.timeMs - b.timeMs);
-  const first = frames[0];
-  const last = frames.at(-1);
-  if (!first || !last) return fallback;
-  if (timeMs <= first.timeMs) return first;
-  if (timeMs >= last.timeMs) return last;
-  const nextIndex = frames.findIndex((frame) => frame.timeMs >= timeMs);
-  const next = frames[nextIndex];
-  const previous = frames[nextIndex - 1];
-  if (!next || !previous) return fallback;
-  const amount = (timeMs - previous.timeMs) / (next.timeMs - previous.timeMs || 1);
-  const rotationDelta = ((next.rotationDeg - previous.rotationDeg + 540) % 360) - 180;
-  return {
-    x: previous.x + (next.x - previous.x) * amount,
-    y: previous.y + (next.y - previous.y) * amount,
-    rotationDeg: previous.rotationDeg + rotationDelta * amount,
-  };
+function formatSceneSeconds(timeMs: number): string {
+  const normalizedTimeMs = Math.round(timeMs);
+  return (normalizedTimeMs / 1000).toFixed(normalizedTimeMs % 100 === 0 ? 1 : 3);
 }
 
-function snapToRoundabout(x: number, y: number) {
-  const dx = x - 50;
-  const dy = y - 50;
+/** Projects onto the lane centers actually drawn by RoundaboutTemplate. */
+function snapToRoundaboutLane(x: number, y: number) {
+  const captureDistance = 28;
+  const point = toView(x, y);
+  const dx = point.x - VIEW_WIDTH / 2;
+  const dy = point.y - VIEW_HEIGHT / 2;
   const distance = Math.hypot(dx, dy) || 1;
-  const radius = distance < 28 ? 23 : 31;
-  return { x: 50 + (dx / distance) * radius, y: 50 + (dy / distance) * radius };
+  const circularCandidates: Array<{ x: number; y: number; distance: number }> = [];
+
+  if (Math.abs(dx) >= 180 && Math.abs(dy) <= 100) {
+    const approachCandidates = [-45, 45].map((laneOffset) => ({
+      x: point.x,
+      y: VIEW_HEIGHT / 2 + laneOffset,
+      distance: Math.abs(point.y - (VIEW_HEIGHT / 2 + laneOffset)),
+    }));
+    const closest = approachCandidates.sort((left, right) => left.distance - right.distance)[0];
+    if (closest && closest.distance <= captureDistance) return toNormalized(closest.x, closest.y);
+  }
+
+  if (Math.abs(dy) >= 130 && Math.abs(dx) <= 110) {
+    const approachCandidates = [-45, 45].map((laneOffset) => ({
+      x: VIEW_WIDTH / 2 + laneOffset,
+      y: point.y,
+      distance: Math.abs(point.x - (VIEW_WIDTH / 2 + laneOffset)),
+    }));
+    const closest = approachCandidates.sort((left, right) => left.distance - right.distance)[0];
+    if (closest && closest.distance <= captureDistance) return toNormalized(closest.x, closest.y);
+  }
+
+  for (const radius of [134, 180]) {
+    const offset = Math.abs(distance - radius);
+    if (offset <= captureDistance) {
+      circularCandidates.push({
+        x: VIEW_WIDTH / 2 + (dx / distance) * radius,
+        y: VIEW_HEIGHT / 2 + (dy / distance) * radius,
+        distance: offset,
+      });
+    }
+  }
+
+  const closest = circularCandidates.sort((left, right) => left.distance - right.distance)[0];
+  return closest ? toNormalized(closest.x, closest.y) : { x, y };
 }
 
 export function SceneCanvas({
   replayCase,
   currentTimeMs,
   selectedId,
+  selectedKeyframeId,
   comparisonBranchIds = [],
   activeAgentIds = [],
   onSelect,
+  onSelectKeyframe,
+  onEditStart,
   onMoveActor,
   onMoveKeyframe,
   onCreateTrajectory,
@@ -118,6 +142,7 @@ export function SceneCanvas({
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<DragState>();
   const dragRef = useRef<DragState | undefined>(undefined);
+  const suppressSceneClickRef = useRef(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [snapToLane, setSnapToLane] = useState(true);
@@ -141,13 +166,22 @@ export function SceneCanvas({
   const actorPoses = useMemo(() => {
     return Object.fromEntries(
       replayCase.actors.map((actor) => {
-        if (drag?.kind === "actor" && drag.id === actor.id && drag.previewPose) {
+        if (
+          (drag?.kind === "actor" || drag?.kind === "rotation") &&
+          drag.id === actor.id &&
+          drag.previewPose
+        ) {
           return [actor.id, drag.previewPose];
         }
         const trajectory = replayCase.trajectories.find(
           (item) => item.actorId === actor.id && item.branchId === replayCase.activeBranchId,
         );
-        return [actor.id, poseAtTime(trajectory, actor.pose, currentTimeMs)];
+        return [
+          actor.id,
+          trajectory?.keyframes.length
+            ? interpolateTrajectory(trajectory, currentTimeMs)
+            : actor.pose,
+        ];
       }),
     ) as Record<string, ActorPose>;
   }, [currentTimeMs, drag, replayCase.activeBranchId, replayCase.actors, replayCase.trajectories]);
@@ -160,6 +194,19 @@ export function SceneCanvas({
     (trajectory) => trajectory.id === selectedId,
   );
   const selectedEvent = replayCase.timelineEvents.find((event) => event.id === selectedId);
+
+  function isActorEditLocked(actor: SceneActor): boolean {
+    const activeTrajectory = replayCase.trajectories.find(
+      (trajectory) =>
+        trajectory.actorId === actor.id && trajectory.branchId === replayCase.activeBranchId,
+    );
+    return actor.locked || Boolean(activeTrajectory?.locked);
+  }
+
+  function isTrajectoryEditLocked(trajectory: Trajectory): boolean {
+    const actor = replayCase.actors.find((item) => item.id === trajectory.actorId);
+    return trajectory.locked || Boolean(actor?.locked);
+  }
 
   function clientToSvg(clientX: number, clientY: number) {
     const svg = svgRef.current;
@@ -177,8 +224,10 @@ export function SceneCanvas({
     setDrag(next);
   }
 
-  function startActorDrag(event: React.PointerEvent, actor: SceneActor) {
-    if (actor.locked) return;
+  function startActorDrag(event: React.PointerEvent<SVGElement>, actor: SceneActor) {
+    if (dragRef.current || isActorEditLocked(actor)) return;
+    onEditStart();
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = clientToSvg(event.clientX, event.clientY);
     const pose = actorPoses[actor.id] ?? actor.pose;
@@ -186,15 +235,127 @@ export function SceneCanvas({
     updateDrag({
       kind: "actor",
       id: actor.id,
+      pointerId: event.pointerId,
       offsetX: pointer.x - position.x,
       offsetY: pointer.y - position.y,
       previewPose: pose,
     });
   }
 
+  function startRotationDrag(event: React.PointerEvent<SVGCircleElement>, actor: SceneActor) {
+    if (dragRef.current || isActorEditLocked(actor)) return;
+    onEditStart();
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateDrag({
+      kind: "rotation",
+      id: actor.id,
+      pointerId: event.pointerId,
+      previewPose: actorPoses[actor.id] ?? actor.pose,
+    });
+  }
+
+  function startKeyframeDrag(
+    event: React.PointerEvent<SVGElement>,
+    trajectory: Trajectory,
+    frame: Trajectory["keyframes"][number],
+  ) {
+    if (dragRef.current || isTrajectoryEditLocked(trajectory)) return;
+    onEditStart();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onSelectKeyframe(trajectory.id, frame.id);
+    updateDrag({
+      kind: "keyframe",
+      id: frame.id,
+      pointerId: event.pointerId,
+      trajectoryId: trajectory.id,
+      previewX: frame.x,
+      previewY: frame.y,
+    });
+  }
+
+  function nearestActor(point: { x: number; y: number }): SceneActor | undefined {
+    let nearest: SceneActor | undefined;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    replayCase.actors.forEach((actor) => {
+      const pose = actorPoses[actor.id];
+      if (!pose) return;
+      const actorPoint = toView(pose.x, pose.y);
+      const distance = Math.hypot(actorPoint.x - point.x, actorPoint.y - point.y);
+      if (distance < nearestDistance) {
+        nearest = actor;
+        nearestDistance = distance;
+      }
+    });
+
+    return nearest;
+  }
+
+  function nearestSelectedKeyframe(point: { x: number; y: number }) {
+    if (
+      !showPaths ||
+      !selectedTrajectory?.visible ||
+      !displayedTrajectories.some((trajectory) => trajectory.id === selectedTrajectory.id)
+    ) {
+      return undefined;
+    }
+
+    let nearestFrame: Trajectory["keyframes"][number] | undefined;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    selectedTrajectory.keyframes.forEach((frame) => {
+      const framePoint = toView(frame.x, frame.y);
+      const distance = Math.hypot(framePoint.x - point.x, framePoint.y - point.y);
+      if (distance < nearestDistance) {
+        nearestFrame = frame;
+        nearestDistance = distance;
+      }
+    });
+
+    return nearestDistance <= 34 && nearestFrame
+      ? { trajectory: selectedTrajectory, frame: nearestFrame }
+      : undefined;
+  }
+
+  function startNearestSceneDrag(event: React.PointerEvent<SVGGElement>) {
+    if (placingImpact || dragRef.current) return;
+    const point = clientToSvg(event.clientX, event.clientY);
+    const keyframe = nearestSelectedKeyframe(point);
+    if (keyframe) {
+      startKeyframeDrag(event, keyframe.trajectory, keyframe.frame);
+      return;
+    }
+
+    const actor = nearestActor(point);
+    if (actor) startActorDrag(event, actor);
+  }
+
+  function startRotationControlDrag(
+    event: React.PointerEvent<SVGCircleElement>,
+    rotationActor: SceneActor,
+  ) {
+    if (placingImpact || dragRef.current) return;
+    startRotationDrag(event, rotationActor);
+  }
+
+  function consumeSuppressedSceneClick(): boolean {
+    if (!suppressSceneClickRef.current) return false;
+    suppressSceneClickRef.current = false;
+    return true;
+  }
+
+  function selectNearestSceneObject(event: React.MouseEvent<SVGGElement>) {
+    if (consumeSuppressedSceneClick()) return;
+    const point = clientToSvg(event.clientX, event.clientY);
+    const actor = nearestActor(point);
+    if (actor) onSelect("actor", actor.id);
+  }
+
   function onPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const activeDrag = dragRef.current;
-    if (!activeDrag) return;
+    if (activeDrag?.pointerId !== event.pointerId) return;
     if (activeDrag.kind === "pan") {
       const factor = 1 / zoom;
       setPan({
@@ -204,13 +365,28 @@ export function SceneCanvas({
       return;
     }
     const pointer = clientToSvg(event.clientX, event.clientY);
+    if (activeDrag.kind === "rotation") {
+      const actor = replayCase.actors.find((item) => item.id === activeDrag.id);
+      if (!actor) return;
+      const pose = activeDrag.previewPose ?? actorPoses[actor.id] ?? actor.pose;
+      const center = toView(pose.x, pose.y);
+      let rotationDeg =
+        ((Math.atan2(pointer.x - center.x, -(pointer.y - center.y)) * 180) / Math.PI + 360) % 360;
+      if (event.shiftKey) rotationDeg = Math.round(rotationDeg / 15) * 15;
+      updateDrag({
+        ...activeDrag,
+        moved: true,
+        previewPose: { ...pose, rotationDeg },
+      });
+      return;
+    }
     const normalized = toNormalized(
       pointer.x - (activeDrag.offsetX ?? 0),
       pointer.y - (activeDrag.offsetY ?? 0),
     );
     const position =
       snapToLane && replayCase.environment.sceneType === "roundabout"
-        ? snapToRoundabout(normalized.x, normalized.y)
+        ? snapToRoundaboutLane(normalized.x, normalized.y)
         : normalized;
     if (activeDrag.kind === "actor") {
       const actor = replayCase.actors.find((item) => item.id === activeDrag.id);
@@ -231,13 +407,24 @@ export function SceneCanvas({
     }
   }
 
-  function commitDrag() {
+  function commitDrag(event: React.PointerEvent<SVGSVGElement>) {
     const completedDrag = dragRef.current;
+    if (completedDrag?.pointerId !== event.pointerId) return;
+    if (
+      completedDrag.moved &&
+      (completedDrag.kind === "rotation" || completedDrag.kind === "keyframe")
+    ) {
+      suppressSceneClickRef.current = true;
+    }
     updateDrag(undefined);
-    if (completedDrag?.kind === "actor" && completedDrag.moved && completedDrag.previewPose) {
+    if (
+      (completedDrag.kind === "actor" || completedDrag.kind === "rotation") &&
+      completedDrag.moved &&
+      completedDrag.previewPose
+    ) {
       onMoveActor(completedDrag.id, completedDrag.previewPose);
     } else if (
-      completedDrag?.kind === "keyframe" &&
+      completedDrag.kind === "keyframe" &&
       completedDrag.moved &&
       completedDrag.trajectoryId &&
       completedDrag.previewX !== undefined &&
@@ -260,7 +447,7 @@ export function SceneCanvas({
     }
     const step = event.shiftKey ? 2 : 0.5;
     const pose = actorPoses[actor.id] ?? actor.pose;
-    let next = { ...pose };
+    const next = { ...pose };
     if (event.key === "ArrowLeft") next.x -= step;
     else if (event.key === "ArrowRight") next.x += step;
     else if (event.key === "ArrowUp") next.y -= step;
@@ -269,16 +456,10 @@ export function SceneCanvas({
     else if (event.key === "]" || event.key === ".") next.rotationDeg += event.shiftKey ? 15 : 3;
     else return;
     event.preventDefault();
-    if (actor.locked) return;
+    if (isActorEditLocked(actor)) return;
     next.x = Math.max(0, Math.min(100, next.x));
     next.y = Math.max(0, Math.min(100, next.y));
-    if (
-      snapToLane &&
-      replayCase.environment.sceneType === "roundabout" &&
-      event.key.startsWith("Arrow")
-    ) {
-      next = { ...next, ...snapToRoundabout(next.x, next.y) };
-    }
+    next.rotationDeg = ((next.rotationDeg % 360) + 360) % 360;
     onMoveActor(actor.id, next);
   }
 
@@ -298,7 +479,11 @@ export function SceneCanvas({
   const viewBox = `${-pan.x + (VIEW_WIDTH - VIEW_WIDTH / zoom) / 2} ${-pan.y + (VIEW_HEIGHT - VIEW_HEIGHT / zoom) / 2} ${VIEW_WIDTH / zoom} ${VIEW_HEIGHT / zoom}`;
 
   return (
-    <section className="scene-panel" aria-label="Incident scene editor">
+    <section
+      className="scene-panel"
+      aria-label="Incident scene editor"
+      data-onboarding-id="scene-editor"
+    >
       <div className="scene-toolbar">
         <div className="scene-toolbar__group">
           <button
@@ -310,10 +495,20 @@ export function SceneCanvas({
             <Route size={15} /> <span>Paths</span>
           </button>
           <button
-            className={`tool-button ${snapToLane ? "is-active" : ""}`}
+            className={`tool-button ${snapToLane && replayCase.environment.sceneType === "roundabout" ? "is-active" : ""}`}
             onClick={() => setSnapToLane((value) => !value)}
-            aria-pressed={snapToLane}
-            title="Snap vehicle movement to lane"
+            disabled={replayCase.environment.sceneType !== "roundabout"}
+            aria-pressed={replayCase.environment.sceneType === "roundabout" ? snapToLane : false}
+            title={
+              replayCase.environment.sceneType === "roundabout"
+                ? "While dragging, snap nearby positions to the nearest drawn lane center. Heading is unchanged."
+                : "Lane snap is available for the roundabout template"
+            }
+            aria-label={
+              replayCase.environment.sceneType === "roundabout"
+                ? "Lane snap while dragging. Moves nearby positions to the nearest drawn lane center; it does not simulate steering."
+                : "Lane snap unavailable for this scene template"
+            }
           >
             <Crosshair size={15} /> <span>Lane snap</span>
           </button>
@@ -321,6 +516,7 @@ export function SceneCanvas({
             className={`tool-button ${placingImpact ? "is-active" : ""}`}
             onClick={() => setPlacingImpact((value) => !value)}
             aria-pressed={placingImpact}
+            aria-label={placingImpact ? "Cancel impact placement" : "Mark impact"}
             title="Place the approximate impact on the scene"
           >
             <CircleAlert size={15} /> <span>Mark impact</span>
@@ -341,7 +537,7 @@ export function SceneCanvas({
               : "Four-way intersection"}
           </span>
           <small>
-            {replayCase.environment.roadCondition} surface · {(currentTimeMs / 1000).toFixed(1)}s
+            {replayCase.environment.roadCondition} surface · {formatSceneSeconds(currentTimeMs)}s
           </small>
         </div>
         <div className="scene-toolbar__group">
@@ -378,22 +574,26 @@ export function SceneCanvas({
       >
         <svg
           ref={svgRef}
-          className="scene-svg"
+          className={`scene-svg${placingImpact ? " is-placing-impact" : ""}`}
           viewBox={viewBox}
           role="application"
           aria-label="Editable road scene. Use Tab to select a vehicle, arrow keys to move it, and bracket keys to rotate it."
           onPointerMove={onPointerMove}
           onPointerUp={commitDrag}
-          onPointerCancel={() => updateDrag(undefined)}
+          onPointerCancel={(event) => {
+            if (dragRef.current?.pointerId === event.pointerId) updateDrag(undefined);
+          }}
           onPointerDown={(event) => {
-            if (placingImpact) return;
+            if (placingImpact || dragRef.current) return;
             if (
               event.target === event.currentTarget ||
               (event.target as Element).classList.contains("scene-pan-target")
             ) {
+              event.currentTarget.setPointerCapture(event.pointerId);
               updateDrag({
                 kind: "pan",
                 id: "canvas",
+                pointerId: event.pointerId,
                 startClientX: event.clientX,
                 startClientY: event.clientY,
                 startPanX: pan.x,
@@ -543,6 +743,10 @@ export function SceneCanvas({
                 .join(" ");
               const selected = selectedId === trajectory.id;
               const active = trajectory.branchId === replayCase.activeBranchId;
+              const owningActor = replayCase.actors.find(
+                (actor) => actor.id === trajectory.actorId,
+              );
+              const pathLocked = trajectory.locked || Boolean(owningActor?.locked);
               return (
                 <g
                   key={trajectory.id}
@@ -551,12 +755,15 @@ export function SceneCanvas({
                   <path
                     className="trajectory__hit"
                     d={path}
-                    tabIndex={0}
+                    tabIndex={placingImpact ? -1 : 0}
                     role="button"
                     aria-label={`Select path for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"}`}
                     aria-pressed={selected}
-                    onClick={() => onSelect("trajectory", trajectory.id)}
+                    onClick={() => {
+                      if (!placingImpact) onSelect("trajectory", trajectory.id);
+                    }}
                     onKeyDown={(event) => {
+                      if (placingImpact) return;
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         onSelect("trajectory", trajectory.id);
@@ -570,28 +777,31 @@ export function SceneCanvas({
                       return (
                         <g key={frame.id} transform={`translate(${point.x} ${point.y})`}>
                           <circle
-                            className="trajectory__handle"
-                            r="7"
-                            tabIndex={0}
+                            className="trajectory__handle-hit"
+                            r="34"
+                            tabIndex={placingImpact ? -1 : 0}
                             role="button"
-                            aria-label={`Path point ${index + 1} for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"} at ${(frame.timeMs / 1000).toFixed(1)} seconds`}
-                            onPointerDown={(event) => {
-                              if (trajectory.locked) return;
+                            aria-label={`Path point ${index + 1} for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"} at ${formatSceneSeconds(frame.timeMs)} seconds`}
+                            aria-pressed={selectedKeyframeId === frame.id}
+                            onClick={(event) => {
+                              if (consumeSuppressedSceneClick()) {
+                                event.stopPropagation();
+                                return;
+                              }
+                              if (placingImpact) return;
                               event.stopPropagation();
-                              event.currentTarget.setPointerCapture(event.pointerId);
-                              updateDrag({
-                                kind: "keyframe",
-                                id: frame.id,
-                                trajectoryId: trajectory.id,
-                                previewX: frame.x,
-                                previewY: frame.y,
-                              });
+                              onSelectKeyframe(trajectory.id, frame.id);
+                            }}
+                            onPointerDown={(event) => {
+                              if (placingImpact || pathLocked) return;
+                              startKeyframeDrag(event, trajectory, frame);
                             }}
                             onKeyDown={(event) => {
+                              if (placingImpact) return;
                               const step = event.shiftKey ? 2 : 0.5;
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                onSelect("trajectory", trajectory.id);
+                                onSelectKeyframe(trajectory.id, frame.id);
                                 return;
                               }
                               let x = frame.x;
@@ -602,15 +812,29 @@ export function SceneCanvas({
                               else if (event.key === "ArrowDown") y += step;
                               else return;
                               event.preventDefault();
-                              if (!trajectory.locked)
-                                onMoveKeyframe(
-                                  trajectory.id,
-                                  frame.id,
-                                  Math.max(0, Math.min(100, x)),
-                                  Math.max(0, Math.min(100, y)),
-                                );
+                              if (!pathLocked) {
+                                onSelectKeyframe(trajectory.id, frame.id);
+                                const bounded = {
+                                  x: Math.max(0, Math.min(100, x)),
+                                  y: Math.max(0, Math.min(100, y)),
+                                };
+                                onMoveKeyframe(trajectory.id, frame.id, bounded.x, bounded.y);
+                              }
                             }}
                           />
+                          <circle
+                            className={`trajectory__handle${selectedKeyframeId === frame.id ? " is-active" : ""}`}
+                            r="11"
+                            aria-hidden="true"
+                          />
+                          <text
+                            className="trajectory__handle-number"
+                            textAnchor="middle"
+                            y="4"
+                            aria-hidden="true"
+                          >
+                            {index + 1}
+                          </text>
                           {index === 0 && (
                             <text className="path-marker-label" x="11" y="4">
                               START
@@ -624,7 +848,7 @@ export function SceneCanvas({
                         </g>
                       );
                     })}
-                  {trajectory.locked && points[1] && <LockGlyph x={points[1].x} y={points[1].y} />}
+                  {pathLocked && points[1] && <LockGlyph x={points[1].x} y={points[1].y} />}
                 </g>
               );
             })}
@@ -633,28 +857,38 @@ export function SceneCanvas({
             <ImpactMarker
               event={impact}
               selected={selectedId === impact.id}
+              placementMode={placingImpact}
               onSelect={() => onSelect("timeline-event", impact.id)}
             />
           )}
 
-          {replayCase.actors.map((actor) => {
-            const pose = actorPoses[actor.id] ?? actor.pose;
-            const point = toView(pose.x, pose.y);
-            return (
-              <Vehicle
-                key={actor.id}
-                actor={actor}
-                x={point.x}
-                y={point.y}
-                rotation={pose.rotationDeg}
-                selected={selectedId === actor.id}
-                agentActive={activeAgentIds.includes(actor.id)}
-                onPointerDown={(event) => startActorDrag(event, actor)}
-                onClick={() => onSelect("actor", actor.id)}
-                onKeyDown={(event) => moveActorWithKeyboard(event, actor)}
-              />
-            );
-          })}
+          {[...replayCase.actors]
+            .sort(
+              (first, second) => Number(first.id === selectedId) - Number(second.id === selectedId),
+            )
+            .map((actor) => {
+              const pose = actorPoses[actor.id] ?? actor.pose;
+              const point = toView(pose.x, pose.y);
+              return (
+                <Vehicle
+                  key={actor.id}
+                  actor={actor}
+                  x={point.x}
+                  y={point.y}
+                  rotation={pose.rotationDeg}
+                  selected={selectedId === actor.id}
+                  editLocked={isActorEditLocked(actor)}
+                  agentActive={activeAgentIds.includes(actor.id)}
+                  placementMode={placingImpact}
+                  onPointerDown={startNearestSceneDrag}
+                  onRotatePointerDown={(event) => {
+                    startRotationControlDrag(event, actor);
+                  }}
+                  onClick={selectNearestSceneObject}
+                  onKeyDown={(event) => moveActorWithKeyboard(event, actor)}
+                />
+              );
+            })}
         </svg>
 
         <div className="scene-legend" aria-label="Scene legend">
@@ -676,7 +910,7 @@ export function SceneCanvas({
           </span>
         </div>
         <div className="scene-hint">
-          <Move size={13} /> Drag background to pan. Select a vehicle for precise controls.
+          <Move size={13} /> Cars show the pose at the playhead. Select one to move or rotate it.
         </div>
         {placingImpact && (
           <div className="scene-placement-prompt">
@@ -742,7 +976,7 @@ export function SceneCanvas({
                 {selectedActor.locked ? <Unlock size={14} /> : <LockKeyhole size={14} />}
                 {selectedActor.locked ? "Unlock object" : "Lock object"}
               </button>
-              <span>Arrow keys move · [ ] rotate · Shift for larger steps</span>
+              <span>Drag the round handle to rotate · Arrow keys move · [ ] rotate</span>
             </>
           )}
           {selectedTrajectory && (
@@ -755,8 +989,7 @@ export function SceneCanvas({
                 {selectedTrajectory.locked ? "Unlock path" : "Lock path"}
               </button>
               <span>
-                {selectedTrajectory.keyframes.length} editable path points · Arrow keys adjust a
-                selected point
+                Drag a numbered point to reshape the path · Timeline diamonds change timing
               </span>
             </>
           )}
@@ -767,7 +1000,7 @@ export function SceneCanvas({
                 {selectedEvent.locked ? "Unlock event" : "Lock event"}
               </button>
               <span>
-                {selectedEvent.title} · {(selectedEvent.timeMs / 1000).toFixed(1)}s ·{" "}
+                {selectedEvent.title} · {formatSceneSeconds(selectedEvent.timeMs)}s ·{" "}
                 {selectedEvent.certainty}
               </span>
             </>
@@ -904,9 +1137,12 @@ interface VehicleProps {
   y: number;
   rotation: number;
   selected: boolean;
+  editLocked: boolean;
   agentActive: boolean;
+  placementMode: boolean;
   onPointerDown: (event: React.PointerEvent<SVGGElement>) => void;
-  onClick: () => void;
+  onRotatePointerDown: (event: React.PointerEvent<SVGCircleElement>) => void;
+  onClick: (event: React.MouseEvent<SVGGElement>) => void;
   onKeyDown: (event: React.KeyboardEvent<SVGGElement>) => void;
 }
 
@@ -916,8 +1152,11 @@ function Vehicle({
   y,
   rotation,
   selected,
+  editLocked,
   agentActive,
+  placementMode,
   onPointerDown,
+  onRotatePointerDown,
   onClick,
   onKeyDown,
 }: VehicleProps) {
@@ -925,20 +1164,36 @@ function Vehicle({
   const damage = actor.damageMarkers;
   return (
     <g
-      className={`scene-vehicle${selected ? " is-selected" : ""}${actor.locked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}`}
+      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}`}
       transform={`translate(${x} ${y}) rotate(${rotation})`}
       tabIndex={0}
       role="button"
-      aria-label={`${actor.label}, position ${(x / 10).toFixed(1)}, ${(y / 7).toFixed(1)}, orientation ${Math.round(rotation)} degrees${actor.locked ? ", locked" : ""}. Use arrow keys to move and bracket keys to rotate.`}
+      aria-label={`${actor.label}, position ${(x / 10).toFixed(1)}, ${(y / 7).toFixed(1)}, orientation ${Math.round(rotation)} degrees${editLocked ? ", locked. Unlock the vehicle and its path to edit" : ". Use arrow keys to move and bracket keys to rotate"}.`}
       aria-pressed={selected}
       onPointerDown={onPointerDown}
       onClick={(event) => {
+        if (placementMode) return;
         event.stopPropagation();
-        onClick();
+        onClick(event);
       }}
       onKeyDown={onKeyDown}
     >
+      <rect className="vehicle-hit" x="-42" y="-58" width="84" height="126" rx="24" />
       <rect className="vehicle-selection" x="-25" y="-50" width="50" height="100" rx="18" />
+      {selected && !editLocked && (
+        <g className="vehicle-rotation-control" aria-hidden="true">
+          <line x1="0" y1="-49" x2="0" y2="-76" />
+          <circle
+            className="vehicle-rotation-control__hit"
+            cx="0"
+            cy="-82"
+            r="34"
+            onPointerDown={onRotatePointerDown}
+          />
+          <circle className="vehicle-rotation-control__knob" cx="0" cy="-82" r="10" />
+          <path d="M-4-83a5 5 0 0 1 8 0M4-83l-1-5 5 2" />
+        </g>
+      )}
       <g filter="url(#vehicle-shadow)">
         <rect
           className={blue ? "vehicle-body vehicle-body--blue" : "vehicle-body vehicle-body--silver"}
@@ -968,7 +1223,7 @@ function Vehicle({
       {damage.map((marker) => (
         <DamageGlyph key={marker.id} marker={marker} />
       ))}
-      {actor.locked && <LockGlyph x={23} y={-49} />}
+      {editLocked && <LockGlyph x={23} y={-49} />}
     </g>
   );
 }
@@ -997,10 +1252,12 @@ function DamageGlyph({ marker }: { marker: DamageMarker }) {
 function ImpactMarker({
   event,
   selected,
+  placementMode,
   onSelect,
 }: {
   event: TimelineEvent;
   selected: boolean;
+  placementMode: boolean;
   onSelect: () => void;
 }) {
   if (!event.location) return null;
@@ -1009,11 +1266,14 @@ function ImpactMarker({
     <g
       className={`impact-marker certainty--${event.certainty}${selected ? " is-selected" : ""}`}
       transform={`translate(${point.x} ${point.y})`}
-      tabIndex={0}
+      tabIndex={placementMode ? -1 : 0}
       role="button"
-      aria-label={`Approximate impact at ${(event.timeMs / 1000).toFixed(1)} seconds, ${event.certainty}`}
-      onClick={onSelect}
+      aria-label={`Approximate impact at ${formatSceneSeconds(event.timeMs)} seconds, ${event.certainty}`}
+      onClick={() => {
+        if (!placementMode) onSelect();
+      }}
       onKeyDown={(keyboardEvent) => {
+        if (placementMode) return;
         if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
           keyboardEvent.preventDefault();
           onSelect();

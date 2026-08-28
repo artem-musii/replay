@@ -6,6 +6,13 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 
+import {
+  clampTimeToRange,
+  editableKeyframeTimeBounds,
+  quantizeEditableTimeMs,
+  quantizeTimeInRange,
+  REPLAY_TIME_STEP_MS,
+} from "../domain/interpolation";
 import type { SceneActor, TimelineEvent, Trajectory } from "../domain/models";
 import "../styles/timeline.css";
 import { useDialogFocus } from "./useDialogFocus";
@@ -30,6 +37,7 @@ export interface TimelineProps {
   trajectories: Trajectory[];
   events: TimelineEvent[];
   selectedId?: string;
+  selectedKeyframeId?: string;
   comparison?: TimelineComparison;
   onTimeChange: (timeMs: number) => void;
   onPlayingChange: (playing: boolean) => void;
@@ -53,13 +61,14 @@ type DragTarget =
 interface DragState {
   target: DragTarget;
   pointerId: number;
+  initialPlayheadMs: number;
   previewTimeMs?: number;
 }
 
 const SPEED_OPTIONS = [0.5, 1, 2] as const;
 
 function clampTime(timeMs: number, range: TimelineProps["timeRangeMs"]): number {
-  return Math.max(range.start, Math.min(range.end, Math.round(timeMs)));
+  return clampTimeToRange(timeMs, range);
 }
 
 function timeToPercent(timeMs: number, range: TimelineProps["timeRangeMs"]): number {
@@ -69,10 +78,13 @@ function timeToPercent(timeMs: number, range: TimelineProps["timeRangeMs"]): num
 }
 
 function formatTime(timeMs: number, precise = false): string {
-  const totalSeconds = Math.max(0, timeMs) / 1000;
+  const normalizedTimeMs = Math.max(0, Math.round(timeMs));
+  const totalSeconds = normalizedTimeMs / 1000;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds - minutes * 60;
-  return `${String(minutes)}:${seconds.toFixed(precise ? 1 : 0).padStart(precise ? 4 : 2, "0")}`;
+  const fractionDigits = precise ? (normalizedTimeMs % REPLAY_TIME_STEP_MS === 0 ? 1 : 3) : 0;
+  const paddedLength = fractionDigits > 0 ? 3 + fractionDigits : 2;
+  return `${String(minutes)}:${seconds.toFixed(fractionDigits).padStart(paddedLength, "0")}`;
 }
 
 function formatAbsoluteTime(start: string, elapsedMs: number): string | undefined {
@@ -137,6 +149,7 @@ export function Timeline({
   trajectories,
   events,
   selectedId,
+  selectedKeyframeId,
   comparison,
   onTimeChange,
   onPlayingChange,
@@ -215,8 +228,30 @@ export function Timeline({
     else onMoveKeyframe?.(target.trajectoryId, target.keyframeId, timeMs);
   }
 
+  function editableTimeFor(target: DragTarget, requestedTimeMs: number): number {
+    if (target.kind !== "keyframe") return quantizeTimeInRange(requestedTimeMs, timeRangeMs);
+    const trajectory = trajectories.find((item) => item.id === target.trajectoryId);
+    const index = trajectory?.keyframes.findIndex((item) => item.id === target.keyframeId) ?? -1;
+    if (!trajectory || index < 0) return quantizeTimeInRange(requestedTimeMs, timeRangeMs);
+    const previous = trajectory.keyframes[index - 1];
+    const next = trajectory.keyframes[index + 1];
+    const bounds = editableKeyframeTimeBounds(previous?.timeMs, next?.timeMs, timeRangeMs);
+    return quantizeEditableTimeMs(requestedTimeMs, bounds, timeRangeMs);
+  }
+
+  function boundedEditableTimeFor(target: DragTarget, requestedTimeMs: number): number {
+    if (target.kind !== "keyframe") return clampTime(requestedTimeMs, timeRangeMs);
+    const trajectory = trajectories.find((item) => item.id === target.trajectoryId);
+    const index = trajectory?.keyframes.findIndex((item) => item.id === target.keyframeId) ?? -1;
+    if (!trajectory || index < 0) return clampTime(requestedTimeMs, timeRangeMs);
+    const previous = trajectory.keyframes[index - 1];
+    const next = trajectory.keyframes[index + 1];
+    const bounds = editableKeyframeTimeBounds(previous?.timeMs, next?.timeMs, timeRangeMs);
+    return Math.max(bounds.min, Math.min(bounds.max, Math.round(requestedTimeMs)));
+  }
+
   function startDrag(target: DragTarget, pointerId: number): void {
-    const nextState: DragState = { target, pointerId };
+    const nextState: DragState = { target, pointerId, initialPlayheadMs: currentTimeMs };
     dragStateRef.current = nextState;
     setDragState(nextState);
   }
@@ -229,8 +264,9 @@ export function Timeline({
   function handleTrackPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
     const activeDrag = dragStateRef.current;
     if (activeDrag?.pointerId !== event.pointerId) return;
-    const timeMs = timeFromPointer(event.clientX);
-    if (timeMs === undefined) return;
+    const requestedTimeMs = timeFromPointer(event.clientX);
+    if (requestedTimeMs === undefined) return;
+    const timeMs = editableTimeFor(activeDrag.target, requestedTimeMs);
     event.preventDefault();
     const nextState = { ...activeDrag, previewTimeMs: timeMs };
     dragStateRef.current = nextState;
@@ -248,7 +284,9 @@ export function Timeline({
   }
 
   function handleTrackPointerCancel(event: ReactPointerEvent<HTMLDivElement>): void {
-    if (dragStateRef.current?.pointerId !== event.pointerId) return;
+    const activeDrag = dragStateRef.current;
+    if (activeDrag?.pointerId !== event.pointerId) return;
+    onTimeChange(activeDrag.initialPlayheadMs);
     clearDrag();
   }
 
@@ -269,7 +307,9 @@ export function Timeline({
     event.stopPropagation();
     const direction = event.key === "ArrowRight" ? 1 : -1;
     const step = event.shiftKey ? 1_000 : 100;
-    const nextTime = clampTime(timeMs + direction * step, timeRangeMs);
+    const nextTime = boundedEditableTimeFor(target, timeMs + direction * step);
+    if (target.kind === "keyframe") onSelectKeyframe?.(target.trajectoryId, target.keyframeId);
+    else onSelectEvent?.(target.eventId);
     moveDragTarget(target, nextTime);
     onTimeChange(nextTime);
   }
@@ -292,9 +332,12 @@ export function Timeline({
   }
 
   const cursorPercent = timeToPercent(currentTimeMs, timeRangeMs);
+  const showsMillisecondScale = timeRangeMs.end - timeRangeMs.start < REPLAY_TIME_STEP_MS;
   const absoluteTime = absoluteClockStart
     ? formatAbsoluteTime(absoluteClockStart, currentTimeMs - timeRangeMs.start)
     : undefined;
+  const timelineStepMs =
+    timeRangeMs.end - timeRangeMs.start < REPLAY_TIME_STEP_MS ? 1 : REPLAY_TIME_STEP_MS;
 
   function submitEvent(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -313,6 +356,7 @@ export function Timeline({
     <section
       className={`timeline${comparison && comparison.branchIds.length > 0 ? " is-comparing" : ""}`}
       aria-label="Incident timeline"
+      data-onboarding-id="incident-timeline"
       tabIndex={0}
       onKeyDown={handleTimelineKeyboard}
     >
@@ -349,7 +393,7 @@ export function Timeline({
           </button>
           <output className="timeline__time" aria-live="off" aria-label="Current timeline position">
             <strong>{formatTime(currentTimeMs, true)}</strong>
-            <span>/ {formatTime(timeRangeMs.end)}</span>
+            <span>/ {formatTime(timeRangeMs.end, showsMillisecondScale)}</span>
             {absoluteTime && (
               <span className="timeline__absolute-time" title="Approximate incident clock time">
                 {absoluteTime}
@@ -433,7 +477,7 @@ export function Timeline({
                 key={tick.percent}
                 style={{ left: `${String(tick.percent)}%` }}
               >
-                <span>{formatTime(tick.timeMs)}</span>
+                <span>{formatTime(tick.timeMs, showsMillisecondScale)}</span>
               </div>
             ))}
           </div>
@@ -462,6 +506,7 @@ export function Timeline({
                   onPointerDown={(event) => {
                     if (!editable) return;
                     event.preventDefault();
+                    onSelectEvent?.(timelineEvent.id);
                     event.currentTarget.setPointerCapture(event.pointerId);
                     startDrag(target, event.pointerId);
                   }}
@@ -490,11 +535,14 @@ export function Timeline({
                   trajectoryId: trajectory.id,
                   keyframeId: keyframe.id,
                 };
-                const editable = Boolean(onMoveKeyframe) && !trajectory.locked;
+                const editable =
+                  Boolean(onMoveKeyframe) &&
+                  !trajectory.locked &&
+                  !actors.find((actor) => actor.id === trajectory.actorId)?.locked;
                 const displayTimeMs = previewTimeFor(target, keyframe.timeMs);
                 return (
                   <button
-                    className={`timeline-keyframe${selectedId === keyframe.id ? " is-selected" : ""}${editable ? " is-editable" : ""}`}
+                    className={`timeline-keyframe${selectedKeyframeId === keyframe.id ? " is-selected" : ""}${editable ? " is-editable" : ""}`}
                     key={keyframe.id}
                     type="button"
                     style={{
@@ -502,7 +550,7 @@ export function Timeline({
                     }}
                     title={`${actorName(actors, trajectory.actorId)} keyframe at ${formatTime(displayTimeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
                     aria-label={`${actorName(actors, trajectory.actorId)} path keyframe at ${formatTime(displayTimeMs, true)}`}
-                    aria-pressed={selectedId === keyframe.id}
+                    aria-pressed={selectedKeyframeId === keyframe.id}
                     onClick={() => {
                       onSelectKeyframe?.(trajectory.id, keyframe.id);
                       onTimeChange(keyframe.timeMs);
@@ -510,6 +558,7 @@ export function Timeline({
                     onPointerDown={(event) => {
                       if (!editable) return;
                       event.preventDefault();
+                      onSelectKeyframe?.(trajectory.id, keyframe.id);
                       event.currentTarget.setPointerCapture(event.pointerId);
                       startDrag(target, event.pointerId);
                     }}
@@ -539,7 +588,7 @@ export function Timeline({
             type="range"
             min={timeRangeMs.start}
             max={timeRangeMs.end}
-            step={100}
+            step={timelineStepMs}
             value={clampTime(currentTimeMs, timeRangeMs)}
             onChange={(event) => onTimeChange(Number(event.target.value))}
             aria-label="Timeline position"

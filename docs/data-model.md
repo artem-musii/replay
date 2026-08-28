@@ -5,7 +5,7 @@ Status: implemented model snapshot aligned to `src/domain/models.ts`, `src/domai
 ## Two independent versions
 
 - `schemaVersion` identifies the persisted JSON shape and drives migrations. The current constant is `REPLAY_SCHEMA_VERSION = 2`; v1 is migrated on import/load.
-- `seedVersion` identifies the deterministic demo fixture independently from user-case migrations. The current constant is `REPLAY_SEED_VERSION = 2`. Schema v2 accepts historical positive seed versions through 2 so a saved seed-v1 demo can resume until the person explicitly resets it.
+- `seedVersion` identifies the deterministic demo fixture independently from user-case migrations. The current constant is `REPLAY_SEED_VERSION = 3`. Schema v2 accepts historical positive seed versions through 3 so an older saved demo can resume until the person explicitly resets it.
 - `caseVersion` is the monotonically increasing optimistic-concurrency revision. The current engine increments it once for every successful command, including persisted `workspace.focus` and `case.validate` commands. Hover, playback time, menus, and other React-only presentation state do not change it.
 
 Keeping these numbers separate prevents a demo refresh, data migration, and concurrent edit from being mistaken for one another.
@@ -47,7 +47,7 @@ The implemented TypeScript contract is conceptually:
 ```ts
 interface ReplayCase {
   schemaVersion: 2;
-  seedVersion?: number; // positive integer <= REPLAY_SEED_VERSION (currently 2)
+  seedVersion?: number; // positive integer <= REPLAY_SEED_VERSION (currently 3)
   id: string;
   title: string;
   createdAt: string;
@@ -275,7 +275,7 @@ Shape validation is necessary but insufficient. The implemented reference and co
 - Case saves use compare-and-swap inside a Dexie transaction. Ordinary UI commands commit live before their queued save and pause for retry/recovery on failure. WebMCP reduces on an isolated engine copy, saves the staged case first, then adopts/notifies; a rejected primary save leaves live state untouched, while post-save cancellation/live conflict compensates and a failed compensation returns/audits `PERSISTENCE_FAILED`. A best-effort exclusive Web Locks lease and BroadcastChannel notices pause competing tabs where supported; none of these controls creates one physical engine/Dexie/browser-paint transaction.
 - Structured JSON carries only `ReplayCase`, not evidence blobs, and contains the source case ID. The visible import flow supplies a fresh `case-import-*` root ID and rewrites root-case references before save; stable entity IDs inside the new local copy remain unchanged.
 - An unsigned external import is intentionally untrusted: confirmed claims/events are demoted, answered questions reopen, reviewed notes become unreviewed, finalized snapshots are removed, activity is relabelled system/unverified and loses request/override attestations, proposal trust markers are cleared, and missing local blobs are tombstoned. Trusted local-vault migration does not perform this trust reset.
-- A demo reset deletes/recreates only the deterministic demo case ID at current seed version 2; opening `/#demo` alone resumes a valid saved seed-v1/v2 demo and does not clear unrelated cases.
+- A demo reset deletes/recreates only the deterministic demo case ID at current seed version 3; opening `/#demo` alone resumes a valid saved seed-v1/v2/v3 demo and does not clear unrelated cases.
 
 ## Safety interpretation
 

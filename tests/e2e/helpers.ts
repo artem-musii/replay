@@ -30,6 +30,16 @@ export function inspectorTab(page: Page, name: string) {
     .getByRole("button", { name, exact: true });
 }
 
+export async function openWebMCPInspector(page: Page) {
+  const invoker = page.getByLabel("Case options");
+  await invoker.click();
+  await page.getByRole("button", { name: "WebMCP inspector" }).click();
+  const dialog = page.getByRole("dialog", { name: "WebMCP Site Tools" });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator("details.workspace-menu")).not.toHaveAttribute("open", "");
+  return { dialog, invoker };
+}
+
 /** Installs the current imperative WebMCP surface before the app is evaluated. */
 export async function installModelContextPolyfill(page: Page): Promise<void> {
   await page.addInitScript(() => {

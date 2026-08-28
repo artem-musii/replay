@@ -427,7 +427,8 @@ function damageIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyI
           ];
           for (const pair of pairs) {
             const contactWorldAngle =
-              (Math.atan2(pair.otherPose.y - pair.pose.y, pair.otherPose.x - pair.pose.x) * 180) /
+              (Math.atan2(pair.otherPose.x - pair.pose.x, -(pair.otherPose.y - pair.pose.y)) *
+                180) /
               Math.PI;
             const localContactAngle =
               (((contactWorldAngle - pair.pose.rotationDeg) % 360) + 360) % 360;

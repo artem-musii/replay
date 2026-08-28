@@ -82,6 +82,7 @@ export function App() {
   const [vaultLoadError, setVaultLoadError] = useState<string>();
   const [vaultLoadAttempt, setVaultLoadAttempt] = useState(0);
   const [demoResetError, setDemoResetError] = useState<string>();
+  const [startWorkspaceTour, setStartWorkspaceTour] = useState(false);
   const resettingDemoRef = useRef(false);
   const webMcpSupported = detectWebMCPSupport().available;
 
@@ -280,6 +281,10 @@ export function App() {
             ? { recentCaseTitle: recentCase.title, onResumeCase: () => openCase(recentCase) }
             : {})}
           onOpenDemo={() => openCase(savedDemoCase ?? createDemoCase(), false, true)}
+          onOpenGuidedDemo={() => {
+            setStartWorkspaceTour(true);
+            openCase(savedDemoCase ?? createDemoCase(), false, true);
+          }}
           onStartBlank={() => navigate("wizard")}
           onOpenCollaboration={() =>
             document.getElementById("collaboration")?.scrollIntoView({ behavior: "smooth" })
@@ -315,6 +320,8 @@ export function App() {
               }}
               onResetDemo={resetDemo}
               onImportCase={(imported) => openCase(imported, true)}
+              startWithTour={startWorkspaceTour}
+              onTourStarted={() => setStartWorkspaceTour(false)}
             />
           </Suspense>
         </ErrorBoundary>

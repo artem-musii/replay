@@ -19,7 +19,7 @@ describe("versioned case schemas and seeds", () => {
 
     expect(first).toEqual(second);
     expect(first.schemaVersion).toBe(2);
-    expect(first.seedVersion).toBe(2);
+    expect(first.seedVersion).toBe(3);
     expect(ReplayCaseSchema.parse(first)).toEqual(first);
     expect(validateCaseReferences(first)).toEqual([]);
   });
@@ -32,8 +32,33 @@ describe("versioned case schemas and seeds", () => {
     ).toBe(true);
     expect(ruleIds).not.toContain("geometry.actor-outside-scene");
     expect(ruleIds).not.toContain("geometry.keyframe-outside-scene");
+    expect(ruleIds).not.toContain("damage.contact-direction-hint");
     expect(JSON.stringify(replayCase).toLowerCase()).not.toContain("at fault");
     expect(replayCase.evidence.every((asset) => asset.syntheticDemoAsset)).toBe(true);
+  });
+
+  it("keeps both demo vehicles moving counter-clockwise in the same traffic flow", () => {
+    const replayCase = createDemoCase();
+    const vehicleA = replayCase.trajectories.find(
+      (trajectory) => trajectory.id === "trajectory-a-baseline",
+    )!;
+    const vehicleB = replayCase.trajectories.find(
+      (trajectory) => trajectory.id === "trajectory-b-baseline",
+    )!;
+
+    expect(
+      vehicleB.keyframes.map(({ timeMs, x, y, rotationDeg }) => [timeMs, x, y, rotationDeg]),
+    ).toEqual([
+      [0, 34, 61, 133],
+      [6_000, 43, 73, 109],
+      [8_000, 56, 72, 59],
+      [10_000, 65, 54, 60],
+      [16_000, 80, 52, 85],
+    ]);
+    expect(vehicleB.keyframes[3]!.x).toBeGreaterThan(vehicleA.keyframes[3]!.x);
+    expect(Math.abs(vehicleB.keyframes[3]!.rotationDeg - vehicleA.keyframes[3]!.rotationDeg)).toBe(
+      2,
+    );
   });
 
   it("rejects unknown persisted fields", () => {
@@ -55,6 +80,10 @@ describe("versioned case schemas and seeds", () => {
 
     expect(blank.id).toBe("case-blank-test");
     expect(blank.actors).toHaveLength(2);
+    expect(blank.actors.map((actor) => actor.pose)).toEqual([
+      { x: 24, y: 56.4, rotationDeg: 90 },
+      { x: 76, y: 43.6, rotationDeg: 270 },
+    ]);
     expect(blank.claims[0]?.status).toBe("reported");
     expect(blank.consistencyIssues.some((issue) => issue.ruleId === "completeness.timeline")).toBe(
       true,

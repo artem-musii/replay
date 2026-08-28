@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  BookOpen,
   Bot,
   CheckCircle2,
   CircleDotDashed,
@@ -8,12 +9,15 @@ import {
   MousePointer2,
   ShieldCheck,
 } from "lucide-react";
+import { useState } from "react";
 import { BrandMark } from "./BrandMark";
+import { ReplayGuide, type GuideSectionId } from "./ReplayGuide";
 
 interface LandingPageProps {
   webMcpSupported: boolean;
   recentCaseTitle?: string;
   onOpenDemo: () => void;
+  onOpenGuidedDemo: () => void;
   onStartBlank: () => void;
   onOpenCollaboration: () => void;
   onResumeCase?: () => void;
@@ -44,10 +48,12 @@ export function LandingPage({
   webMcpSupported,
   recentCaseTitle,
   onOpenDemo,
+  onOpenGuidedDemo,
   onStartBlank,
   onOpenCollaboration,
   onResumeCase,
 }: LandingPageProps) {
+  const [guideSection, setGuideSection] = useState<GuideSectionId>();
   const isSharedGitHubPagesOrigin = window.location.hostname.endsWith(".github.io");
   return (
     <main className="landing">
@@ -58,9 +64,15 @@ export function LandingPage({
         <div className="landing-nav__meta">
           <span className={`compatibility-pill ${webMcpSupported ? "is-supported" : ""}`}>
             <span className="compatibility-pill__dot" aria-hidden="true" />
-            {webMcpSupported ? "Site Tools ready" : "Manual mode ready"}
+            {webMcpSupported ? "Site Tools compatible" : "Manual mode ready"}
           </span>
           <a href="#privacy">Privacy</a>
+          <button
+            className="text-button landing-guide-button"
+            onClick={() => setGuideSection("quick-start")}
+          >
+            <BookOpen size={14} aria-hidden="true" /> How to use REPLAY
+          </button>
           <button className="text-button" onClick={onOpenCollaboration}>
             How collaboration works
           </button>
@@ -85,6 +97,9 @@ export function LandingPage({
               Start a blank case
             </button>
           </div>
+          <button className="guided-demo-link" onClick={onOpenGuidedDemo}>
+            <BookOpen size={15} aria-hidden="true" /> Guided demo · about 4 minutes
+          </button>
           <ul className="landing-hero__assurances" aria-label="Product assurances">
             <li>
               <LockKeyhole size={14} /> Local-first
@@ -153,7 +168,8 @@ export function LandingPage({
           <h2 id="collaboration-title">The agent works inside your case, not beside it.</h2>
           <p>
             Site Tools expose narrow, validated actions through WebMCP. The agent reads the live
-            case, changes the same state you see, and leaves every mutation visible and undoable.
+            case and works through the same validated state you see. Durable mutations are
+            attributed in activity, and eligible agent work can be reverted while it remains safe.
           </p>
         </div>
         <ol className="collaboration-loop">
@@ -185,6 +201,9 @@ export function LandingPage({
             visible human review.
           </p>
         </div>
+        <button className="collaboration-guide-link" onClick={() => setGuideSection("site-tools")}>
+          Learn how to use Site Tools <ArrowRight size={15} aria-hidden="true" />
+        </button>
       </section>
 
       <section className="privacy-section" id="privacy" aria-labelledby="privacy-title">
@@ -238,6 +257,16 @@ export function LandingPage({
         </p>
         <span>REPLAY · 2026</span>
       </footer>
+      {guideSection && (
+        <ReplayGuide
+          key={guideSection}
+          context="landing"
+          webMcpSupported={webMcpSupported}
+          initialSection={guideSection}
+          onClose={() => setGuideSection(undefined)}
+          onOpenGuidedDemo={onOpenGuidedDemo}
+        />
+      )}
     </main>
   );
 }

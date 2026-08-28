@@ -4,7 +4,12 @@ import { readFile } from "node:fs/promises";
 
 import { expect, test, type Download, type Page } from "@playwright/test";
 
-import { inspectorTab, installModelContextPolyfill, openDemo } from "./helpers";
+import {
+  inspectorTab,
+  installModelContextPolyfill,
+  openDemo,
+  openWebMCPInspector,
+} from "./helpers";
 
 async function downloadedBytes(download: Download): Promise<Buffer> {
   const path = await download.path();
@@ -17,11 +22,10 @@ async function runSiteTool(
   toolName: string,
   input: Readonly<Record<string, unknown>>,
 ): Promise<void> {
-  const siteTools = page.locator("button.webmcp-status");
-  await expect(siteTools).toContainText(/\d+ registered/, { timeout: 10_000 });
-  await siteTools.click();
-
-  const dialog = page.getByRole("dialog", { name: "WebMCP Site Tools" });
+  await expect(page.locator("button.webmcp-status")).toContainText(/\d+ registered/, {
+    timeout: 10_000,
+  });
+  const { dialog } = await openWebMCPInspector(page);
   await dialog.locator(".debug-tool-list button").filter({ hasText: toolName }).click();
   await dialog.getByLabel("Simulation input").fill(JSON.stringify(input, null, 2));
   await dialog.getByRole("button", { name: "Run through browser" }).click();
@@ -565,9 +569,11 @@ test.describe("production-critical regressions", () => {
     await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(confirmation).toHaveCount(0);
-    await expect(resetDemo).toBeFocused();
+    const caseOptions = page.getByLabel("Case options");
+    await expect(caseOptions).toBeFocused();
 
-    await resetDemo.click();
+    await caseOptions.click();
+    await page.getByRole("button", { name: "Reset deterministic demo" }).click();
     confirmation = page.getByRole("alertdialog", { name: "Reset the deterministic demo?" });
     await confirmation.getByRole("button", { name: "Reset demo" }).click();
     await expect(page.locator(".workspace-case-title")).toContainText("v1");

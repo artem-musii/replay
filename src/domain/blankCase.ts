@@ -41,6 +41,31 @@ function actorLabel(index: number): string {
   return `Vehicle ${String.fromCharCode(65 + index)}`;
 }
 
+function initialActorPose(
+  sceneType: BlankCaseInput["sceneType"],
+  index: number,
+): SceneActor["pose"] {
+  const sharedApproachSlots: SceneActor["pose"][] = [
+    { x: 24, y: 56.4, rotationDeg: 90 },
+    { x: 76, y: 43.6, rotationDeg: 270 },
+    { x: 45.5, y: 20, rotationDeg: 180 },
+    { x: 54.5, y: 80, rotationDeg: 0 },
+  ];
+  const extraSlots: SceneActor["pose"][] =
+    sceneType === "roundabout"
+      ? [
+          { x: 35, y: 65, rotationDeg: 125 },
+          { x: 65, y: 35, rotationDeg: 305 },
+        ]
+      : [
+          { x: 16, y: 56.4, rotationDeg: 90 },
+          { x: 84, y: 43.6, rotationDeg: 270 },
+        ];
+  const pose = [...sharedApproachSlots, ...extraSlots][index] ?? sharedApproachSlots[0];
+  if (!pose) throw new Error("REPLAY could not choose an initial vehicle position.");
+  return pose;
+}
+
 /** Creates a fully valid, intentionally incomplete local case for the start wizard. */
 export function createBlankCase(
   input: BlankCaseInput,
@@ -60,7 +85,7 @@ export function createBlankCase(
         : index === 1
           ? "vehicle-silver"
           : `vehicle-neutral-${String(index + 1)}`,
-    pose: { x: 35 + index * 10, y: 50, rotationDeg: index % 2 === 0 ? 0 : 180 },
+    pose: initialActorPose(parsed.sceneType, index),
     locked: false,
     damageMarkers: [],
   }));

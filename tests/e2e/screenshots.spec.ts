@@ -56,6 +56,12 @@ test.describe("judge-facing visual regression", () => {
     await vehicle.press("Enter");
     await expect(page.getByRole("region", { name: "Vehicle A" })).toBeVisible();
     await expectVisual(page, "workspace-selected-vehicle-1280x800.png");
+
+    await page.getByRole("button", { name: "Edit path" }).click();
+    await expect(
+      page.getByText("A path point is the vehicle’s pose at a specific time."),
+    ).toBeVisible();
+    await expectVisual(page, "workspace-selected-trajectory-1280x800.png");
   });
 
   test("focused inconsistency and unsupported Site Tools state", async ({ page }, testInfo) => {
@@ -69,8 +75,8 @@ test.describe("judge-facing visual regression", () => {
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator("button.webmcp-status").click();
-    await expect(page.getByRole("dialog", { name: "WebMCP Site Tools" })).toBeVisible();
-    await expectVisual(page, "webmcp-unsupported-1440x900.png");
+    await expect(page.getByRole("dialog", { name: "Learn REPLAY" })).toBeVisible();
+    await expectVisual(page, "site-tools-guide-manual-1440x900.png");
   });
 
   test("hypothesis comparison", async ({ page }, testInfo) => {

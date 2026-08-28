@@ -18,6 +18,7 @@ import {
   LockKeyhole,
   MessageSquareText,
   Plus,
+  RotateCw,
   RotateCcw,
   Route,
   SearchCheck,
@@ -31,7 +32,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import { compareHypotheses } from "../domain/hypotheses";
-import { getActorPoseAtTime } from "../domain/interpolation";
+import { getActorPoseAtTime, normalizeDegrees } from "../domain/interpolation";
 import { rankOpenQuestions } from "../domain/reducer";
 import type {
   Claim,
@@ -104,6 +105,10 @@ interface InspectorPanelProps {
     keyframeId: string,
     update: ActorPose & { timeMs: number },
   ) => void;
+  onAddTrajectoryKeyframe: (trajectoryId: string) => void;
+  onRemoveTrajectoryKeyframe: (trajectoryId: string, keyframeId: string) => void;
+  selectedKeyframeId?: string;
+  onSelectTrajectoryKeyframe: (trajectoryId: string, keyframeId: string) => void;
   onSetTrajectoryVisible: (trajectoryId: string, visible: boolean) => void;
   onUpdateTimelineEvent: (
     eventId: string,
@@ -189,6 +194,12 @@ const statusLabels: Record<ClaimStatus, string> = {
   "agent-hypothesis": "Agent hypothesis",
 };
 
+function formatSeconds(timeMs: number): string {
+  const normalizedTimeMs = Math.round(timeMs);
+  const fractionDigits = normalizedTimeMs % 100 === 0 ? 1 : 3;
+  return `${(normalizedTimeMs / 1000).toFixed(fractionDigits)}s`;
+}
+
 function StatusGlyph({ status }: { status: ClaimStatus }) {
   if (status === "confirmed") return <Check size={12} strokeWidth={3} />;
   if (status === "disputed") return <X size={12} strokeWidth={3} />;
@@ -217,7 +228,11 @@ function EmptyState({
 
 export function InspectorPanel(props: InspectorPanelProps) {
   return (
-    <aside className="inspector-panel" aria-label="Case inspector">
+    <aside
+      className="inspector-panel"
+      aria-label="Case inspector"
+      data-onboarding-id="case-inspector"
+    >
       <nav className="inspector-tabs" aria-label="Case workspaces">
         {tabs.map(({ id, label, Icon }) => (
           <button
@@ -439,7 +454,7 @@ function ProposalReviewPanel(props: InspectorPanelProps) {
                                 type="number"
                                 min={props.replayCase.timeRangeMs.start / 1000}
                                 max={props.replayCase.timeRangeMs.end / 1000}
-                                step="0.1"
+                                step="0.001"
                                 defaultValue={frame.timeMs / 1000}
                                 required
                               />
@@ -552,6 +567,16 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
   const branch = trajectory
     ? props.replayCase.branches.find((item) => item.id === trajectory.branchId)
     : undefined;
+  const trajectoryActor = trajectory
+    ? props.replayCase.actors.find((item) => item.id === trajectory.actorId)
+    : undefined;
+  const trajectoryEditLocked = [trajectory?.locked, trajectoryActor?.locked].some(Boolean);
+  const actorTrajectory = actor
+    ? props.replayCase.trajectories.find(
+        (item) => item.actorId === actor.id && item.branchId === props.replayCase.activeBranchId,
+      )
+    : undefined;
+  const actorEditLocked = [actor?.locked, actorTrajectory?.locked].some(Boolean);
   const actorPose = actor
     ? (getActorPoseAtTime(props.replayCase, actor.id, props.currentTimeMs) ?? actor.pose)
     : undefined;
@@ -578,8 +603,16 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
           </button>
         </header>
         <p className="scene-selection-editor__hint">
-          Exact pose at the playhead. Values use the scene’s 0–100 coordinate system.
+          This is the vehicle pose at {formatSeconds(props.currentTimeMs)}. Cars follow their path
+          as the playhead moves. Moving or rotating one here updates a nearby path point, or creates
+          one at this time.
         </p>
+        {actorTrajectory?.locked && !actor.locked && (
+          <p className="scene-selection-editor__hint" role="note">
+            {actor.label} follows a locked path, so its pose is read-only until that path is
+            unlocked.
+          </p>
+        )}
         <form
           key={`${actor.id}-${String(actorPose.x)}-${String(actorPose.y)}-${String(actorPose.rotationDeg)}`}
           className="scene-numeric-form"
@@ -604,7 +637,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                 step="0.1"
                 defaultValue={actorPose.x}
                 required
-                disabled={actor.locked}
+                disabled={actorEditLocked}
               />
             </label>
             <label>
@@ -617,7 +650,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                 step="0.1"
                 defaultValue={actorPose.y}
                 required
-                disabled={actor.locked}
+                disabled={actorEditLocked}
               />
             </label>
             <label>
@@ -630,14 +663,50 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                 step="1"
                 defaultValue={actorPose.rotationDeg}
                 required
-                disabled={actor.locked}
+                disabled={actorEditLocked}
               />
             </label>
           </div>
-          <button className="button button--secondary" disabled={actor.locked}>
+          <button className="button button--secondary" disabled={actorEditLocked}>
             Apply exact pose
           </button>
         </form>
+        <div className="rotation-controls" aria-label={`Rotate ${actor.label}`}>
+          <span>Quick rotation</span>
+          <div>
+            <button
+              type="button"
+              className="button button--secondary"
+              disabled={actorEditLocked}
+              onClick={() =>
+                props.onUpdateActorPose(actor.id, {
+                  ...actorPose,
+                  rotationDeg: normalizeDegrees(actorPose.rotationDeg - 15),
+                })
+              }
+              aria-label={`Rotate ${actor.label} left 15 degrees`}
+            >
+              <RotateCcw size={14} aria-hidden="true" /> −15°
+            </button>
+            <button
+              type="button"
+              className="button button--secondary"
+              disabled={actorEditLocked}
+              onClick={() =>
+                props.onUpdateActorPose(actor.id, {
+                  ...actorPose,
+                  rotationDeg: normalizeDegrees(actorPose.rotationDeg + 15),
+                })
+              }
+              aria-label={`Rotate ${actor.label} right 15 degrees`}
+            >
+              <RotateCw size={14} aria-hidden="true" /> +15°
+            </button>
+          </div>
+          <small>
+            Drag the round handle above the car. 0° points up, 90° right, 180° down, and 270° left.
+          </small>
+        </div>
         <dl className="scene-selection-facts">
           <div>
             <dt>Dimensions</dt>
@@ -663,10 +732,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
           </span>
           <div>
             <small>Selected trajectory</small>
-            <h2 id="scene-selection-title">
-              {props.replayCase.actors.find((item) => item.id === trajectory.actorId)?.label ??
-                "Vehicle path"}
-            </h2>
+            <h2 id="scene-selection-title">{trajectoryActor?.label ?? "Vehicle path"}</h2>
           </div>
           <button
             className="icon-button icon-button--small"
@@ -685,7 +751,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
             <input
               type="checkbox"
               checked={trajectory.visible}
-              disabled={trajectory.locked}
+              disabled={trajectoryEditLocked}
               onChange={(event) =>
                 props.onSetTrajectoryVisible(trajectory.id, event.target.checked)
               }
@@ -693,11 +759,35 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
             Show path
           </label>
         </div>
+        {trajectoryActor?.locked && !trajectory.locked && (
+          <p className="scene-selection-editor__hint" role="note">
+            {trajectoryActor.label} is locked, so its path is read-only until the vehicle is
+            unlocked.
+          </p>
+        )}
+        <div className="trajectory-model-note">
+          <strong>A path point is the vehicle’s pose at a specific time.</strong>
+          <p>
+            REPLAY draws straight movement between points and interpolates heading. It does not
+            simulate steering, collision physics, or fault.
+          </p>
+          <button
+            type="button"
+            className="button button--secondary"
+            disabled={trajectoryEditLocked}
+            onClick={() => props.onAddTrajectoryKeyframe(trajectory.id)}
+          >
+            <Plus size={14} aria-hidden="true" /> Add point at {formatSeconds(props.currentTimeMs)}
+          </button>
+          <small>Move the timeline playhead first to add a point at a different time.</small>
+        </div>
         <div className="keyframe-editor-list" aria-label="Exact trajectory points">
           {trajectory.keyframes.map((frame, index) => (
             <form
               key={`${frame.id}-${String(frame.timeMs)}-${String(frame.x)}-${String(frame.y)}-${String(frame.rotationDeg)}`}
-              className="keyframe-editor"
+              className={`keyframe-editor scene-numeric-form${props.selectedKeyframeId === frame.id ? " is-active" : ""}`}
+              aria-labelledby={`keyframe-editor-${frame.id}`}
+              onFocusCapture={() => props.onSelectTrajectoryKeyframe(trajectory.id, frame.id)}
               onSubmit={(event) => {
                 event.preventDefault();
                 const data = new FormData(event.currentTarget);
@@ -710,10 +800,32 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
               }}
             >
               <header>
-                <strong>Point {index + 1}</strong>
-                <button className="text-button" disabled={trajectory.locked}>
-                  Apply point
-                </button>
+                <strong id={`keyframe-editor-${frame.id}`}>
+                  Point {index + 1} <small>{formatSeconds(frame.timeMs)}</small>
+                </strong>
+                <div>
+                  <button
+                    type="button"
+                    className="text-button keyframe-remove"
+                    disabled={trajectoryEditLocked || trajectory.keyframes.length <= 2}
+                    onClick={() => props.onRemoveTrajectoryKeyframe(trajectory.id, frame.id)}
+                    aria-label={`Remove point ${index + 1}`}
+                    title={
+                      trajectory.keyframes.length <= 2
+                        ? "A path needs at least two points"
+                        : `Remove point ${index + 1}`
+                    }
+                  >
+                    <Trash2 size={13} aria-hidden="true" /> Remove
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={trajectoryEditLocked}
+                    aria-label={`Apply point ${index + 1}`}
+                  >
+                    Apply point
+                  </button>
+                </div>
               </header>
               <div className="scene-numeric-form__grid scene-numeric-form__grid--four">
                 <label>
@@ -723,10 +835,10 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                     type="number"
                     min={props.replayCase.timeRangeMs.start / 1000}
                     max={props.replayCase.timeRangeMs.end / 1000}
-                    step="0.1"
+                    step="0.001"
                     defaultValue={frame.timeMs / 1000}
                     required
-                    disabled={trajectory.locked}
+                    disabled={trajectoryEditLocked}
                   />
                 </label>
                 <label>
@@ -739,7 +851,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                     step="0.1"
                     defaultValue={frame.x}
                     required
-                    disabled={trajectory.locked}
+                    disabled={trajectoryEditLocked}
                   />
                 </label>
                 <label>
@@ -752,7 +864,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                     step="0.1"
                     defaultValue={frame.y}
                     required
-                    disabled={trajectory.locked}
+                    disabled={trajectoryEditLocked}
                   />
                 </label>
                 <label>
@@ -765,7 +877,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
                     step="1"
                     defaultValue={frame.rotationDeg}
                     required
-                    disabled={trajectory.locked}
+                    disabled={trajectoryEditLocked}
                   />
                 </label>
               </div>
@@ -777,6 +889,12 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
   }
 
   if (!timelineEvent) return null;
+  const isUncertaintyMarker =
+    timelineEvent.certainty === "unknown" ||
+    timelineEvent.linkedClaimIds.some((claimId) => {
+      const linkedClaim = props.replayCase.claims.find((claim) => claim.id === claimId);
+      return linkedClaim?.status === "unknown";
+    });
   return (
     <section className="scene-selection-editor" aria-labelledby="scene-selection-title">
       <header>
@@ -798,6 +916,11 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
           {timelineEvent.locked ? <Unlock size={14} /> : <LockKeyhole size={14} />}
         </button>
       </header>
+      <p className="scene-selection-editor__hint">
+        {isUncertaintyMarker
+          ? "This is an uncertainty marker, not a simulated change in motion. From this time, the available information does not establish which lane either vehicle occupied."
+          : "Edit the event at the playhead. Certainty describes how the detail is supported, not how likely the motion is in a physics model."}
+      </p>
       <form
         key={`${timelineEvent.id}-${String(timelineEvent.timeMs)}-${timelineEvent.certainty}-${String(timelineEvent.location?.x)}-${String(timelineEvent.location?.y)}`}
         className="scene-numeric-form"
@@ -822,7 +945,7 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
               type="number"
               min={props.replayCase.timeRangeMs.start / 1000}
               max={props.replayCase.timeRangeMs.end / 1000}
-              step="0.1"
+              step="0.001"
               defaultValue={timelineEvent.timeMs / 1000}
               required
               disabled={timelineEvent.locked}

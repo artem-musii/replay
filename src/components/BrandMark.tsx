@@ -5,7 +5,11 @@ interface BrandMarkProps {
 
 export function BrandMark({ compact = false, inverse = false }: BrandMarkProps) {
   return (
-    <span className={`brand-mark${compact ? " brand-mark--compact" : ""}`} aria-label="REPLAY">
+    <span
+      className={`brand-mark${compact ? " brand-mark--compact" : ""}`}
+      role="img"
+      aria-label="REPLAY"
+    >
       <svg aria-hidden="true" viewBox="0 0 28 28" className="brand-mark__symbol">
         <path
           d="M6.3 6.4h10.2a5.25 5.25 0 0 1 0 10.5H10"

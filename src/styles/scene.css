@@ -97,6 +97,17 @@
   touch-action: none;
   user-select: none;
 }
+
+.scene-svg.is-placing-impact {
+  cursor: crosshair;
+}
+
+.scene-svg.is-placing-impact .trajectory,
+.scene-svg.is-placing-impact .trajectory__hit,
+.scene-svg.is-placing-impact .trajectory__handle-hit {
+  cursor: crosshair;
+  pointer-events: none;
+}
 .scene-ground {
   fill: oklch(0.87 0.028 145);
 }
@@ -151,7 +162,9 @@
 .trajectory__hit {
   fill: none;
   stroke: transparent;
-  stroke-width: 20;
+  stroke-width: 40px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
 }
 .trajectory__line {
   fill: none;
@@ -222,12 +235,44 @@
   fill: var(--paper-raised);
   stroke: var(--selection);
   stroke-width: 3;
-  cursor: move;
+  pointer-events: none;
+  transition:
+    r 160ms var(--ease-out),
+    fill 160ms var(--ease-out);
 }
-.trajectory__handle:focus {
+.trajectory__handle.is-active {
+  fill: var(--selection);
+  stroke: var(--paper-raised);
+  r: 13px;
+}
+.trajectory__handle-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 24px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: grab;
   outline: none;
+}
+.trajectory__handle-hit:active {
+  cursor: grabbing;
+}
+.trajectory__handle-hit:hover + .trajectory__handle,
+.trajectory__handle-hit:focus-visible + .trajectory__handle {
   stroke: var(--ink);
   stroke-width: 4;
+  r: 14px;
+}
+.trajectory__handle-number {
+  fill: var(--ink);
+  font:
+    800 11px "SFMono-Regular",
+    ui-monospace,
+    monospace;
+  pointer-events: none;
+}
+.trajectory__handle.is-active + .trajectory__handle-number {
+  fill: var(--paper-raised);
 }
 .path-marker-label {
   font:
@@ -244,6 +289,12 @@
 .scene-vehicle {
   cursor: move;
   outline: none;
+}
+.vehicle-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 24px;
+  vector-effect: non-scaling-stroke;
 }
 .scene-vehicle:focus-visible .vehicle-selection {
   stroke: var(--focus);
@@ -264,6 +315,39 @@
 }
 .scene-vehicle.is-locked {
   cursor: not-allowed;
+}
+.vehicle-rotation-control {
+  color: var(--selection);
+  pointer-events: none;
+}
+.vehicle-rotation-control line,
+.vehicle-rotation-control path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.vehicle-rotation-control__hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 24px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+  cursor: grab;
+}
+.vehicle-rotation-control__hit:active {
+  cursor: grabbing;
+}
+.vehicle-rotation-control__knob {
+  fill: var(--paper-raised);
+  stroke: currentColor;
+  stroke-width: 3;
+  pointer-events: none;
+}
+.vehicle-rotation-control__hit:hover + .vehicle-rotation-control__knob {
+  fill: oklch(0.92 0.04 240);
 }
 .vehicle-body {
   stroke: oklch(0.28 0.03 220);

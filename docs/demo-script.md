@@ -120,8 +120,8 @@ This script uses the deterministic `#demo` route, the live REPLAY workspace, and
 
 - Fresh-origin reset: use a clean browser origin with no saved demo data.
 - In-workspace reset: **Case options → Reset deterministic demo**.
-- Opening `/#demo` alone resumes a valid saved seed-v1 or seed-v2 demo case and is not a reset.
-- After an explicit reset, verify `seedVersion = 2`, case version 1, active branch **Baseline reconstruction**, four synthetic evidence items, and the seeded geometry inconsistency before each take.
+- Opening `/#demo` alone resumes a valid saved seed-v1, seed-v2, or seed-v3 demo case and is not a reset.
+- After an explicit reset, verify `seedVersion = 3`, case version 1, active branch **Baseline reconstruction**, four synthetic evidence items, and the seeded geometry inconsistency before each take.
 - Do not reuse a take after hidden warm-up commands. Reads add session audit, while mutations also change case version and durable activity.
 
 ## Backup recording sequence

@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  CircleHelp,
   CloudOff,
   Download,
   FileUp,
@@ -15,12 +16,19 @@ import {
   Undo2,
   Wifi,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import {
   buildReportPreview,
+  clampTimeToRange,
   createReplayEngine,
+  editableKeyframeTimeBounds,
   importReplayCase,
+  initialTrajectoryTimes,
+  interpolateTrajectory,
+  quantizeEditableTimeMs,
+  quantizeTimeInRange,
+  sceneDeltaForCompassHeading,
   type ActivityEvent,
   type OpenQuestion,
   type ReplayCase,
@@ -56,6 +64,8 @@ import { SceneCanvas } from "./SceneCanvas";
 import { Timeline } from "./Timeline";
 import { useDialogFocus } from "./useDialogFocus";
 import { WebMCPDebugPanel } from "./WebMCPDebugPanel";
+import { ReplayGuide, type GuideSectionId } from "./ReplayGuide";
+import { WorkspaceTour } from "./WorkspaceTour";
 
 interface WorkspaceProps {
   initialCase: ReplayCase;
@@ -63,6 +73,8 @@ interface WorkspaceProps {
   onHome: (latestCase: ReplayCase) => void;
   onResetDemo: () => Promise<boolean>;
   onImportCase: (replayCase: ReplayCase) => void;
+  startWithTour?: boolean;
+  onTourStarted?: () => void;
 }
 
 type SaveState = "saving" | "saved" | "error";
@@ -173,6 +185,13 @@ const inspectorModes = new Set<InspectorTab>([
   "report",
 ]);
 
+const TIME_EQUALITY_EPSILON_MS = 0.001;
+
+function formatWorkspaceSeconds(timeMs: number): string {
+  const normalizedTimeMs = Math.round(timeMs);
+  return (normalizedTimeMs / 1000).toFixed(normalizedTimeMs % 100 === 0 ? 1 : 3);
+}
+
 function humanMeta() {
   return { actor: "human" as const, origin: "ui" as const };
 }
@@ -218,6 +237,8 @@ export function Workspace({
   onHome,
   onResetDemo,
   onImportCase,
+  startWithTour = false,
+  onTourStarted,
 }: WorkspaceProps) {
   const [engine] = useState(() => createReplayEngine(initialCase));
   const [replayCase, setReplayCase] = useState(() => engine.getState());
@@ -238,8 +259,11 @@ export function Workspace({
   const [toolActivityStore] = useState<{ items: ActivityEvent[] }>(() => ({ items: [] }));
   const [activeAgentIds, setActiveAgentIds] = useState<string[]>([]);
   const [focusedIssueId, setFocusedIssueId] = useState<string>();
+  const [selectedKeyframeId, setSelectedKeyframeId] = useState<string>();
   const [revertingActivityId, setRevertingActivityId] = useState<string>();
   const [showDebug, setShowDebug] = useState(false);
+  const [guideSection, setGuideSection] = useState<GuideSectionId>();
+  const [tourStep, setTourStep] = useState<number | null>(() => (startWithTour ? 0 : null));
   const [confirmingDemoReset, setConfirmingDemoReset] = useState(false);
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const evidenceUrlsRef = useRef<Record<string, string>>({});
@@ -265,6 +289,10 @@ export function Workspace({
         : saveFailureIsBlocking
           ? `Local saving failed at case version ${saveFailure?.caseVersion}. Editing and Site Tools are paused until you retry the save or download a recovery backup.`
           : undefined);
+
+  useEffect(() => {
+    if (startWithTour) onTourStarted?.();
+  }, [onTourStarted, startWithTour]);
 
   const recordSaveSuccess = useCallback(
     (caseVersion: number) => {
@@ -720,7 +748,8 @@ export function Workspace({
     if (!result.ok) setToast({ kind: "error", message: result.message });
   }
 
-  function selectItem(type: WorkspaceItemType, itemId: string): void {
+  function selectItem(type: WorkspaceItemType, itemId: string, keyframeId?: string): void {
+    setSelectedKeyframeId(keyframeId);
     runCommand(
       {
         type: "workspace.focus",
@@ -738,6 +767,7 @@ export function Workspace({
     x: number,
     y: number,
   ): void {
+    setIsPlaying(false);
     const state = engine.getState();
     const trajectory = state.trajectories.find((item) => item.id === trajectoryId);
     if (!trajectory) return;
@@ -761,6 +791,7 @@ export function Workspace({
     actorId: string,
     pose: { x: number; y: number; rotationDeg: number },
   ): void {
+    setIsPlaying(false);
     const state = engine.getState();
     const trajectory = state.trajectories.find(
       (item) => item.actorId === actorId && item.branchId === state.activeBranchId,
@@ -769,7 +800,7 @@ export function Workspace({
       runCommand({ type: "actor.update-pose", actorId, pose }, true);
       return;
     }
-    const targetTime = Math.round(currentTimeMs);
+    const targetTime = clampTimeToRange(currentTimeMs, state.timeRangeMs);
     const nearest = trajectory.keyframes.reduce<{ index: number; distance: number } | undefined>(
       (best, frame, index) => {
         const distance = Math.abs(frame.timeMs - targetTime);
@@ -809,11 +840,11 @@ export function Workspace({
       selectItem("trajectory", existing.id);
       return;
     }
-    const start = Math.min(Math.round(currentTimeMs), state.timeRangeMs.end - 1_000);
-    const end = Math.min(state.timeRangeMs.end, Math.max(start + 1_000, start + 4_000));
-    const radians = (actor.pose.rotationDeg * Math.PI) / 180;
-    const dx = Math.sin(radians) * 12;
-    const dy = -Math.cos(radians) * 12;
+    const { start, end } = initialTrajectoryTimes(currentTimeMs, state.timeRangeMs);
+    // Scene coordinates are normalized but render at 10 px per X unit and
+    // 7 px per Y unit. Build the preview vector in rendered space so a
+    // diagonal path leaves the vehicle nose at the selected compass heading.
+    const { x: dx, y: dy } = sceneDeltaForCompassHeading(actor.pose.rotationDeg, 96);
     const result = runCommand({
       type: "trajectory.set",
       actorId,
@@ -848,7 +879,7 @@ export function Workspace({
       type: "timeline.upsert",
       ...(existing ? { eventId: existing.id } : {}),
       branchId: state.activeBranchId,
-      timeMs: Math.round(currentTimeMs),
+      timeMs: clampTimeToRange(currentTimeMs, state.timeRangeMs),
       eventType: "impact",
       title: existing?.title ?? "Approximate contact",
       certainty: existing?.certainty ?? "uncertain",
@@ -870,7 +901,7 @@ export function Workspace({
     runCommand({
       type: "timeline.upsert",
       branchId: replayCaseRef.current.activeBranchId,
-      timeMs: Math.round(currentTimeMs),
+      timeMs: clampTimeToRange(currentTimeMs, replayCaseRef.current.timeRangeMs),
       ...input,
       linkedClaimIds: [],
       linkedEvidenceIds: [],
@@ -885,10 +916,8 @@ export function Workspace({
     if (index < 0) return;
     const previous = trajectory.keyframes[index - 1];
     const next = trajectory.keyframes[index + 1];
-    const safeTime = Math.max(
-      previous ? previous.timeMs + 1 : state.timeRangeMs.start,
-      Math.min(next ? next.timeMs - 1 : state.timeRangeMs.end, timeMs),
-    );
+    const bounds = editableKeyframeTimeBounds(previous?.timeMs, next?.timeMs, state.timeRangeMs);
+    const safeTime = Math.max(bounds.min, Math.min(bounds.max, Math.round(timeMs)));
     runCommand(
       {
         type: "trajectory.set",
@@ -917,10 +946,12 @@ export function Workspace({
     if (index < 0) return;
     const previous = trajectory.keyframes[index - 1];
     const next = trajectory.keyframes[index + 1];
-    const safeTime = Math.max(
-      previous ? previous.timeMs + 1 : state.timeRangeMs.start,
-      Math.min(next ? next.timeMs - 1 : state.timeRangeMs.end, update.timeMs),
-    );
+    const bounds = editableKeyframeTimeBounds(previous?.timeMs, next?.timeMs, state.timeRangeMs);
+    const currentFrame = trajectory.keyframes[index];
+    const safeTime =
+      currentFrame && Math.abs(update.timeMs - currentFrame.timeMs) < TIME_EQUALITY_EPSILON_MS
+        ? currentFrame.timeMs
+        : quantizeEditableTimeMs(update.timeMs, bounds, state.timeRangeMs);
     runCommand({
       type: "trajectory.set",
       trajectoryId,
@@ -942,6 +973,59 @@ export function Workspace({
     });
   }
 
+  function addTrajectoryKeyframeAtPlayhead(trajectoryId: string): void {
+    setIsPlaying(false);
+    const state = engine.getState();
+    const trajectory = state.trajectories.find((item) => item.id === trajectoryId);
+    if (!trajectory) return;
+    const targetTime = clampTimeToRange(currentTimeMs, state.timeRangeMs);
+    const existing = trajectory.keyframes.find((frame) => frame.timeMs === targetTime);
+    if (existing) {
+      setSelectedKeyframeId(existing.id);
+      setToast({
+        kind: "info",
+        message: `Point already exists at ${formatWorkspaceSeconds(targetTime)}s.`,
+        detail: "Move the timeline playhead to another time before adding a point.",
+      });
+      return;
+    }
+    const pose = interpolateTrajectory(trajectory, targetTime);
+    const keyframeId = `keyframe-${crypto.randomUUID()}`;
+    const result = runCommand({
+      type: "trajectory.set",
+      trajectoryId,
+      actorId: trajectory.actorId,
+      branchId: trajectory.branchId,
+      keyframes: [
+        ...trajectory.keyframes.map(toTrajectoryKeyframeInput),
+        { id: keyframeId, timeMs: targetTime, ...pose },
+      ].sort((left, right) => left.timeMs - right.timeMs),
+      visible: trajectory.visible,
+    });
+    if (result.ok) setSelectedKeyframeId(keyframeId);
+  }
+
+  function removeTrajectoryKeyframe(trajectoryId: string, keyframeId: string): void {
+    setIsPlaying(false);
+    const trajectory = engine.getState().trajectories.find((item) => item.id === trajectoryId);
+    if (!trajectory) return;
+    if (trajectory.keyframes.length <= 2) {
+      setToast({ kind: "info", message: "A path needs at least two points." });
+      return;
+    }
+    const result = runCommand({
+      type: "trajectory.set",
+      trajectoryId,
+      actorId: trajectory.actorId,
+      branchId: trajectory.branchId,
+      keyframes: trajectory.keyframes
+        .filter((frame) => frame.id !== keyframeId)
+        .map(toTrajectoryKeyframeInput),
+      visible: trajectory.visible,
+    });
+    if (result.ok) setSelectedKeyframeId(undefined);
+  }
+
   function setTrajectoryVisible(trajectoryId: string, visible: boolean): void {
     const trajectory = engine.getState().trajectories.find((item) => item.id === trajectoryId);
     if (!trajectory) return;
@@ -956,14 +1040,15 @@ export function Workspace({
   }
 
   function moveTimelineEvent(eventId: string, timeMs: number): void {
-    const timelineEvent = engine.getState().timelineEvents.find((item) => item.id === eventId);
+    const state = engine.getState();
+    const timelineEvent = state.timelineEvents.find((item) => item.id === eventId);
     if (!timelineEvent) return;
     runCommand(
       {
         type: "timeline.upsert",
         eventId,
         branchId: timelineEvent.branchId,
-        timeMs,
+        timeMs: clampTimeToRange(timeMs, state.timeRangeMs),
         eventType: timelineEvent.type,
         title: timelineEvent.title,
         certainty: timelineEvent.certainty,
@@ -997,7 +1082,10 @@ export function Workspace({
       type: "timeline.upsert",
       eventId,
       branchId: timelineEvent.branchId,
-      timeMs: Math.max(state.timeRangeMs.start, Math.min(state.timeRangeMs.end, update.timeMs)),
+      timeMs:
+        Math.abs(update.timeMs - timelineEvent.timeMs) < TIME_EQUALITY_EPSILON_MS
+          ? timelineEvent.timeMs
+          : quantizeTimeInRange(update.timeMs, state.timeRangeMs),
       eventType: timelineEvent.type,
       title: timelineEvent.title,
       certainty: update.certainty,
@@ -1314,6 +1402,8 @@ export function Workspace({
           else importInputRef.current?.click();
         }}
         onExport={() => exportCaseJson(replayCaseRef.current)}
+        onGuide={() => setGuideSection("quick-start")}
+        onSiteToolsHelp={() => setGuideSection("site-tools")}
         onDebug={() => setShowDebug(true)}
       />
       {externalConflict && (
@@ -1383,9 +1473,12 @@ export function Workspace({
             replayCase={replayCase}
             currentTimeMs={currentTimeMs}
             {...(selectedId ? { selectedId } : {})}
+            {...(selectedKeyframeId ? { selectedKeyframeId } : {})}
             comparisonBranchIds={compareBranchIds}
             activeAgentIds={activeAgentIds}
             onSelect={(type, id) => selectItem(type, id)}
+            onSelectKeyframe={(_trajectoryId, keyframeId) => setSelectedKeyframeId(keyframeId)}
+            onEditStart={() => setIsPlaying(false)}
             onMoveActor={moveActorAtCurrentTime}
             onMoveKeyframe={moveKeyframePosition}
             onCreateTrajectory={createTrajectory}
@@ -1450,6 +1543,7 @@ export function Workspace({
           activeTab={activeTab}
           {...(focusedIssueId ? { focusedIssueId } : {})}
           {...(selectedId ? { selectedId } : {})}
+          {...(selectedKeyframeId ? { selectedKeyframeId } : {})}
           {...(reportPreview ? { reportPreview } : {})}
           evidenceUrls={evidenceUrls}
           compareBranchIds={compareBranchIds}
@@ -1483,6 +1577,11 @@ export function Workspace({
           }
           onUpdateActorPose={moveActorAtCurrentTime}
           onUpdateTrajectoryKeyframe={updateTrajectoryKeyframeExact}
+          onAddTrajectoryKeyframe={addTrajectoryKeyframeAtPlayhead}
+          onRemoveTrajectoryKeyframe={removeTrajectoryKeyframe}
+          onSelectTrajectoryKeyframe={(_trajectoryId, keyframeId) =>
+            setSelectedKeyframeId(keyframeId)
+          }
           onSetTrajectoryVisible={setTrajectoryVisible}
           onUpdateTimelineEvent={updateTimelineEventExact}
           onToggleSceneItemLock={toggleSceneItemLock}
@@ -1602,6 +1701,7 @@ export function Workspace({
           trajectories={replayCase.trajectories}
           events={replayCase.timelineEvents}
           {...(selectedId ? { selectedId } : {})}
+          {...(selectedKeyframeId ? { selectedKeyframeId } : {})}
           {...(compareBranchIds.length > 0
             ? {
                 comparison: {
@@ -1618,12 +1718,14 @@ export function Workspace({
           onPlayingChange={setIsPlaying}
           onPlaybackSpeedChange={setPlaybackSpeed}
           onSelectEvent={(eventId) => selectItem("timeline-event", eventId)}
-          onSelectKeyframe={(trajectoryId) => selectItem("trajectory", trajectoryId)}
+          onSelectKeyframe={(trajectoryId, keyframeId) =>
+            selectItem("trajectory", trajectoryId, keyframeId)
+          }
           onMoveEvent={moveTimelineEvent}
           onMoveKeyframe={moveKeyframeTime}
           onAddEvent={addTimelineEvent}
         />
-        <div className="workspace-activity">
+        <div className="workspace-activity" data-onboarding-id="case-activity">
           <ActivityPanel
             activities={[...replayCase.activity, ...toolInvocationActivity]}
             {...(agentAction ? { activeAgentAction: agentAction } : {})}
@@ -1662,6 +1764,36 @@ export function Workspace({
               message: "The WebMCP registry is restarting.",
             })
           }
+        />
+      )}
+      {guideSection && (
+        <ReplayGuide
+          key={guideSection}
+          context="workspace"
+          webMcpSupported={debugState.supported}
+          registeredTools={debugState.registeredToolNames.length}
+          toolRegistrationStatus={
+            debugState.tools.some((tool) => tool.registrationState === "error")
+              ? "error"
+              : debugState.registeredToolNames.length > 0
+                ? "ready"
+                : "registering"
+          }
+          initialSection={guideSection}
+          onClose={() => setGuideSection(undefined)}
+          onStartWorkspaceTour={() => setTourStep(0)}
+          onOpenTechnicalInspector={() => {
+            setGuideSection(undefined);
+            setShowDebug(true);
+          }}
+        />
+      )}
+      {tourStep !== null && (
+        <WorkspaceTour
+          step={tourStep}
+          onStepChange={setTourStep}
+          onExit={() => setTourStep(null)}
+          onFinish={() => setTourStep(null)}
         />
       )}
       {confirmingDemoReset && (
@@ -1775,10 +1907,19 @@ interface WorkspaceHeaderProps {
   onResetDemo: () => void;
   onImport: () => void;
   onExport: () => void;
+  onGuide: () => void;
+  onSiteToolsHelp: () => void;
   onDebug: () => void;
 }
 
 function WorkspaceHeader(props: WorkspaceHeaderProps) {
+  function runMenuAction(event: MouseEvent<HTMLButtonElement>, action: () => void): void {
+    const menu = event.currentTarget.closest("details");
+    menu?.removeAttribute("open");
+    menu?.querySelector<HTMLElement>("summary")?.focus();
+    action();
+  }
+
   return (
     <header className="workspace-header">
       <button
@@ -1820,9 +1961,13 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
           <span>Redo</span>
         </button>
       </div>
+      <button className="workspace-help" onClick={props.onGuide} aria-label="Open REPLAY guide">
+        <CircleHelp size={15} aria-hidden="true" /> <span>Guide</span>
+      </button>
       <button
         className={`webmcp-status${props.webMcpSupported ? " is-supported" : ""}${props.agentWorking ? " is-working" : ""}`}
-        onClick={props.onDebug}
+        onClick={props.onSiteToolsHelp}
+        data-onboarding-id="site-tools-status"
       >
         <span className="webmcp-status__dot" />
         {props.webMcpSupported ? (
@@ -1837,27 +1982,27 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
           </small>
         </span>
       </button>
-      <details className="workspace-menu">
+      <details className="workspace-menu" data-onboarding-id="case-options">
         <summary aria-label="Case options">
           <Settings2 size={16} />
           <ChevronDown size={12} />
         </summary>
         <div>
-          <button onClick={props.onExport}>
+          <button onClick={(event) => runMenuAction(event, props.onExport)}>
             <Download size={14} /> Export structured case JSON
           </button>
-          <button onClick={props.onImport}>
+          <button onClick={(event) => runMenuAction(event, props.onImport)}>
             <FileUp size={14} /> Import structured case JSON
           </button>
           {props.isDemo && (
-            <button onClick={props.onResetDemo}>
+            <button onClick={(event) => runMenuAction(event, props.onResetDemo)}>
               <RotateCcw size={14} /> Reset deterministic demo
             </button>
           )}
-          <button onClick={props.onDebug}>
+          <button onClick={(event) => runMenuAction(event, props.onDebug)}>
             <ShieldCheck size={14} /> WebMCP inspector
           </button>
-          <button onClick={props.onHome}>
+          <button onClick={(event) => runMenuAction(event, props.onHome)}>
             <Home size={14} /> Close workspace
           </button>
         </div>

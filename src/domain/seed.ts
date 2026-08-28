@@ -239,18 +239,18 @@ function buildDemoCase(): ReplayCase {
 
   const trajectories: Trajectory[] = [
     trajectory("trajectory-a-baseline", "actor-vehicle-a", [
-      [0, 28, 50, 0],
-      [6_000, 35, 65, 38],
-      [8_000, 50, 72, 82],
-      [10_000, 62, 57, 15],
-      [16_000, 74, 54, 5],
+      [0, 28, 50, 146],
+      [6_000, 35, 65, 125],
+      [8_000, 50, 72, 78],
+      [10_000, 62, 57, 62],
+      [16_000, 74, 54, 80],
     ]),
     trajectory("trajectory-b-baseline", "actor-vehicle-b", [
-      [0, 52, 20, 90],
-      [6_000, 65, 31, 125],
-      [8_000, 69, 43, 110],
-      [10_000, 66, 57, 90],
-      [16_000, 60, 70, 155],
+      [0, 34, 61, 133],
+      [6_000, 43, 73, 109],
+      [8_000, 56, 72, 59],
+      [10_000, 65, 54, 60],
+      [16_000, 80, 52, 85],
     ]),
   ];
 
@@ -275,7 +275,7 @@ function buildDemoCase(): ReplayCase {
       "event-maneuver",
       7_000,
       "maneuver",
-      "Lane positions become uncertain",
+      "Exact lane positions are not established from this point",
       ["actor-vehicle-a", "actor-vehicle-b"],
       {
         certainty: "unknown",
@@ -393,7 +393,7 @@ function buildDemoCase(): ReplayCase {
         kind: "vehicle",
         dimensions: { width: 1.82, length: 4.31 },
         colorToken: "vehicle-muted-blue",
-        pose: { x: 74, y: 54, rotationDeg: 5 },
+        pose: { x: 74, y: 54, rotationDeg: 80 },
         locked: false,
         damageMarkers: [
           {
@@ -414,7 +414,7 @@ function buildDemoCase(): ReplayCase {
         kind: "vehicle",
         dimensions: { width: 1.79, length: 4.22 },
         colorToken: "vehicle-silver",
-        pose: { x: 60, y: 70, rotationDeg: 155 },
+        pose: { x: 80, y: 52, rotationDeg: 85 },
         locked: false,
         damageMarkers: [
           {

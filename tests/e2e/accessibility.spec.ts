@@ -1,7 +1,13 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { inspectorTab, installModelContextPolyfill, openDemo, openLanding } from "./helpers";
+import {
+  inspectorTab,
+  installModelContextPolyfill,
+  openDemo,
+  openLanding,
+  openWebMCPInspector,
+} from "./helpers";
 
 async function expectNoHighImpactViolations(page: Page, state: string): Promise<void> {
   const results = await new AxeBuilder({ page })
@@ -122,9 +128,16 @@ test.describe("accessibility guardrails", () => {
     await expectNoHighImpactViolations(page, "agent proposal workspace");
 
     await page.locator("button.webmcp-status").click();
-    await expect(page.getByRole("dialog", { name: "WebMCP Site Tools" })).toBeVisible();
+    const guide = page.getByRole("dialog", { name: "Learn REPLAY" });
+    await expect(
+      guide.getByRole("heading", { name: "Work manually or invite an agent into the same case" }),
+    ).toBeVisible();
+    await expectNoHighImpactViolations(page, "Site Tools guide");
+    await guide.getByRole("button", { name: "Close REPLAY guide" }).click();
+
+    const { dialog } = await openWebMCPInspector(page);
     await expectNoHighImpactViolations(page, "WebMCP debug inspector");
-    await page.getByRole("button", { name: "Close WebMCP inspector" }).click();
+    await dialog.getByRole("button", { name: "Close WebMCP inspector" }).click();
 
     await page.getByRole("button", { name: "Reject" }).click();
     await page

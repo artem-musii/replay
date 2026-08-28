@@ -98,7 +98,7 @@ Pointer drag/rotation, full local user-evidence upload/delete/reload, raw-recove
 
 ## Deterministic demo fixture
 
-Use `case-demo-roundabout` from `src/domain/seed.ts` for automated and manual journeys. The current fixture has `seedVersion = 2`; schema v2 deliberately accepts saved positive seed versions through 2 for resume compatibility.
+Use `case-demo-roundabout` from `src/domain/seed.ts` for automated and manual journeys. The current fixture has `seedVersion = 3`; schema v2 deliberately accepts saved positive seed versions through 3 for resume compatibility.
 
 Reset methods:
 
@@ -106,7 +106,7 @@ Reset methods:
 - use **Case options → Reset deterministic demo**; or
 - call `createDemoCase()` in an isolated deterministic test.
 
-Opening `/#demo` resumes a valid saved seed-v1 or seed-v2 demo case when present; navigation alone is not a reset. An explicit reset replaces it with seed v2.
+Opening `/#demo` resumes a valid saved seed-v1, seed-v2, or seed-v3 demo case when present; navigation alone is not a reset. An explicit reset replaces it with seed v3.
 
 Before every run, capture:
 

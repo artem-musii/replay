@@ -1,5 +1,5 @@
 export const REPLAY_SCHEMA_VERSION = 2 as const;
-export const REPLAY_SEED_VERSION = 2 as const;
+export const REPLAY_SEED_VERSION = 3 as const;
 
 export type ActorKind = "vehicle";
 

@@ -23,7 +23,15 @@ _Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The 
 
 To start without WebMCP, run the app locally and choose **Try the demo case**. Every core workspace feature remains available in an ordinary browser.
 
-The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. Opening `/#demo` resumes a valid saved seed-v1 or seed-v2 demo; use **Case options → Reset deterministic demo** to replace it with the current seed-v2 fixture.
+The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. Opening `/#demo` resumes a valid saved seed-v1, seed-v2, or seed-v3 demo; use **Case options → Reset deterministic demo** to replace it with the current seed-v3 fixture.
+
+## Learn REPLAY in the product
+
+The onboarding is optional and replayable. Open **How to use REPLAY** from the landing page for the complete topic guide, choose **Guided demo · about 4 minutes** for a six-step workspace tour, or use **Guide** in the workspace at any time. The guide covers scene editing, timed path points, the straight-line interpolation model, lane snap, the timeline, provenance, evidence, hypotheses, files, reports, and human-only review boundaries.
+
+For Site Tools/WebMCP, select the **Site Tools** status in the workspace. WebMCP is the browser bridge, not an embedded chat box: keep REPLAY open in a compatible ChatGPT, Codex, or other client, then ask in that client’s conversation. A registered-tool count means the connection is ready; **Manual mode** means the full visible workflow remains available without an agent. The guide includes four copyable, narrow prompts and a link to the technical registration inspector.
+
+Paths are timed poses rather than simulated driving physics. Set the playhead, select a vehicle or path, and add a point at that time. REPLAY moves in straight segments between points and interpolates heading through the shortest angle; add intermediate points to describe a curve. Lane snap affects nearby pointer drags only, while keyboard nudges and exact numeric fields remain precise. Select a vehicle to use its visible rotation handle, ±15° controls, or exact compass heading.
 
 ## The problem
 
@@ -117,7 +125,7 @@ Primary external references: the [WebMCP Draft Community Group Report](https://w
 REPLAY is a static React 19 + strict TypeScript application built with Vite. The core workflow needs no server, account, analytics, location access, or runtime model API.
 
 - `src/domain/`: schema-v2 model, Zod schemas, command engine, locks, optimistic versioning, idempotency, proposals, undo/redo, consistency, hypotheses, import/export, and report projections.
-- `src/components/`: landing page, blank-case wizard, SVG scene, timeline, inspector, activity, report review, and WebMCP inspector.
+- `src/components/`: landing page, optional guide and workspace tour, blank-case wizard, SVG scene, timeline, inspector, activity, report review, and WebMCP inspector.
 - `src/webmcp/`: schemas, tool definitions, annotations, instrumentation, registration lifecycle, feature detection, and debug state.
 - `src/integration/`: adapter from WebMCP operations to canonical domain queries and commands.
 - `src/persistence/`: IndexedDB case and evidence-blob storage through Dexie.

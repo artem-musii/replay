@@ -188,7 +188,7 @@ describe("ReplayEngine command guarantees", () => {
     });
     expect(engine.state.caseVersion).toBe(2);
     expect(engine.state.actors.find((actor) => actor.id === "actor-vehicle-b")?.pose).toMatchObject(
-      { x: 60, y: 70 },
+      { x: 80, y: 52 },
     );
   });
 

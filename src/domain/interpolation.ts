@@ -1,7 +1,92 @@
 import type { ActorPose, Point, ReplayCase, Trajectory } from "./models";
 
+export const REPLAY_TIME_STEP_MS = 100;
+export const REPLAY_SCENE_X_SCALE = 10;
+export const REPLAY_SCENE_Y_SCALE = 7;
+
+export function sceneDeltaForCompassHeading(rotationDeg: number, distancePx: number): Point {
+  const radians = (rotationDeg * Math.PI) / 180;
+  return {
+    x: (Math.sin(radians) * distancePx) / REPLAY_SCENE_X_SCALE,
+    y: (-Math.cos(radians) * distancePx) / REPLAY_SCENE_Y_SCALE,
+  };
+}
+
+export function quantizeTimeMs(timeMs: number, originMs = 0): number {
+  return originMs + Math.round((timeMs - originMs) / REPLAY_TIME_STEP_MS) * REPLAY_TIME_STEP_MS;
+}
+
+export function clampTimeToRange(timeMs: number, range: ReplayCase["timeRangeMs"]): number {
+  return clamp(Math.round(timeMs), range.start, range.end);
+}
+
+/**
+ * Snaps ordinary timeline editing to tenths of a second relative to the case
+ * start. Very short imported ranges retain millisecond precision instead of
+ * being collapsed onto a grid point outside their range.
+ */
+export function quantizeTimeInRange(timeMs: number, range: ReplayCase["timeRangeMs"]): number {
+  const bounded = clampTimeToRange(timeMs, range);
+  if (range.end - range.start < REPLAY_TIME_STEP_MS) return bounded;
+  return clamp(quantizeTimeMs(bounded, range.start), range.start, range.end);
+}
+
+/**
+ * Applies the timeline grid only when the editable gap can contain it. This
+ * preserves valid imported keyframes that are less than 100 ms apart.
+ */
+export function quantizeEditableTimeMs(
+  timeMs: number,
+  bounds: { min: number; max: number },
+  range: ReplayCase["timeRangeMs"],
+): number {
+  const bounded = clamp(Math.round(timeMs), bounds.min, bounds.max);
+  if (bounds.max - bounds.min < REPLAY_TIME_STEP_MS) return bounded;
+  return clamp(quantizeTimeMs(bounded, range.start), bounds.min, bounds.max);
+}
+
+export function editableKeyframeTimeBounds(
+  previousTimeMs: number | undefined,
+  nextTimeMs: number | undefined,
+  range: ReplayCase["timeRangeMs"],
+): { min: number; max: number } {
+  const preferred = {
+    min: previousTimeMs === undefined ? range.start : previousTimeMs + REPLAY_TIME_STEP_MS,
+    max: nextTimeMs === undefined ? range.end : nextTimeMs - REPLAY_TIME_STEP_MS,
+  };
+  if (preferred.min <= preferred.max) return preferred;
+  return {
+    min: previousTimeMs === undefined ? range.start : previousTimeMs + 1,
+    max: nextTimeMs === undefined ? range.end : nextTimeMs - 1,
+  };
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Chooses two valid times for a newly-created trajectory. Short cases use the
+ * entire available range; longer cases keep at least one second between the
+ * points and prefer a four-second preview from the current playhead.
+ */
+export function initialTrajectoryTimes(
+  currentTimeMs: number,
+  range: ReplayCase["timeRangeMs"],
+): { start: number; end: number } {
+  const availableDuration = range.end - range.start;
+  if (availableDuration <= 0) {
+    throw new RangeError("A trajectory requires a case time range with positive duration");
+  }
+
+  const minimumDuration = Math.min(1_000, availableDuration);
+  const start = clamp(
+    quantizeTimeInRange(currentTimeMs, range),
+    range.start,
+    range.end - minimumDuration,
+  );
+  const end = Math.min(range.end, start + 4_000);
+  return { start, end };
 }
 
 export function normalizeDegrees(degrees: number): number {

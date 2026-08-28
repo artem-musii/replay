@@ -125,7 +125,7 @@ describe("agent proposal command workflow", () => {
       ],
     });
     expect(createResult.ok).toBe(true);
-    expect(actorPose(engine, "actor-vehicle-a")).toEqual({ x: 74, y: 54, rotationDeg: 5 });
+    expect(actorPose(engine, "actor-vehicle-a")).toEqual({ x: 74, y: 54, rotationDeg: 80 });
 
     const acceptResult = engine.execute({
       type: "proposal.accept",
@@ -251,7 +251,7 @@ describe("agent proposal command workflow", () => {
       ],
     });
     expect(adjusted.ok).toBe(true);
-    expect(actorPose(engine, "actor-vehicle-a")).toEqual({ x: 74, y: 54, rotationDeg: 5 });
+    expect(actorPose(engine, "actor-vehicle-a")).toEqual({ x: 74, y: 54, rotationDeg: 80 });
     expect(engine.state.proposals[0]?.revisions).toMatchObject([
       { revisionNumber: 1, createdBy: "agent", origin: "webmcp" },
       { revisionNumber: 2, createdBy: "human", origin: "ui", authorshipTrusted: true },

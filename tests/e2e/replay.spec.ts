@@ -5,6 +5,7 @@ import {
   installModelContextPolyfill,
   openDemo,
   openLanding,
+  openWebMCPInspector,
   waitForLocalSave,
 } from "./helpers";
 
@@ -107,8 +108,7 @@ test.describe("REPLAY primary journey", () => {
 
     const siteToolsButton = page.locator("button.webmcp-status");
     await expect(siteToolsButton).toContainText(/\d+ registered/, { timeout: 10_000 });
-    await siteToolsButton.click();
-    const dialog = page.getByRole("dialog", { name: "WebMCP Site Tools" });
+    const { dialog } = await openWebMCPInspector(page);
     await expect(dialog.getByText("Browser Site Tools available")).toBeVisible();
     await dialog.locator(".debug-tool-list button").filter({ hasText: "add_observation" }).click();
     await dialog.getByLabel("Simulation input").fill(
@@ -467,12 +467,10 @@ test.describe("REPLAY primary journey", () => {
     await expect(siteToolsButton).toContainText("Manual mode");
     await expect(siteToolsButton).toHaveAccessibleName("Site Tools Manual mode");
     await siteToolsButton.click();
-    const dialog = page.getByRole("dialog", { name: "WebMCP Site Tools" });
-    await expect(dialog.getByText("Manual browser mode")).toBeVisible();
-    await expect(
-      dialog.getByText(/Every manual workspace feature remains available/),
-    ).toBeVisible();
-    await dialog.getByRole("button", { name: "Close WebMCP inspector" }).click();
+    const dialog = page.getByRole("dialog", { name: "Learn REPLAY" });
+    await expect(dialog.getByText("Manual mode is active")).toBeVisible();
+    await expect(dialog.getByText(/Every visible case workflow remains available/)).toBeVisible();
+    await dialog.getByRole("button", { name: "Close REPLAY guide" }).click();
 
     await inspectorTab(page, "Evidence").click();
     await expect(page.getByRole("list", { name: "Evidence images" })).toBeVisible();

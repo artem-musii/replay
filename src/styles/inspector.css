@@ -2,7 +2,7 @@
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(96px, 6rem) minmax(0, 1fr);
+  grid-template-columns: clamp(96px, 6rem, 112px) minmax(0, 1fr);
   background: var(--paper-raised);
   border-left: 1px solid var(--rule);
 }
@@ -34,7 +34,7 @@
 }
 .inspector-tab span {
   max-width: 100%;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-size: 0.75rem;
   font-weight: 690;
   line-height: 1.15;
@@ -69,6 +69,7 @@
   min-height: 0;
   padding: 18px;
   scrollbar-width: thin;
+  container: inspector-content / inline-size;
 }
 
 .proposal-review {
@@ -311,7 +312,7 @@
   gap: 6px;
 }
 .scene-numeric-form__grid--four {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .scene-numeric-form label,
 .scene-certainty-field {
@@ -329,7 +330,7 @@
 .scene-certainty-field select {
   width: 100%;
   min-width: 0;
-  min-height: 34px;
+  min-height: 40px;
   padding: 6px;
   border: 1px solid var(--rule-strong);
   border-radius: 6px;
@@ -341,6 +342,58 @@
 .scene-numeric-form > .button {
   justify-self: stretch;
   min-height: 34px;
+  font-size: 0.75rem;
+}
+.rotation-controls {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+.rotation-controls > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+.rotation-controls > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.rotation-controls .button {
+  min-height: 38px;
+  padding-inline: 8px;
+  font-size: 0.75rem;
+}
+.rotation-controls > small,
+.trajectory-model-note > small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+.trajectory-model-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.trajectory-model-note > strong {
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+.trajectory-model-note > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.trajectory-model-note .button {
+  min-height: 38px;
+  padding-inline: 9px;
   font-size: 0.75rem;
 }
 .scene-selection-facts {
@@ -366,16 +419,20 @@
   display: grid;
   gap: 7px;
   margin-top: 9px;
-  max-height: 280px;
-  overflow: auto;
 }
 .keyframe-editor {
+  min-width: 0;
   display: grid;
   gap: 6px;
+  margin-top: 0;
   padding: 8px;
   border: 1px solid var(--rule);
   border-radius: 8px;
   background: var(--paper-raised);
+}
+.keyframe-editor.is-active {
+  border-color: var(--selection);
+  box-shadow: 0 0 0 2px oklch(0.58 0.13 240 / 0.1);
 }
 .keyframe-editor > header {
   display: flex;
@@ -386,15 +443,53 @@
 .keyframe-editor > header strong {
   font-size: 0.7rem;
 }
+.keyframe-editor > header strong small {
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 580;
+}
+.keyframe-editor > header > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .keyframe-editor > header .text-button {
   min-height: 30px;
   font-weight: 720;
 }
+.keyframe-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+@container inspector-content (min-width: 34rem) {
+  .scene-numeric-form__grid--four {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container inspector-content (max-width: 16rem) {
+  .scene-numeric-form__grid,
+  .scene-numeric-form__grid--four {
+    grid-template-columns: 1fr;
+  }
+  .scene-selection-editor__meta,
+  .keyframe-editor > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .keyframe-editor > header > div {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-content: space-between;
+  }
+}
 
 @media (max-width: 520px) {
-  .scene-numeric-form__grid--four {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .proposal-card > footer {
     grid-template-columns: 1fr;
   }
@@ -1821,8 +1916,24 @@
   .inspector-content {
     padding: 12px;
   }
-  .scene-numeric-form__grid--four {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (pointer: coarse) {
+  .icon-button,
+  .icon-button--small {
+    width: 44px;
+    height: 44px;
+  }
+  .scene-selection-editor__meta > label {
+    min-height: 44px;
+  }
+  .scene-numeric-form input,
+  .scene-certainty-field select,
+  .scene-numeric-form > .button,
+  .rotation-controls .button,
+  .trajectory-model-note .button,
+  .keyframe-editor > header .text-button {
+    min-height: 44px;
   }
 }
 

@@ -7,7 +7,7 @@ The public GitHub Pages link serves the current schema-v2/proposal application f
 ## Open a clean fixture
 
 1. Open the [public deterministic demo](https://artem-musii.github.io/replay-sol/#demo), or locally run `npm run build && npm run preview` and open `http://127.0.0.1:4173/#demo` in the built-in browser. The public site shares the `artem-musii.github.io` storage origin, so use only synthetic/non-sensitive data.
-2. Reset the demo before each run. A valid saved seed-v1 or seed-v2 case otherwise resumes; reset replaces it with the current seed-v2 fixture.
+2. Reset the demo before each run. A valid saved seed-v1, seed-v2, or seed-v3 case otherwise resumes; reset replaces it with the current seed-v3 fixture.
 3. Open **Case options → WebMCP inspector** and record the browser/client version, page URL, case version, and registered tools.
 4. Expect 18 imperative tools before a report preview and 19 after `build_report_preview` makes `add_report_note` available. The added scene tool is `propose_scene_changes`.
 

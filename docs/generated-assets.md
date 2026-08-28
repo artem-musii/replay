@@ -2,7 +2,7 @@
 
 Last inspected locally and on the deployed application: **2026-08-28**.
 
-The current seed-v2 experience uses five original bitmap assets created during development with the Codex built-in image-generation mode. The built-in mode selected the available image model; it did not expose a model identifier in the returned artifact, so this repository does not claim a specific model snapshot. Three earlier evidence assets remain packaged so a saved seed-v1 demo can still resume until the person explicitly resets it. No API key is bundled, and the running application performs no image generation or external evidence upload.
+The current seed-v3 experience uses five original bitmap assets created during development with the Codex built-in image-generation mode. The built-in mode selected the available image model; it did not expose a model identifier in the returned artifact, so this repository does not claim a specific model snapshot. Three earlier evidence assets remain packaged so a saved seed-v1 demo can still resume until the person explicitly resets it. No API key is bundled, and the running application performs no image generation or external evidence upload.
 
 The hero supports product communication. The other four images are fictional, synthetic demo evidence and are visibly badged **Synthetic demo** in the evidence inspector. They do not depict a real incident. The functional road, vehicles, paths, impact marker, damage markers, and branch overlays are authored as semantic SVG rather than generated pixels.
 
@@ -18,11 +18,11 @@ The application/seed reference this set. All active files are public in Pages de
 | [`demo-vehicle-b-damage-v2.webp`](../public/assets/generated/demo-vehicle-b-damage-v2.webp) | Vehicle B rear-right damage detail    | 1448 × 1086 | 211,696 bytes | `382f6f38420934d265529ef1b3588dc852580274cc07b7d4c514d056ad6c8326` |
 | [`demo-road-condition.webp`](../public/assets/generated/demo-road-condition.webp)           | Wet road-surface and marking detail   | 1448 × 1086 | 389,932 bytes | `e2179643bfd0bc5ebb74247abb839b8d3bb1a635ad8620846fd525c7ea3c8cc5` |
 
-The active optimized WebP set is approximately 1.5 MB. High-quality PNG generation outputs remain in the development host’s Codex generated-image artifact store, outside this repository, for reproducible re-encoding and close review. They are not copied into `public/` or `dist/`. Earlier evidence iterations remain in the repository for auditability and seed-v1 resume compatibility; they are not referenced by the current seed-v2 reset.
+The active optimized WebP set is approximately 1.5 MB. High-quality PNG generation outputs remain in the development host’s Codex generated-image artifact store, outside this repository, for reproducible re-encoding and close review. They are not copied into `public/` or `dist/`. Earlier evidence iterations remain in the repository for auditability and seed-v1 resume compatibility; they are not referenced by the current seed-v3 reset.
 
 ## Legacy seed-v1 compatibility files
 
-These superseded generation iterations are still distributed because valid saved seed-v1 demo cases may reference their paths. They are not used by a fresh seed-v2 reset and must not be mistaken for additional incident evidence.
+These superseded generation iterations are still distributed because valid saved seed-v1 demo cases may reference their paths. They are not used by a fresh seed-v3 reset and must not be mistaken for additional incident evidence.
 
 | File                                                                                  | Compatibility status         |  Dimensions |     WebP size | SHA-256                                                            |
 | ------------------------------------------------------------------------------------- | ---------------------------- | ----------: | ------------: | ------------------------------------------------------------------ |

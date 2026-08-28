@@ -159,6 +159,24 @@
   background: var(--paper-deep);
   color: var(--ink);
 }
+.workspace-help {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 680;
+}
+.workspace-help:hover {
+  border-color: var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+}
 .webmcp-status {
   display: flex;
   align-items: center;
@@ -229,6 +247,20 @@
 .workspace-menu summary:hover {
   background: var(--paper-deep);
   color: var(--ink);
+}
+
+@media (pointer: coarse) {
+  .workspace-header__brand,
+  .history-controls button,
+  .workspace-help,
+  .webmcp-status,
+  .workspace-menu summary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .workspace-menu > div button {
+    min-height: 44px;
+  }
 }
 .workspace-menu > div {
   position: absolute;
@@ -425,6 +457,18 @@
   .history-controls span {
     display: none;
   }
+  .workspace-help span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
   .webmcp-status__text {
     position: absolute;
     width: 1px;
@@ -526,5 +570,11 @@
   }
   .comparison-banner {
     top: 45px;
+  }
+}
+
+@media (max-width: 400px) {
+  .workspace-case-title {
+    display: none;
   }
 }

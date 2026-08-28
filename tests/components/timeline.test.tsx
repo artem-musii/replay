@@ -131,8 +131,8 @@ describe("Timeline", () => {
     fireEvent.pointerMove(track, { pointerId: 11, clientX: 912, buttons: 1 });
 
     expect(onMoveKeyframe).not.toHaveBeenCalled();
-    expect(onTimeChange.mock.calls).toEqual([[2_000], [18_000]]);
-    expect(keyframe.style.left).toBe("90%");
+    expect(onTimeChange.mock.calls).toEqual([[6_100], [9_900]]);
+    expect(keyframe.style.left).toBe("49.5%");
 
     fireEvent.pointerUp(track, { pointerId: 11, clientX: 912, buttons: 0 });
 
@@ -140,7 +140,7 @@ describe("Timeline", () => {
     expect(onMoveKeyframe).toHaveBeenCalledWith(
       "trajectory-a-baseline",
       "trajectory-a-baseline-keyframe-3",
-      18_000,
+      9_900,
     );
   });
 
@@ -158,13 +158,57 @@ describe("Timeline", () => {
     fireEvent.pointerDown(keyframe, { pointerId: 13, clientX: 412, buttons: 1 });
     fireEvent.pointerMove(track, { pointerId: 13, clientX: 612, buttons: 1 });
 
-    expect(onTimeChange).toHaveBeenCalledWith(12_000);
-    expect(keyframe.style.left).toBe("60%");
+    expect(onTimeChange).toHaveBeenCalledWith(9_900);
+    expect(keyframe.style.left).toBe("49.5%");
 
     fireEvent.pointerCancel(track, { pointerId: 13 });
 
     expect(onMoveKeyframe).not.toHaveBeenCalled();
+    expect(onTimeChange).toHaveBeenLastCalledWith(10_000);
     expect(keyframe.style.left).toBe("40%");
+  });
+
+  it("preserves millisecond timing for close imported keyframes", () => {
+    const replayCase = createDemoCase();
+    const source = replayCase.trajectories[0];
+    if (!source) throw new Error("Demo trajectory is unavailable.");
+    const closeTrajectory = {
+      ...source,
+      keyframes: source.keyframes.slice(0, 3).map((frame, index) => ({
+        ...frame,
+        timeMs: [0, 25, 50][index] ?? frame.timeMs,
+      })),
+    };
+    const onTimeChange = vi.fn();
+    const onMoveKeyframe = vi.fn();
+    const { container } = renderTimeline({
+      timeRangeMs: { start: 0, end: 50 },
+      currentTimeMs: 25,
+      trajectories: [closeTrajectory],
+      events: [],
+      onTimeChange,
+      onMoveKeyframe,
+    });
+    const track = getTimelineTrack(container);
+    const keyframe = container.querySelectorAll<HTMLButtonElement>(".timeline-keyframe")[1];
+    const middleFrame = closeTrajectory.keyframes[1];
+    if (!keyframe || !middleFrame) throw new Error("Close imported keyframe was not rendered.");
+    preparePointerDrag(keyframe);
+
+    expect(keyframe.style.left).toBe("50%");
+    expect(keyframe).toHaveAccessibleName(/0:00\.025/);
+    expect(screen.getByLabelText("Current timeline position")).toHaveTextContent(
+      "0:00.025/ 0:00.050",
+    );
+    expect(
+      [...container.querySelectorAll(".timeline__tick")].map((tick) => tick.textContent),
+    ).toEqual(["0:00.0", "0:00.010", "0:00.020", "0:00.030", "0:00.040", "0:00.050"]);
+    fireEvent.pointerDown(keyframe, { pointerId: 19, clientX: 512, buttons: 1 });
+    fireEvent.pointerMove(track, { pointerId: 19, clientX: 512, buttons: 1 });
+    fireEvent.pointerUp(track, { pointerId: 19, clientX: 512, buttons: 0 });
+
+    expect(onTimeChange).toHaveBeenLastCalledWith(25);
+    expect(onMoveKeyframe).toHaveBeenCalledWith(closeTrajectory.id, middleFrame.id, 25);
   });
 
   it("shows and exits comparison mode", () => {

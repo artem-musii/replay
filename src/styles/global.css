@@ -26,6 +26,7 @@
   --conflict: oklch(0.47 0.14 30);
   --agent: oklch(0.57 0.105 275);
   --selection: oklch(0.58 0.13 240);
+  --selection-text: oklch(0.48 0.13 240);
   --focus: oklch(0.53 0.17 245);
   --shadow-soft: 0 18px 50px oklch(0.24 0.02 200 / 0.12);
   --ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);

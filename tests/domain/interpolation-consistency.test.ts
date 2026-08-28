@@ -3,8 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDemoCase,
+  editableKeyframeTimeBounds,
   getActorPoseAtTime,
+  initialTrajectoryTimes,
   interpolateTrajectory,
+  quantizeEditableTimeMs,
+  quantizeTimeMs,
+  quantizeTimeInRange,
+  sceneDeltaForCompassHeading,
   validateConsistency,
 } from "../../src/domain";
 import type { Trajectory } from "../../src/domain";
@@ -31,6 +37,39 @@ describe("trajectory interpolation", () => {
 
   it("interpolates position and takes the shortest rotation path", () => {
     expect(interpolateTrajectory(trajectory, 2_000)).toEqual({ x: 5, y: 10, rotationDeg: 0 });
+  });
+
+  it("uses tenths-of-a-second editing while preserving close imported keyframes", () => {
+    expect(quantizeTimeMs(8_337)).toBe(8_300);
+    expect(quantizeTimeMs(8_337, 50)).toBe(8_350);
+    expect(quantizeTimeInRange(89, { start: 50, end: 90 })).toBe(89);
+    expect(editableKeyframeTimeBounds(6_000, 10_000, { start: 0, end: 20_000 })).toEqual({
+      min: 6_100,
+      max: 9_900,
+    });
+    expect(editableKeyframeTimeBounds(0, 100, { start: 0, end: 20_000 })).toEqual({
+      min: 1,
+      max: 99,
+    });
+    expect(quantizeEditableTimeMs(25, { min: 1, max: 49 }, { start: 0, end: 20_000 })).toBe(25);
+  });
+
+  it("converts compass headings through the scene's non-square coordinate scale", () => {
+    const delta = sceneDeltaForCompassHeading(45, 96);
+    const renderedHeading = ((Math.atan2(delta.x * 10, -delta.y * 7) * 180) / Math.PI + 360) % 360;
+    expect(renderedHeading).toBeCloseTo(45, 8);
+    expect(Math.hypot(delta.x * 10, delta.y * 7)).toBeCloseTo(96, 8);
+  });
+
+  it("keeps newly-created two-point spans inside short and offset case ranges", () => {
+    expect(initialTrajectoryTimes(10_300, { start: 10_000, end: 10_500 })).toEqual({
+      start: 10_000,
+      end: 10_500,
+    });
+    expect(initialTrajectoryTimes(0, { start: 0, end: 500 })).toEqual({
+      start: 0,
+      end: 500,
+    });
   });
 
   it("reads the active branch pose at an incident-relative time", () => {

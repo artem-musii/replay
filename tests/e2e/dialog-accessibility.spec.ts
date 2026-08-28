@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { inspectorTab, openDemo } from "./helpers";
+import { inspectorTab, openDemo, openWebMCPInspector } from "./helpers";
 
 test.describe("Dialog keyboard accessibility", () => {
-  test("timeline and WebMCP dialogs trap focus and restore their invokers", async ({ page }) => {
+  test("timeline, guide, and WebMCP dialogs trap focus and restore their invokers", async ({
+    page,
+  }) => {
     await openDemo(page);
 
     const addEvent = page.getByRole("button", { name: "Add timeline event" });
@@ -27,20 +29,29 @@ test.describe("Dialog keyboard accessibility", () => {
     const siteTools = page.locator("button.webmcp-status");
     await siteTools.focus();
     await page.keyboard.press("Enter");
-    const webMcpDialog = page.getByRole("dialog", { name: "WebMCP Site Tools" });
-    const closeWebMcp = webMcpDialog.getByRole("button", {
-      name: "Close WebMCP inspector",
-    });
+    const guideDialog = page.getByRole("dialog", { name: "Learn REPLAY" });
+    const closeGuide = guideDialog.getByRole("button", { name: "Close REPLAY guide" });
+    const lastGuideButton = guideDialog.getByRole("button").last();
+    await expect(closeGuide).toBeFocused();
+    await closeGuide.press("Shift+Tab");
+    await expect(lastGuideButton).toBeFocused();
+    await lastGuideButton.press("Tab");
+    await expect(closeGuide).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(guideDialog).toHaveCount(0);
+    await expect(siteTools).toBeFocused();
+
+    const { dialog: webMcpDialog, invoker } = await openWebMCPInspector(page);
+    const closeWebMcp = webMcpDialog.getByRole("button", { name: "Close WebMCP inspector" });
     const copyInput = webMcpDialog.getByRole("button", { name: "Copy input" });
     await expect(closeWebMcp).toBeFocused();
-
     await closeWebMcp.press("Shift+Tab");
     await expect(copyInput).toBeFocused();
     await copyInput.press("Tab");
     await expect(closeWebMcp).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(webMcpDialog).toHaveCount(0);
-    await expect(siteTools).toBeFocused();
+    await expect(invoker).toBeFocused();
   });
 
   test("evidence deletion defaults to cancel and Escape returns to the delete control", async ({
