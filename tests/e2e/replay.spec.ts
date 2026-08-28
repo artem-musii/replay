@@ -74,8 +74,8 @@ test.describe("REPLAY primary journey", () => {
     await expect
       .poll(async () => vehicleA.getAttribute("transform"), { timeout: 4_000 })
       .not.toBe(initialTransform);
+    await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(0);
     await timeline.getByRole("button", { name: "Pause reconstruction", exact: true }).click();
-    await expect(output).not.toContainText("0:00.0");
     await expect(vehicleA).not.toHaveAttribute("transform", impactTransform ?? "");
   });
 

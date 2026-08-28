@@ -802,6 +802,9 @@
   .landing-hero {
     padding: 56px 20px 68px;
   }
+  .landing-hero .eyebrow {
+    letter-spacing: 0.1em;
+  }
   .guided-demo-link {
     width: 100%;
     box-sizing: border-box;
