@@ -43,7 +43,7 @@ export class LocalVaultConflictError extends Error {
 
   constructor(persistedCaseVersion: number) {
     super(
-      `Another tab saved case version ${persistedCaseVersion}. Reload the latest local case before editing.`,
+      `Another REPLAY page saved case version ${persistedCaseVersion}. Reload the latest local case before editing.`,
     );
     this.name = "LocalVaultConflictError";
     this.persistedCaseVersion = persistedCaseVersion;

@@ -73,8 +73,20 @@ function domainItemType(itemType: WorkspaceItemType): DomainWorkspaceItemType {
 }
 
 function scopeForWebMCP(scope: string): ConsistencyValidationScope {
-  if (scope === "scene") return "scene";
-  if (scope === "timeline" || scope === "provenance" || scope === "report") return scope;
+  if (
+    scope === "all" ||
+    scope === "scene" ||
+    scope === "timeline" ||
+    scope === "geometry" ||
+    scope === "motion" ||
+    scope === "damage" ||
+    scope === "integrity" ||
+    scope === "provenance" ||
+    scope === "completeness" ||
+    scope === "report"
+  ) {
+    return scope;
+  }
   return "all";
 }
 
@@ -221,6 +233,11 @@ export function createReplayWebMCPAdapter(
         const existing = replayCase.actors.find((actor) => actor.id === actorId);
         const position = payload.position as { x: number; y: number };
         const dimensions = payload.dimensions as { width: number; length: number };
+        const dimensionsChanged =
+          existing?.dimensions.width !== dimensions.width ||
+          existing.dimensions.length !== dimensions.length ||
+          (payload.wheelbaseMeters !== undefined &&
+            payload.wheelbaseMeters !== existing.wheelbaseMeters);
         domainCommand = {
           type: "actor.upsert",
           ...meta,
@@ -229,6 +246,15 @@ export function createReplayWebMCPAdapter(
             label: payload.label,
             kind: "vehicle",
             dimensions,
+            vehicleClass: payload.vehicleClass ?? existing?.vehicleClass ?? "unknown",
+            dimensionsSource:
+              payload.dimensionsSource ??
+              (dimensionsChanged ? "estimated" : existing.dimensionsSource),
+            ...(payload.wheelbaseMeters !== undefined
+              ? { wheelbaseMeters: payload.wheelbaseMeters }
+              : existing?.wheelbaseMeters !== undefined
+                ? { wheelbaseMeters: existing.wheelbaseMeters }
+                : {}),
             colorToken: payload.colorToken ?? existing?.colorToken ?? "vehicle-muted-blue",
             pose: { x: position.x * 100, y: position.y * 100, rotationDeg: payload.rotationDeg },
             locked: existing?.locked ?? false,

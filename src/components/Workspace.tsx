@@ -28,7 +28,7 @@ import {
   interpolateTrajectory,
   quantizeEditableTimeMs,
   quantizeTimeInRange,
-  sceneDeltaForCompassHeading,
+  sceneDeltaForMetricHeading,
   type ActivityEvent,
   type OpenQuestion,
   type ReplayCase,
@@ -79,6 +79,10 @@ interface WorkspaceProps {
 
 type SaveState = "saving" | "saved" | "error";
 type WriteAccess = "checking" | "writable" | "blocked";
+
+const CASE_WRITE_LEASE_CONFLICT_MESSAGE =
+  "Another page context still owns this case. It may be a hidden or recently closed tab. This copy is read-only. If no other copy is actively editing, take over and reload the latest saved case.";
+const LEASE_HANDOFF_RETRY_DELAYS_MS = [25, 75, 150, 300] as const;
 
 function getLockManager(): LockManager | undefined {
   const candidate: unknown = Reflect.get(navigator, "locks");
@@ -265,6 +269,7 @@ export function Workspace({
   const [guideSection, setGuideSection] = useState<GuideSectionId>();
   const [tourStep, setTourStep] = useState<number | null>(() => (startWithTour ? 0 : null));
   const [confirmingDemoReset, setConfirmingDemoReset] = useState(false);
+  const [confirmingLeaseTakeover, setConfirmingLeaseTakeover] = useState(false);
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const evidenceUrlsRef = useRef<Record<string, string>>({});
   const pendingEvidenceBlobDeletionsRef = useRef(
@@ -276,6 +281,7 @@ export function Workspace({
   const [writeAccess, setWriteAccess] = useState<WriteAccess>(() =>
     getLockManager() ? "checking" : "writable",
   );
+  const [leaseTakeoverPending, setLeaseTakeoverPending] = useState(false);
   const [externalConflict, setExternalConflict] = useState<string>();
   const saveFailureIsBlocking = Boolean(
     saveFailure && (recoveryBackupVersion ?? -1) < replayCase.caseVersion,
@@ -285,7 +291,7 @@ export function Workspace({
     (writeAccess === "checking"
       ? "REPLAY is acquiring the local editing lease. Try again in a moment."
       : writeAccess === "blocked"
-        ? "Another tab is editing this case. Reload after closing the other editor."
+        ? "Another page context owns this case. Reload after closing it, or use the visible takeover action if no other copy is actively editing."
         : saveFailureIsBlocking
           ? `Local saving failed at case version ${saveFailure?.caseVersion}. Editing and Site Tools are paused until you retry the save or download a recovery backup.`
           : undefined);
@@ -370,51 +376,87 @@ export function Workspace({
     if (!locks) return;
     let disposed = false;
     let releaseLease: (() => void) | undefined;
-    const acquisition = new AbortController();
-    const acquisitionTimeout = window.setTimeout(() => acquisition.abort(), 500);
-    void locks
-      .request(
-        `replay-case-writer:${initialCase.id}`,
-        { mode: "exclusive", signal: acquisition.signal },
-        async (lock) => {
-          window.clearTimeout(acquisitionTimeout);
+    let retryTimer: number | undefined;
+
+    const acquireLease = (attempt: number): void => {
+      void locks
+        .request(
+          `replay-case-writer:${initialCase.id}`,
+          { mode: "exclusive", ifAvailable: true },
+          async (lock) => {
+            if (disposed) return;
+            if (!lock) {
+              const retryDelay = LEASE_HANDOFF_RETRY_DELAYS_MS[attempt];
+              if (retryDelay !== undefined) {
+                retryTimer = window.setTimeout(() => acquireLease(attempt + 1), retryDelay);
+                return;
+              }
+              saveCoordinator.setConflictSource("lease");
+              setExternalConflict(CASE_WRITE_LEASE_CONFLICT_MESSAGE);
+              setWriteAccess("blocked");
+              return;
+            }
+            setWriteAccess("writable");
+            await new Promise<void>((resolve) => {
+              releaseLease = resolve;
+            });
+          },
+        )
+        .catch((error: unknown) => {
           if (disposed) return;
-          if (!lock) {
-            const message =
-              "Another tab is editing this case. This copy is read-only until you reload.";
+          if (error instanceof DOMException && error.name === "AbortError") {
             saveCoordinator.setConflictSource("lease");
-            setExternalConflict(message);
+            setExternalConflict(CASE_WRITE_LEASE_CONFLICT_MESSAGE);
             setWriteAccess("blocked");
             return;
           }
+          // A browser implementation failure must not make the complete manual
+          // workspace unusable; CAS persistence remains the fallback guard.
           setWriteAccess("writable");
+        });
+    };
+
+    acquireLease(0);
+    return () => {
+      disposed = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      releaseLease?.();
+    };
+  }, [initialCase.id, saveCoordinator]);
+
+  const takeOverWriteLease = useCallback(() => {
+    const locks = getLockManager();
+    if (!locks) {
+      window.location.reload();
+      return;
+    }
+    setLeaseTakeoverPending(true);
+    setWriteAccess("checking");
+    void locks
+      .request(
+        `replay-case-writer:${initialCase.id}`,
+        { mode: "exclusive", steal: true },
+        async () => {
+          // Reload only after the browser has transferred ownership. App
+          // hydration then reads the newest durable case, while IndexedDB CAS
+          // remains the backstop for a previous editor's in-flight save.
           await new Promise<void>((resolve) => {
-            releaseLease = resolve;
+            window.addEventListener("pagehide", () => resolve(), { once: true });
+            window.location.reload();
           });
         },
       )
       .catch((error: unknown) => {
-        window.clearTimeout(acquisitionTimeout);
-        if (disposed) return;
-        if (error instanceof DOMException && error.name === "AbortError") {
-          const message =
-            "Another tab is editing this case. This copy is read-only until you reload.";
-          saveCoordinator.setConflictSource("lease");
-          setExternalConflict(message);
-          setWriteAccess("blocked");
-          return;
-        }
-        // A browser implementation failure must not make the complete manual
-        // workspace unusable; CAS persistence remains the fallback guard.
-        setWriteAccess("writable");
+        setLeaseTakeoverPending(false);
+        setConfirmingLeaseTakeover(false);
+        setWriteAccess("blocked");
+        const detail =
+          error instanceof Error ? error.message : "The browser did not provide a reason.";
+        setExternalConflict(
+          `REPLAY could not take over the editing lease. ${detail} Close any other REPLAY window and try again.`,
+        );
       });
-    return () => {
-      disposed = true;
-      window.clearTimeout(acquisitionTimeout);
-      acquisition.abort();
-      releaseLease?.();
-    };
-  }, [initialCase.id, saveCoordinator]);
+  }, [initialCase.id]);
 
   useEffect(() => {
     if (writeAccess !== "writable") return;
@@ -453,7 +495,7 @@ export function Workspace({
           update.updatedAt === replayCaseRef.current.updatedAt)
       )
         return;
-      const message = `Another tab saved case version ${String(update.caseVersion)}. Reload before editing so no human or agent work is overwritten.`;
+      const message = `Another REPLAY page saved case version ${String(update.caseVersion)}. Reload before editing so no human or agent work is overwritten.`;
       saveCoordinator.setConflictSource("broadcast");
       setExternalConflict(message);
       setWriteAccess("blocked");
@@ -829,6 +871,26 @@ export function Workspace({
     );
   }
 
+  function updateActorSpecs(
+    actorId: string,
+    update: {
+      dimensions: { length: number; width: number };
+      vehicleClass: ReplayCase["actors"][number]["vehicleClass"];
+      dimensionsSource: ReplayCase["actors"][number]["dimensionsSource"];
+      wheelbaseMeters?: number;
+    },
+  ): void {
+    const actor = engine.getState().actors.find((item) => item.id === actorId);
+    if (!actor) return;
+    const sceneActor = structuredClone(actor);
+    sceneActor.dimensions = structuredClone(update.dimensions);
+    sceneActor.vehicleClass = update.vehicleClass;
+    sceneActor.dimensionsSource = update.dimensionsSource;
+    if (update.wheelbaseMeters === undefined) delete sceneActor.wheelbaseMeters;
+    else sceneActor.wheelbaseMeters = update.wheelbaseMeters;
+    runCommand({ type: "actor.upsert", sceneActor }, true);
+  }
+
   function createTrajectory(actorId: string): void {
     const state = engine.getState();
     const actor = state.actors.find((item) => item.id === actorId);
@@ -841,10 +903,13 @@ export function Workspace({
       return;
     }
     const { start, end } = initialTrajectoryTimes(currentTimeMs, state.timeRangeMs);
-    // Scene coordinates are normalized but render at 10 px per X unit and
-    // 7 px per Y unit. Build the preview vector in rendered space so a
-    // diagonal path leaves the vehicle nose at the selected compass heading.
-    const { x: dx, y: dy } = sceneDeltaForCompassHeading(actor.pose.rotationDeg, 96);
+    // Start with an eight-metre physical preview in the actor's heading. The
+    // calibrated scene converts that distance back to editable coordinates.
+    const { x: dx, y: dy } = sceneDeltaForMetricHeading(
+      actor.pose.rotationDeg,
+      8,
+      state.environment,
+    );
     const result = runCommand({
       type: "trajectory.set",
       actorId,
@@ -1036,6 +1101,13 @@ export function Workspace({
       branchId: trajectory.branchId,
       keyframes: trajectory.keyframes.map(toTrajectoryKeyframeInput),
       visible,
+    });
+  }
+
+  function updateEnvironment(environment: ReplayCase["environment"]): void {
+    runCommand({
+      type: "case.update",
+      environment,
     });
   }
 
@@ -1413,9 +1485,19 @@ export function Workspace({
             <strong>Editing paused to protect local work</strong>
             <span>{externalConflict}</span>
           </div>
-          <button className="button button--secondary" onClick={() => window.location.reload()}>
-            Reload latest
-          </button>
+          {saveCoordinator.getConflictSource() === "lease" ? (
+            <button
+              className="button button--secondary"
+              disabled={leaseTakeoverPending}
+              onClick={() => setConfirmingLeaseTakeover(true)}
+            >
+              Take over & reload
+            </button>
+          ) : (
+            <button className="button button--secondary" onClick={() => window.location.reload()}>
+              Reload latest
+            </button>
+          )}
         </div>
       )}
       {saveFailure && (
@@ -1494,6 +1576,7 @@ export function Workspace({
               })
             }
             onMarkImpact={markImpact}
+            onUpdateEnvironment={updateEnvironment}
             onToggleActorLock={(actorId) => {
               const actor = replayCaseRef.current.actors.find((item) => item.id === actorId);
               if (actor)
@@ -1576,6 +1659,7 @@ export function Workspace({
             })
           }
           onUpdateActorPose={moveActorAtCurrentTime}
+          onUpdateActorSpecs={updateActorSpecs}
           onUpdateTrajectoryKeyframe={updateTrajectoryKeyframeExact}
           onAddTrajectoryKeyframe={addTrajectoryKeyframeAtPlayhead}
           onRemoveTrajectoryKeyframe={removeTrajectoryKeyframe}
@@ -1815,7 +1899,75 @@ export function Workspace({
           }}
         />
       )}
+      {confirmingLeaseTakeover && (
+        <LeaseTakeoverDialog
+          pending={leaseTakeoverPending}
+          onCancel={() => setConfirmingLeaseTakeover(false)}
+          onConfirm={takeOverWriteLease}
+        />
+      )}
     </main>
+  );
+}
+
+function LeaseTakeoverDialog({
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>({
+    initialFocusRef: cancelButtonRef,
+    onEscape: () => {
+      if (!pending) onCancel();
+    },
+  });
+
+  return (
+    <div
+      className="dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (!pending && event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        ref={dialogRef}
+        className="dialog confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="take-over-lease-title"
+        aria-describedby="take-over-lease-description"
+        tabIndex={-1}
+      >
+        <div className="dialog-icon is-destructive">
+          <CircleAlert size={20} aria-hidden="true" />
+        </div>
+        <h2 id="take-over-lease-title">Take over editing?</h2>
+        <p id="take-over-lease-description">
+          This stops another REPLAY page context from editing and reloads the newest saved copy.
+          Work that the other page has not finished saving could be lost. Continue only if no other
+          copy is actively editing this case.
+        </p>
+        <footer>
+          <button
+            ref={cancelButtonRef}
+            className="button button--quiet"
+            disabled={pending}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button className="button button--danger" disabled={pending} onClick={onConfirm}>
+            {pending ? "Taking over…" : "Take over & reload"}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

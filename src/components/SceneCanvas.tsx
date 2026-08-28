@@ -8,16 +8,26 @@ import {
   Move,
   Plus,
   Route,
+  Ruler,
   Unlock,
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
-import { interpolateTrajectory } from "../domain/interpolation";
+import { interpolateTrajectory, sampleTrajectory } from "../domain/interpolation";
+import {
+  getRoadTemplate,
+  normalizedToView,
+  SCENE_VIEW_HEIGHT,
+  SCENE_VIEW_WIDTH,
+  snapPointToRoadLane,
+  viewToNormalized,
+} from "../domain/roadTemplates";
 import type {
   ActorPose,
   DamageRegion,
   DamageMarker,
   ReplayCase,
+  RoadSceneType,
   SceneActor,
   TimelineEvent,
   Trajectory,
@@ -41,6 +51,7 @@ interface SceneCanvasProps {
   onToggleActorLock: (actorId: string) => void;
   onToggleTrajectoryLock: (trajectoryId: string) => void;
   onToggleEventLock: (eventId: string) => void;
+  onUpdateEnvironment: (environment: ReplayCase["environment"]) => void;
 }
 
 interface DragState {
@@ -60,64 +71,20 @@ interface DragState {
   startPanY?: number;
 }
 
-const VIEW_WIDTH = 1000;
-const VIEW_HEIGHT = 700;
+const VIEW_WIDTH = SCENE_VIEW_WIDTH;
+const VIEW_HEIGHT = SCENE_VIEW_HEIGHT;
 
 function toView(x: number, y: number) {
-  return { x: x * 10, y: y * 7 };
+  return normalizedToView({ x, y });
 }
 
 function toNormalized(x: number, y: number) {
-  return { x: Math.max(0, Math.min(100, x / 10)), y: Math.max(0, Math.min(100, y / 7)) };
+  return viewToNormalized({ x, y });
 }
 
 function formatSceneSeconds(timeMs: number): string {
   const normalizedTimeMs = Math.round(timeMs);
   return (normalizedTimeMs / 1000).toFixed(normalizedTimeMs % 100 === 0 ? 1 : 3);
-}
-
-/** Projects onto the lane centers actually drawn by RoundaboutTemplate. */
-function snapToRoundaboutLane(x: number, y: number) {
-  const captureDistance = 28;
-  const point = toView(x, y);
-  const dx = point.x - VIEW_WIDTH / 2;
-  const dy = point.y - VIEW_HEIGHT / 2;
-  const distance = Math.hypot(dx, dy) || 1;
-  const circularCandidates: Array<{ x: number; y: number; distance: number }> = [];
-
-  if (Math.abs(dx) >= 180 && Math.abs(dy) <= 100) {
-    const approachCandidates = [-45, 45].map((laneOffset) => ({
-      x: point.x,
-      y: VIEW_HEIGHT / 2 + laneOffset,
-      distance: Math.abs(point.y - (VIEW_HEIGHT / 2 + laneOffset)),
-    }));
-    const closest = approachCandidates.sort((left, right) => left.distance - right.distance)[0];
-    if (closest && closest.distance <= captureDistance) return toNormalized(closest.x, closest.y);
-  }
-
-  if (Math.abs(dy) >= 130 && Math.abs(dx) <= 110) {
-    const approachCandidates = [-45, 45].map((laneOffset) => ({
-      x: VIEW_WIDTH / 2 + laneOffset,
-      y: point.y,
-      distance: Math.abs(point.x - (VIEW_WIDTH / 2 + laneOffset)),
-    }));
-    const closest = approachCandidates.sort((left, right) => left.distance - right.distance)[0];
-    if (closest && closest.distance <= captureDistance) return toNormalized(closest.x, closest.y);
-  }
-
-  for (const radius of [134, 180]) {
-    const offset = Math.abs(distance - radius);
-    if (offset <= captureDistance) {
-      circularCandidates.push({
-        x: VIEW_WIDTH / 2 + (dx / distance) * radius,
-        y: VIEW_HEIGHT / 2 + (dy / distance) * radius,
-        distance: offset,
-      });
-    }
-  }
-
-  const closest = circularCandidates.sort((left, right) => left.distance - right.distance)[0];
-  return closest ? toNormalized(closest.x, closest.y) : { x, y };
 }
 
 export function SceneCanvas({
@@ -138,6 +105,7 @@ export function SceneCanvas({
   onToggleActorLock,
   onToggleTrajectoryLock,
   onToggleEventLock,
+  onUpdateEnvironment,
 }: SceneCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<DragState>();
@@ -152,12 +120,49 @@ export function SceneCanvas({
   const [damageEditorOpen, setDamageEditorOpen] = useState(false);
   const [damageRegion, setDamageRegion] = useState<DamageRegion>("unknown");
   const [damageDescription, setDamageDescription] = useState("");
+  const roadTemplate = getRoadTemplate(replayCase.environment.sceneType);
+  const metresToPixels = Math.min(
+    VIEW_WIDTH / replayCase.environment.calibration.widthMeters,
+    VIEW_HEIGHT / replayCase.environment.calibration.heightMeters,
+  );
 
   const displayedBranchIds = comparisonBranchIds.length
     ? new Set([replayCase.activeBranchId, ...comparisonBranchIds])
     : new Set([replayCase.activeBranchId]);
   const displayedTrajectories = replayCase.trajectories.filter(
     (trajectory) => displayedBranchIds.has(trajectory.branchId) && trajectory.visible,
+  );
+  const acceptedProposalActorIds = new Set<string>();
+  const acceptedProposalTrajectoryIds = new Set<string>();
+  for (const proposal of replayCase.proposals) {
+    if (proposal.status !== "accepted" || !proposal.decision) continue;
+    const revision = proposal.revisions.find(
+      (candidate) => candidate.id === proposal.decision?.revisionId,
+    );
+    if (!revision) continue;
+    for (const change of revision.changes) {
+      const actor = replayCase.actors.find((candidate) => candidate.id === change.actorId);
+      if (actor?.lastEditedAt === proposal.decision.decidedAt) {
+        acceptedProposalActorIds.add(actor.id);
+      }
+      if (change.kind === "trajectory-set") {
+        const trajectory = replayCase.trajectories.find(
+          (candidate) => candidate.id === change.trajectoryId,
+        );
+        if (trajectory?.changeHistory.at(-1)?.createdAt === proposal.decision.decidedAt) {
+          acceptedProposalTrajectoryIds.add(trajectory.id);
+        }
+      }
+    }
+  }
+  const hasAgentAuthoredPath = displayedTrajectories.some(
+    (trajectory) =>
+      trajectory.createdBy === "agent" || trajectory.changeHistory.at(-1)?.author === "agent",
+  );
+  const hasAcceptedAgentGeometry =
+    acceptedProposalActorIds.size > 0 || acceptedProposalTrajectoryIds.size > 0;
+  const hasDirectAgentActorGeometry = replayCase.actors.some(
+    (actor) => actor.lastEditedBy === "agent",
   );
   const pendingProposalChanges = replayCase.proposals
     .filter((proposal) => proposal.status === "pending")
@@ -384,10 +389,9 @@ export function SceneCanvas({
       pointer.x - (activeDrag.offsetX ?? 0),
       pointer.y - (activeDrag.offsetY ?? 0),
     );
-    const position =
-      snapToLane && replayCase.environment.sceneType === "roundabout"
-        ? snapToRoundaboutLane(normalized.x, normalized.y)
-        : normalized;
+    const position = snapToLane
+      ? snapPointToRoadLane(replayCase.environment.sceneType, normalized)
+      : normalized;
     if (activeDrag.kind === "actor") {
       const actor = replayCase.actors.find((item) => item.id === activeDrag.id);
       if (!actor) return;
@@ -495,20 +499,11 @@ export function SceneCanvas({
             <Route size={15} /> <span>Paths</span>
           </button>
           <button
-            className={`tool-button ${snapToLane && replayCase.environment.sceneType === "roundabout" ? "is-active" : ""}`}
+            className={`tool-button ${snapToLane ? "is-active" : ""}`}
             onClick={() => setSnapToLane((value) => !value)}
-            disabled={replayCase.environment.sceneType !== "roundabout"}
-            aria-pressed={replayCase.environment.sceneType === "roundabout" ? snapToLane : false}
-            title={
-              replayCase.environment.sceneType === "roundabout"
-                ? "While dragging, snap nearby positions to the nearest drawn lane center. Heading is unchanged."
-                : "Lane snap is available for the roundabout template"
-            }
-            aria-label={
-              replayCase.environment.sceneType === "roundabout"
-                ? "Lane snap while dragging. Moves nearby positions to the nearest drawn lane center; it does not simulate steering."
-                : "Lane snap unavailable for this scene template"
-            }
+            aria-pressed={snapToLane}
+            title="While dragging, snap nearby positions to the nearest template lane centre. Heading is unchanged."
+            aria-label="Lane snap while dragging. Moves nearby positions to the nearest template lane centre; it does not simulate steering."
           >
             <Crosshair size={15} /> <span>Lane snap</span>
           </button>
@@ -529,15 +524,147 @@ export function SceneCanvas({
           >
             <Grid3X3 size={15} />
           </button>
+          <details className="scene-calibration-popover">
+            <summary className="tool-button" title="Review physical scene settings">
+              <Ruler size={15} /> <span>Physical model</span>
+            </summary>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const data = new FormData(event.currentTarget);
+                const widthMeters = Number(data.get("scene-width"));
+                const heightMeters = Number(data.get("scene-height"));
+                const uncertaintyMeters = Number(data.get("scene-uncertainty"));
+                const postedSpeedLimitKph = Number(data.get("speed-limit"));
+                if (
+                  ![widthMeters, heightMeters, uncertaintyMeters, postedSpeedLimitKph].every(
+                    Number.isFinite,
+                  )
+                ) {
+                  return;
+                }
+                onUpdateEnvironment({
+                  ...replayCase.environment,
+                  roadCondition: data.get(
+                    "road-condition",
+                  ) as ReplayCase["environment"]["roadCondition"],
+                  trafficSide: data.get("traffic-side") as ReplayCase["environment"]["trafficSide"],
+                  calibration: {
+                    widthMeters,
+                    heightMeters,
+                    uncertaintyMeters,
+                    source: data.get(
+                      "calibration-source",
+                    ) as ReplayCase["environment"]["calibration"]["source"],
+                  },
+                  postedSpeedLimitKph,
+                });
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              <header>
+                <strong>Physical scene settings</strong>
+                <small>Values and sources remain inspectable in the case.</small>
+              </header>
+              <div className="scene-calibration-popover__grid">
+                <label>
+                  <span>Width m</span>
+                  <input
+                    name="scene-width"
+                    type="number"
+                    min="10"
+                    max="5000"
+                    step="0.1"
+                    defaultValue={replayCase.environment.calibration.widthMeters}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Height m</span>
+                  <input
+                    name="scene-height"
+                    type="number"
+                    min="10"
+                    max="5000"
+                    step="0.1"
+                    defaultValue={replayCase.environment.calibration.heightMeters}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Uncertainty ±m</span>
+                  <input
+                    name="scene-uncertainty"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    defaultValue={replayCase.environment.calibration.uncertaintyMeters}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Speed limit km/h</span>
+                  <input
+                    name="speed-limit"
+                    type="number"
+                    min="1"
+                    max="300"
+                    step="1"
+                    defaultValue={
+                      replayCase.environment.postedSpeedLimitKph ??
+                      roadTemplate.defaultSpeedLimitKph
+                    }
+                    required
+                  />
+                </label>
+              </div>
+              <label>
+                <span>Calibration source</span>
+                <select
+                  name="calibration-source"
+                  defaultValue={replayCase.environment.calibration.source}
+                >
+                  <option value="measured">Measured scene</option>
+                  <option value="survey">Survey or measured plan</option>
+                  <option value="map">Scaled map or aerial image</option>
+                  <option value="template">Road template</option>
+                  <option value="estimated">Human estimate</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </label>
+              <div className="scene-calibration-popover__grid">
+                <label>
+                  <span>Road condition</span>
+                  <select name="road-condition" defaultValue={replayCase.environment.roadCondition}>
+                    <option value="dry">Dry</option>
+                    <option value="wet">Wet</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Traffic side</span>
+                  <select name="traffic-side" defaultValue={replayCase.environment.trafficSide}>
+                    <option value="right">Right</option>
+                    <option value="left">Left</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </label>
+              </div>
+              <p>
+                Motion and contact checks use these values. Template or estimated calibration is
+                never presented as survey-grade evidence.
+              </p>
+              <button className="button button--primary">Apply physical settings</button>
+            </form>
+          </details>
         </div>
         <div className="scene-toolbar__label">
-          <span>
-            {replayCase.environment.sceneType === "roundabout"
-              ? "European roundabout"
-              : "Four-way intersection"}
-          </span>
+          <span>{roadTemplate.label}</span>
           <small>
-            {replayCase.environment.roadCondition} surface · {formatSceneSeconds(currentTimeMs)}s
+            {replayCase.environment.calibration.widthMeters} ×{" "}
+            {replayCase.environment.calibration.heightMeters} m ·{" "}
+            {replayCase.environment.roadCondition} · {formatSceneSeconds(currentTimeMs)}s
           </small>
         </div>
         <div className="scene-toolbar__group">
@@ -652,11 +779,7 @@ export function SceneCanvas({
             height={VIEW_HEIGHT}
             rx="10"
           />
-          {replayCase.environment.sceneType === "roundabout" ? (
-            <RoundaboutTemplate />
-          ) : (
-            <IntersectionTemplate />
-          )}
+          <RoadTemplate sceneType={replayCase.environment.sceneType} />
           {replayCase.environment.roadCondition === "wet" && (
             <rect
               className="scene-pan-target"
@@ -679,6 +802,8 @@ export function SceneCanvas({
             const actor = replayCase.actors.find((candidate) => candidate.id === change.actorId);
             if (change.kind === "actor-pose") {
               const point = toView(change.proposedPose.x, change.proposedPose.y);
+              const bodyWidth = (actor?.dimensions.width ?? 1.8) * metresToPixels;
+              const bodyLength = (actor?.dimensions.length ?? 4.3) * metresToPixels;
               return (
                 <g
                   key={change.id}
@@ -686,13 +811,18 @@ export function SceneCanvas({
                   transform={`translate(${point.x} ${point.y}) rotate(${change.proposedPose.rotationDeg})`}
                   aria-hidden="true"
                 >
-                  <rect x="-23" y="-48" width="46" height="96" rx="16" />
-                  <path d="M-15-22Q0-33 15-22L14 14Q0 23-14 14Z" />
+                  <rect
+                    x={-bodyWidth / 2}
+                    y={-bodyLength / 2}
+                    width={bodyWidth}
+                    height={bodyLength}
+                    rx={Math.min(bodyWidth / 2, 8)}
+                  />
                   <text
                     x="0"
-                    y="66"
+                    y={bodyLength / 2 + 22}
                     textAnchor="middle"
-                    transform={`rotate(${-change.proposedPose.rotationDeg} 0 66)`}
+                    transform={`rotate(${-change.proposedPose.rotationDeg} 0 ${bodyLength / 2 + 22})`}
                   >
                     Proposed {actor?.label ?? "vehicle"}
                   </text>
@@ -738,7 +868,11 @@ export function SceneCanvas({
                     : frame.y,
                 ),
               );
-              const path = points
+              const sampledPoints =
+                drag?.kind === "keyframe" && drag.trajectoryId === trajectory.id
+                  ? points
+                  : sampleTrajectory(trajectory).map((pose) => toView(pose.x, pose.y));
+              const path = sampledPoints
                 .map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`)
                 .join(" ");
               const selected = selectedId === trajectory.id;
@@ -747,17 +881,21 @@ export function SceneCanvas({
                 (actor) => actor.id === trajectory.actorId,
               );
               const pathLocked = trajectory.locked || Boolean(owningActor?.locked);
+              const agentAuthored =
+                trajectory.createdBy === "agent" ||
+                trajectory.changeHistory.at(-1)?.author === "agent";
+              const acceptedAgentProposal = acceptedProposalTrajectoryIds.has(trajectory.id);
               return (
                 <g
                   key={trajectory.id}
-                  className={`trajectory trajectory--branch-${branchIndex % 3}${selected ? " is-selected" : ""}${active ? " is-active" : " is-overlay"}`}
+                  className={`trajectory trajectory--branch-${branchIndex % 3}${selected ? " is-selected" : ""}${active ? " is-active" : " is-overlay"}${agentAuthored ? " is-agent-authored" : ""}${acceptedAgentProposal ? " is-accepted-agent-proposal" : ""}`}
                 >
                   <path
                     className="trajectory__hit"
                     d={path}
                     tabIndex={placingImpact ? -1 : 0}
                     role="button"
-                    aria-label={`Select path for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"}`}
+                    aria-label={`Select ${agentAuthored ? "agent-authored " : acceptedAgentProposal ? "human-accepted agent proposal " : ""}path for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"}`}
                     aria-pressed={selected}
                     onClick={() => {
                       if (!placingImpact) onSelect("trajectory", trajectory.id);
@@ -875,10 +1013,30 @@ export function SceneCanvas({
                   actor={actor}
                   x={point.x}
                   y={point.y}
+                  worldX={
+                    ((pose.x - replayCase.environment.bounds.minX) /
+                      (replayCase.environment.bounds.maxX - replayCase.environment.bounds.minX)) *
+                    replayCase.environment.calibration.widthMeters
+                  }
+                  worldY={
+                    ((pose.y - replayCase.environment.bounds.minY) /
+                      (replayCase.environment.bounds.maxY - replayCase.environment.bounds.minY)) *
+                    replayCase.environment.calibration.heightMeters
+                  }
+                  metresToPixels={metresToPixels}
                   rotation={pose.rotationDeg}
                   selected={selectedId === actor.id}
                   editLocked={isActorEditLocked(actor)}
                   agentActive={activeAgentIds.includes(actor.id)}
+                  authorship={
+                    actor.lastEditedBy === "agent"
+                      ? "agent"
+                      : acceptedProposalActorIds.has(actor.id)
+                        ? "accepted-proposal"
+                        : actor.lastEditedBy === "human"
+                          ? "human"
+                          : "legacy"
+                  }
                   placementMode={placingImpact}
                   onPointerDown={startNearestSceneDrag}
                   onRotatePointerDown={(event) => {
@@ -903,6 +1061,21 @@ export function SceneCanvas({
           {pendingProposalChanges.length > 0 && (
             <span>
               <i className="legend-line legend-line--proposal" /> Agent proposal
+            </span>
+          )}
+          {hasAgentAuthoredPath && (
+            <span>
+              <i className="legend-line legend-line--agent" /> Agent-authored geometry
+            </span>
+          )}
+          {hasDirectAgentActorGeometry && (
+            <span>
+              <i className="legend-box legend-box--agent" /> Agent-authored vehicle geometry
+            </span>
+          )}
+          {hasAcceptedAgentGeometry && (
+            <span>
+              <i className="legend-line legend-line--accepted" /> Human-accepted agent proposal
             </span>
           )}
           <span>
@@ -1069,6 +1242,14 @@ export function SceneCanvas({
   );
 }
 
+function RoadTemplate({ sceneType }: { sceneType: RoadSceneType }) {
+  if (sceneType === "roundabout") return <RoundaboutTemplate />;
+  if (sceneType === "intersection") return <IntersectionTemplate />;
+  if (sceneType === "t-junction") return <TJunctionTemplate />;
+  if (sceneType === "straight-road") return <StraightRoadTemplate />;
+  return <ParkingAreaTemplate />;
+}
+
 function RoundaboutTemplate() {
   return (
     <g className="road-template" aria-hidden="true">
@@ -1131,14 +1312,76 @@ function IntersectionTemplate() {
   );
 }
 
+function TJunctionTemplate() {
+  return (
+    <g className="road-template" aria-hidden="true">
+      <rect x="0" y="182" width="1000" height="168" className="road-surface" />
+      <rect x="410" y="266" width="180" height="434" className="road-surface" />
+      <path className="lane-boundary" d="M0 266h410M590 266h410M500 350v350" />
+      <path className="stop-line" d="M410 382h180" />
+      <path
+        className="direction-arrow"
+        d="M180 240l28 26-28 26M820 292l-28-26 28-26M470 560l30-28 30 28"
+      />
+      {[0, 1, 2, 3, 4].map((index) => (
+        <rect
+          key={`junction-crosswalk-${String(index)}`}
+          x={415 + index * 36}
+          y="333"
+          width="20"
+          height="44"
+          className="crosswalk"
+        />
+      ))}
+    </g>
+  );
+}
+
+function StraightRoadTemplate() {
+  return (
+    <g className="road-template" aria-hidden="true">
+      <rect x="0" y="245" width="1000" height="210" className="road-surface" />
+      <path className="road-edge" d="M0 245h1000M0 455h1000" />
+      <path className="lane-boundary" d="M0 350h1000" />
+      <path className="direction-arrow" d="M180 315l30 35-30 35M820 385l-30-35 30-35" />
+      <path className="stop-line" d="M330 245v210M670 245v210" opacity="0.28" />
+    </g>
+  );
+}
+
+function ParkingAreaTemplate() {
+  const bayColumns = Array.from({ length: 10 }, (_, index) => 85 + index * 83);
+  return (
+    <g className="road-template parking-template" aria-hidden="true">
+      <rect x="60" y="56" width="880" height="588" rx="12" className="road-surface" />
+      <rect x="60" y="280" width="880" height="140" className="parking-aisle" />
+      <path className="lane-boundary" d="M60 350h880" />
+      {bayColumns.map((x) => (
+        <g key={`parking-bays-${String(x)}`}>
+          <path className="parking-bay" d={`M${String(x)} 76v170h62V76`} />
+          <path className="parking-bay" d={`M${String(x)} 624V454h62v170`} />
+        </g>
+      ))}
+      <path className="direction-arrow" d="M235 325l28 25-28 25M765 375l-28-25 28-25" />
+      <text x="82" y="342" className="parking-speed-label">
+        15
+      </text>
+    </g>
+  );
+}
+
 interface VehicleProps {
   actor: SceneActor;
   x: number;
   y: number;
+  worldX: number;
+  worldY: number;
+  metresToPixels: number;
   rotation: number;
   selected: boolean;
   editLocked: boolean;
   agentActive: boolean;
+  authorship: "human" | "agent" | "accepted-proposal" | "legacy";
   placementMode: boolean;
   onPointerDown: (event: React.PointerEvent<SVGGElement>) => void;
   onRotatePointerDown: (event: React.PointerEvent<SVGCircleElement>) => void;
@@ -1150,10 +1393,14 @@ function Vehicle({
   actor,
   x,
   y,
+  worldX,
+  worldY,
+  metresToPixels,
   rotation,
   selected,
   editLocked,
   agentActive,
+  authorship,
   placementMode,
   onPointerDown,
   onRotatePointerDown,
@@ -1162,13 +1409,22 @@ function Vehicle({
 }: VehicleProps) {
   const blue = actor.colorToken.includes("blue");
   const damage = actor.damageMarkers;
+  const bodyWidth = actor.dimensions.width * metresToPixels;
+  const bodyLength = actor.dimensions.length * metresToPixels;
+  const bodyScaleX = bodyWidth / 40;
+  const bodyScaleY = bodyLength / 86;
+  const hitWidth = Math.max(84, bodyWidth + 48);
+  const hitLength = Math.max(126, bodyLength + 48);
+  const labelY = bodyLength / 2 + 22;
+  const rotationLineY = -bodyLength / 2 - 5;
+  const rotationHandleY = -bodyLength / 2 - 38;
   return (
     <g
-      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}`}
+      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}${authorship === "agent" ? " is-agent-authored" : ""}${authorship === "accepted-proposal" ? " is-accepted-agent-proposal" : ""}`}
       transform={`translate(${x} ${y}) rotate(${rotation})`}
       tabIndex={0}
       role="button"
-      aria-label={`${actor.label}, position ${(x / 10).toFixed(1)}, ${(y / 7).toFixed(1)}, orientation ${Math.round(rotation)} degrees${editLocked ? ", locked. Unlock the vehicle and its path to edit" : ". Use arrow keys to move and bracket keys to rotate"}.`}
+      aria-label={`${actor.label}, position ${worldX.toFixed(1)} metres east and ${worldY.toFixed(1)} metres south of the calibrated scene origin, ${actor.dimensions.length.toFixed(2)} by ${actor.dimensions.width.toFixed(2)} metres, orientation ${Math.round(rotation)} degrees${editLocked ? ", locked. Unlock the vehicle and its path to edit" : ". Use arrow keys to move and bracket keys to rotate"}.`}
       aria-pressed={selected}
       onPointerDown={onPointerDown}
       onClick={(event) => {
@@ -1178,23 +1434,39 @@ function Vehicle({
       }}
       onKeyDown={onKeyDown}
     >
-      <rect className="vehicle-hit" x="-42" y="-58" width="84" height="126" rx="24" />
-      <rect className="vehicle-selection" x="-25" y="-50" width="50" height="100" rx="18" />
+      <rect
+        className="vehicle-hit"
+        x={-hitWidth / 2}
+        y={-hitLength / 2}
+        width={hitWidth}
+        height={hitLength}
+        rx="24"
+      />
+      <rect
+        className="vehicle-selection"
+        x={-bodyWidth / 2 - 5}
+        y={-bodyLength / 2 - 5}
+        width={bodyWidth + 10}
+        height={bodyLength + 10}
+        rx={Math.min(bodyWidth / 2 + 5, 14)}
+      />
       {selected && !editLocked && (
         <g className="vehicle-rotation-control" aria-hidden="true">
-          <line x1="0" y1="-49" x2="0" y2="-76" />
+          <line x1="0" y1={rotationLineY} x2="0" y2={rotationHandleY + 6} />
           <circle
             className="vehicle-rotation-control__hit"
             cx="0"
-            cy="-82"
+            cy={rotationHandleY}
             r="34"
             onPointerDown={onRotatePointerDown}
           />
-          <circle className="vehicle-rotation-control__knob" cx="0" cy="-82" r="10" />
-          <path d="M-4-83a5 5 0 0 1 8 0M4-83l-1-5 5 2" />
+          <circle className="vehicle-rotation-control__knob" cx="0" cy={rotationHandleY} r="10" />
+          <path
+            d={`M-4 ${String(rotationHandleY - 1)}a5 5 0 0 1 8 0M4 ${String(rotationHandleY - 1)}l-1-5 5 2`}
+          />
         </g>
       )}
-      <g filter="url(#vehicle-shadow)">
+      <g filter="url(#vehicle-shadow)" transform={`scale(${bodyScaleX} ${bodyScaleY})`}>
         <rect
           className={blue ? "vehicle-body vehicle-body--blue" : "vehicle-body vehicle-body--silver"}
           x="-20"
@@ -1214,30 +1486,56 @@ function Vehicle({
       <text
         className="vehicle-label"
         x="0"
-        y="66"
+        y={labelY}
         textAnchor="middle"
-        transform={`rotate(${-rotation} 0 66)`}
+        transform={`rotate(${-rotation} 0 ${labelY})`}
       >
         {actor.label}
       </text>
+      {(authorship === "agent" || authorship === "accepted-proposal") && (
+        <text
+          className="vehicle-authorship-badge"
+          x="0"
+          y={-bodyLength / 2 - 11}
+          textAnchor="middle"
+          transform={`rotate(${-rotation} 0 ${-bodyLength / 2 - 11})`}
+        >
+          {authorship === "agent" ? "AGENT" : "HUMAN ACCEPTED"}
+        </text>
+      )}
       {damage.map((marker) => (
-        <DamageGlyph key={marker.id} marker={marker} />
+        <DamageGlyph
+          key={marker.id}
+          marker={marker}
+          bodyWidth={bodyWidth}
+          bodyLength={bodyLength}
+        />
       ))}
-      {editLocked && <LockGlyph x={23} y={-49} />}
+      {editLocked && <LockGlyph x={bodyWidth / 2 + 5} y={-bodyLength / 2 - 6} />}
     </g>
   );
 }
 
-function DamageGlyph({ marker }: { marker: DamageMarker }) {
+function DamageGlyph({
+  marker,
+  bodyWidth,
+  bodyLength,
+}: {
+  marker: DamageMarker;
+  bodyWidth: number;
+  bodyLength: number;
+}) {
+  const halfWidth = bodyWidth / 2;
+  const halfLength = bodyLength / 2;
   const positionByRegion: Record<DamageMarker["region"], [number, number]> = {
-    front: [0, -43],
-    "front-left": [-18, -36],
-    "front-right": [18, -36],
-    "left-side": [-21, 0],
-    "right-side": [21, 0],
-    "rear-left": [-18, 36],
-    "rear-right": [18, 36],
-    rear: [0, 43],
+    front: [0, -halfLength],
+    "front-left": [-halfWidth, -halfLength * 0.82],
+    "front-right": [halfWidth, -halfLength * 0.82],
+    "left-side": [-halfWidth, 0],
+    "right-side": [halfWidth, 0],
+    "rear-left": [-halfWidth, halfLength * 0.82],
+    "rear-right": [halfWidth, halfLength * 0.82],
+    rear: [0, halfLength],
     unknown: [0, 0],
   };
   const [x, y] = positionByRegion[marker.region];

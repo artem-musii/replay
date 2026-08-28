@@ -1,148 +1,159 @@
-# REPLAY demo script
+# REPLAY under-three-minute demo script
 
-Target runtime: **2:36**. Hard ceiling: **2:50**. The Devpost video must remain under three minutes after the final render and upload.
+Target edited runtime: **2:52**. Hard ceiling: **2:55**. The uploaded public YouTube video must remain below three minutes and include clear audio. [Official video requirements](https://webmcp.devpost.com/rules)
 
-This script uses the deterministic `#demo` route, the live REPLAY workspace, and a Site Tools-capable agent. It avoids terminal footage, hidden state changes, fault conclusions, and claims that the generated evidence is real.
+This is a recording runbook, not evidence that a video or final deployment exists. Record only after the release gates in [hackathon-readiness.md](hackathon-readiness.md) pass.
 
-## Recording setup
+## Preflight — not part of the video
 
-1. Build and deploy the exact commit to be submitted over HTTPS.
-2. Open [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) in the ChatGPT/Codex built-in browser. For a strict WebMCP-enabled Chrome test, use a header-capable deployment or the local production preview because GitHub Pages does not emit the repository’s origin-isolation and permissions response headers.
-3. Confirm the header reports Site Tools available. Open **Case options → WebMCP inspector** only during preflight and confirm the expected tools are registered; close it before recording.
-4. Reset from **Case options → Reset deterministic demo**, then refresh once. Confirm the title is **Roundabout incident — 17:42**, the case version is stable, and the deliberate geometry inconsistency is present.
-5. Use a 1440 × 900 or larger capture, 100% page zoom, a large readable cursor, and a layout where the agent conversation and workspace remain legible.
-6. Disable notifications, unrelated extensions, password-manager overlays, and copyrighted music. Use clear narration and the generated/original repository assets only.
-7. Rehearse the exact prompts once against the deployed commit. Start the recorded run from a fresh reset.
+1. Use the exact final HTTPS URL and commit named in the Devpost submission. Start from the landing page in a clean browser profile with only synthetic demo data.
+2. Use the latest ChatGPT/Codex desktop app with **GPT-5.6 Sol or GPT-5.6 Terra**. OpenAI currently says Luna has WebMCP disabled; Site Tools availability remains rollout- and workspace-dependent. [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)
+3. Confirm the page reports Site Tools available. In preflight only, inspect the registered tools and verify that native `get_workspace_state` and `validate_case_consistency` calls succeed. Close the technical inspector before recording.
+4. From the scenario lab, open **Roundabout reconstruction**. If a saved demo exists, use **Case options → Reset deterministic demo**. Confirm the fixture is synthetic, the scene is calibrated, and no personal data is present.
+5. Rehearse the prompts below against a disposable reset. The final take must begin from another clean reset because WebMCP mutations change case version and activity.
+6. Keep the agent conversation, Site Tools call activity, and REPLAY workspace legible at 1080p or better. Disable notifications, unrelated extensions, credentials, copyrighted music, and unrelated third-party branding.
+7. You may edit out model latency, but preserve truthful call order and one coherent case version. Never splice a result from a different build, scenario state, or model into the sequence.
 
-## Timed narration and actions
+## Timed script
 
-### 0:00–0:14 — The problem and product
+### 0:00–0:12 — Real problem, real product
 
-**Picture:** Begin directly in the demo workspace. Pan across the roundabout scene, evidence-aware inspector, timeline, and activity rail. Do not begin on the landing page.
-
-**Narration:**
-
-> After a minor road incident, memory, photographs, timing, damage, and assumptions become mixed together. REPLAY gives a person and an AI agent one shared visual case model.
-
-**Cursor:** Briefly point to the two vehicles, the timeline, and the certainty labels. Keep moving; do not click yet.
-
-### 0:14–0:35 — Inspect live state
-
-**Agent prompt, verbatim:**
-
-> Inspect this case and separate what is confirmed, reported, unknown, and inconsistent.
-
-**Expected Site Tools:** `get_case_summary`, a narrow `get_workspace_state`, `validate_case_consistency`, then `focus_workspace_item` for the geometry issue. Tool choice may vary, but the call sequence must remain read-first and non-destructive.
-
-**Picture:** Keep both the Site Tools activity and workspace visible. Let the inconsistency focus or highlight on the same page.
+**Picture:** Start on the landing scenario lab. Show the four cards, then click **Open case** on **Roundabout reconstruction**.
 
 **Narration:**
 
-> The agent reads the structured case, not pixels. It can distinguish a human-confirmed observation from a report, an unknown, or a deterministic inconsistency.
+> Minor road incidents leave fragments: memory, damage, photos, timing, and disagreement. REPLAY gives a person and an agent one inspectable case instead of flattening everything into chat.
 
-**Pass cue:** No case version, canonical mutation activity, or factual content changes during inspection. Completed calls may appear in session-only invocation audit.
+### 0:12–0:30 — Calibrated physical model
 
-### 0:35–0:55 — Propose and review a reconstruction
-
-**Agent prompt, verbatim:**
-
-> Propose coordinated paths for both vehicles from the current information, but do not apply them or decide fault.
-
-**Expected Site Tools:** a targeted state read if needed, then one `propose_scene_changes` call containing both vehicle paths. It must not call the direct trajectory tools for this coordinated change.
-
-**Picture:** Show the pending proposal and base-versus-proposed paths while current geometry remains unchanged. Click **Accept and apply**, then confirm the visible dialog yourself; show both paths update together and the proposal plus human-decision activity entries.
+**Picture:** In the roundabout workspace, open **Physical model**. Show scene width/height, uncertainty, calibration source, road condition, and speed limit. Close it, select Vehicle A, open **Vehicle size and measurement**, then select its path to show distance, peak speed, turn radius, and advisory count.
 
 **Narration:**
 
-> For a coordinated change, the agent creates a reversible preview instead of moving the scene behind my back. Only I can adjust, accept, or reject it, and acceptance applies the reviewed revision together.
+> Road scale, uncertainty, vehicle footprints, wheelbase, and measurement source stay visible. Timed poses produce transparent motion and contact advisories—not a claim of perfect physics or fault.
 
-**Pass cue:** No scene geometry changes before the human click. After acceptance, both paths, proposal status, durable activity, and persistence agree.
+**Pass cue:** The displayed values and source labels match the final fixture. No value is presented as measured when its source is template or estimated.
 
-### 0:55–1:15 — Human override
+### 0:30–0:56 — Actual WebMCP read and validation
 
-**Cursor:** Click the impact event on the timeline so the scene is near contact time. Select Vehicle B, drag it into the inner lane, then press `Shift` + `[` or `Shift` + `]` once to rotate it. Pause long enough for the human-authored activity entry to be readable.
+**Agent prompt — use verbatim:**
 
-**Narration:**
+> Use this page's Site Tools to read the scene, claims, and timeline. Run the full consistency check. Summarize the calibration, vehicle dimension sources, confirmed versus reported information, and the top review advisory. Do not change the case or infer fault.
 
-> The agent is not the owner of the scene. I can correct it directly, rotate it precisely, or lock a detail. That newer human action becomes part of the shared history.
+**Expected native calls:** `get_workspace_state`, then `validate_case_consistency` with `scope: "all"`; `focus_workspace_item` is optional if the agent identifies one issue.
 
-**Pass cue:** Vehicle B remains at the corrected branch trajectory position; the activity feed labels the change as human/UI.
-
-### 1:15–1:45 — Preserve two possibilities
-
-**Agent prompt, verbatim:**
-
-> Revalidate after my correction. Preserve the damage observations and create two hypotheses for who may have crossed the lane.
-
-**Expected Site Tools:** `get_recent_activity`, `validate_case_consistency`, `fork_hypothesis` as needed, trajectory or assumption updates scoped to the branches, and `compare_hypotheses`.
-
-**Picture:** Show the agent respecting the corrected Vehicle B position. Open the hypothesis comparison overlay with two distinct paths. Keep the front-left and rear-right damage markers visible.
+**Picture:** Keep Site Tools activity and the workspace visible. Briefly reveal the returned tool names and let the selected issue appear in REPLAY.
 
 **Narration:**
 
-> REPLAY keeps unresolved explanations as branches. Damage and other shared facts stay shared; only the assumptions and paths diverge. Neither branch is labeled true or at fault.
+> The agent is reading the same structured scene I see, then asking REPLAY's deterministic engine to validate it. The result preserves confirmed, reported, unknown, and advisory information separately.
 
-### 1:45–2:08 — Evidence and provenance
+**Pass cue:** Both calls are native WebMCP/Site Tools calls. A registered-tool count, ordinary browser automation, or debug-inspector execution is not a substitute.
 
-**Cursor:** Open **Evidence**. Select the overview, Vehicle A damage, Vehicle B damage, and wet-road image in quick succession. Pause on the **Synthetic demo** badge and linked-item count. Return briefly to **Facts** to show confirmed, reported, and unknown labels.
+### 0:56–1:20 — Proposal versus inference
 
-**Agent prompt, verbatim:**
+**Agent prompt — use verbatim:**
 
-> Link the evidence and prepare a neutral report using only confirmed facts. Keep unresolved details explicit.
+> With Site Tools, create a review-only coordinated proposal for both current vehicle paths; keep it inside the road and do not apply it. Separately add one branch-scoped agent hypothesis: “The available paths may permit more than one lane-crossing explanation.” Link it to the two paths. Do not claim fault or intent.
 
-**Expected Site Tools:** `link_evidence` only where a link is missing, then `build_report_preview`. The agent must not confirm a claim or finalize a snapshot.
+**Expected native calls:** a narrow state read if needed, `propose_scene_changes`, and `add_observation` with agent-hypothesis status, agent-inference source, the active branch, and both trajectory IDs.
 
-**Narration:**
-
-> Evidence links remain inspectable, and these images are clearly synthetic demo material. REPLAY never silently converts an agent inference into a confirmed fact.
-
-### 2:08–2:31 — Report and human decision
-
-**Picture:** Show the cited report preview, uncertainty/open-question section, and limitations. Click **Review and finalize** yourself.
-
-**Cursor:** Check the three visible acknowledgements, choose **Continue to confirmation**, then manually click **Finalize factual report** in the confirmation dialog.
+**Picture:** Show the pending proposal overlay and proposal card while the base geometry remains unchanged. Then open **Facts** and select the new hypothesis.
 
 **Narration:**
 
-> The agent can prepare a citation-bound preview, but only a person can confirm facts or create the immutable report snapshot. Unresolved details and method limits remain in the report.
+> These are two different agent contributions. Geometry is a preview that only a person can accept or reject. The text is stored as an attributable agent hypothesis, never as a confirmed fact.
 
-**Pass cue:** The activity feed records human finalization. There is no automatic or agent-triggered final click.
+**Pass cue:** The proposal remains pending; no proposed geometry is applied. Activity attributes the calls to agent/WebMCP. The new fact shows **Agent hypothesis**, source **agent inference**, and no human-confirm button.
 
-### 2:31–2:36 — Closing
+### 1:20–1:39 — Human-only confirmation
 
-**Cursor:** Click **PDF** once and show the successful local export cue. End on the scene, report tab, and activity feed together.
+**Picture:** Still in **Facts**, select the human-authored reported statement beginning “Vehicle A was leaving the roundabout…” and click **Confirm as human-reviewed**. Pause on its **Confirmed by human** badge and human/UI activity entry.
 
 **Narration:**
 
-> Humans provide memory and judgment. Agents organize complexity. REPLAY keeps the difference visible.
+> The agent cannot confirm its own inference. I can explicitly review a human statement, and REPLAY records that exact human action and provenance.
 
-## Reset instructions
+**Pass cue:** Only the selected human-authored statement becomes confirmed. The agent hypothesis remains unconfirmed and the proposal remains pending.
 
-- Fresh-origin reset: use a clean browser origin with no saved demo data.
-- In-workspace reset: **Case options → Reset deterministic demo**.
-- Opening `/#demo` alone resumes a valid saved seed-v1, seed-v2, or seed-v3 demo case and is not a reset.
-- After an explicit reset, verify `seedVersion = 3`, case version 1, active branch **Baseline reconstruction**, four synthetic evidence items, and the seeded geometry inconsistency before each take.
-- Do not reuse a take after hidden warm-up commands. Reads add session audit, while mutations also change case version and durable activity.
+### 1:39–2:07 — Agent preview, human finalization
 
-## Backup recording sequence
+**Agent prompt — use verbatim:**
 
-If model latency makes one continuous take awkward, capture these clips from the same deployed commit and fresh fixture, then edit only dead time:
+> Build a neutral cited report preview from the current case. Keep the agent hypothesis in the hypothesis appendix, keep open questions explicit, and do not confirm or finalize anything.
 
-1. clean workspace opening and first read-only Site Tools call;
-2. coordinated proposal preview followed by visible human acceptance;
-3. human drag and rotation followed by recent-activity reread;
-4. branch creation and comparison;
-5. evidence badge and provenance links;
-6. report preview, human acknowledgements, final confirmation, and export.
+**Expected native call:** `build_report_preview`, preceded by a compact state/version read if needed. There must be no WebMCP report-finalization call.
 
-Keep call order truthful. Do not splice a result from a different case version into the sequence. If Site Tools are unavailable, the WebMCP inspector may document registration for debugging, but it is not a substitute for recording a real supported agent/browser flow. Resolve availability or record in a compatible Chrome session before submission.
+**Picture:** Show the cited preview and its limitations. Click **Review and finalize** yourself, check the three acknowledgements, choose **Continue to confirmation**, then manually click **Finalize factual report**.
 
-## Final video checks
+**Narration:**
 
-- Uploaded YouTube duration is under 3:00 and visibility is public.
-- Audio is clear; UI labels and Site Tools activity are readable at 1080p.
-- The first 30 seconds show both the problem and WebMCP reading the live model.
-- No fault, legal, forensic, or truthfulness conclusion is stated.
-- Synthetic images are badged and never described as real evidence.
-- No copyrighted music, third-party trademarks, credentials, personal records, terminal footage, or unrelated browser UI appears.
-- The video matches the submitted commit and live URL.
+> Site Tools can prepare a citation-bound preview. Finalization is deliberately human-only: I review open questions, acknowledge the method limits, review confirmed facts, and make the final click.
+
+**Pass cue:** The immutable snapshot and activity entry are human/UI-authored. If the preview shows a missing requirement, stop the take and fix the fixture or prompt; never edit around a failed finalization.
+
+### 2:07–2:20 — Open the adversarial case
+
+**Picture:** Click **Close workspace** from Case options, scroll to the scenario lab, and open **Parking-area account contradiction**.
+
+**Narration:**
+
+> Plausible cases should stay quiet. This synthetic adversarial case tests whether the same product can surface a contradictory record without accusing a person.
+
+### 2:20–2:46 — Motion and integrity review
+
+**Agent prompt — use verbatim:**
+
+> Use this page's Site Tools to read the parking scene, claims, and timeline and run the full consistency check. State the reported stationary account separately from the timestamped movement. Name the motion and integrity rule IDs and their assumptions. Do not characterize any person's truthfulness, fault, or intent.
+
+**Expected native calls:** `get_workspace_state`, `validate_case_consistency` with `scope: "all"`, and optionally `focus_workspace_item` for the most relevant trajectory or issue.
+
+**Picture:** Show the reported stationary claim beside the timestamped path, then cut to the visible issue list. Focus the speed/deceleration advisory. Briefly expose the integrity questions about estimated calibration or dimension sourcing.
+
+**Narration:**
+
+> REPLAY does not call anyone dishonest. It shows the conflict: one account is reported as stationary, while the timestamped path implies movement outside the declared envelope. Integrity advisories expose which scale and vehicle inputs are estimated or unsupported.
+
+**Expected current fixture:** motion includes `motion.speed` and `motion.deceleration`; integrity includes calibration and/or dimension-source questions. The structural `geometry.trajectory-teleport` issue may also appear. Reconfirm exact rule IDs and numerical thresholds on the final committed build before recording.
+
+### 2:46–2:52 — Close on value
+
+**Picture:** End with the parking path, focused advisory, neutral question, and attributed activity visible together.
+
+**Narration:**
+
+> REPLAY turns disputed incident fragments into a reviewable record—agents organize complexity, while people keep authority over facts and the final report.
+
+## Recording evidence checklist
+
+### WebMCP proof
+
+- The video visibly shows actual native Site Tools/WebMCP invocations, not only tool registration, the manual fallback, DevTools, or REPLAY's inspector.
+- The trace includes successful `get_workspace_state` and `validate_case_consistency` calls in both cases.
+- The trace includes `propose_scene_changes`, `add_observation`, and `build_report_preview`, or the narration/script is revised truthfully if a supported model chooses a different valid path.
+- The Site Tools “Recently used”/sources view or equivalent retains tool names, inputs, and results for the final evidence bundle.
+- The exact model, desktop client/build, timestamp, final live URL, and commit are recorded outside the video and in submission testing notes.
+
+### Product and safety proof
+
+- Roundabout calibration, uncertainty, vehicle dimensions, dimension sources, and metric path summary are readable.
+- The proposal is visibly pending and does not alter geometry before a human decision.
+- The agent inference is visibly attributed and unconfirmed; it cannot be confirmed through the agent flow.
+- The human-reported statement is confirmed only by the presenter's visible UI action.
+- The report preview is agent-prepared, but all three acknowledgements, second confirmation, and final click are visibly human actions.
+- The parking result separates the reported stationary statement, timestamped movement, deterministic motion findings, and input-integrity questions.
+- No narration or UI claim describes the output as lie detection, cheating detection, fault assignment, forensic certification, legal advice, or proof of actual motion.
+- Every incident, claim, and image shown is explicitly synthetic demo material; no personal case data appears.
+
+### Submission proof
+
+- Uploaded YouTube visibility is **Public**, not unlisted or private.
+- Uploaded duration is below **3:00**; target 2:50–2:55 leaves encoding/title-card margin.
+- Audio is intelligible and UI/tool text is readable at 1080p playback.
+- The final video shows the same behavior, scenario labels, rules, commit, and URL submitted to Devpost.
+- No credentials, notifications, private tabs, unrelated browser history, unlicensed music, or unauthorized incident material appear.
+- Play the uploaded video from beginning to end while signed out and test the final live URL in a clean supported client before submission.
+
+## Failure policy
+
+Do not record a manual fallback and describe it as WebMCP. If the supported model does not invoke the intended tools, inspect the full trace, reset the synthetic case, refine only the prompt or tool metadata truthfully, and rerun. If Site Tools are unavailable, document the exact model/client/build and escalate through the [Challenge FAQ support routes](https://webmcp.devpost.com/resources); do not manufacture a successful trace.

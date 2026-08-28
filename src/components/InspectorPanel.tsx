@@ -33,6 +33,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 
 import { compareHypotheses } from "../domain/hypotheses";
 import { getActorPoseAtTime, normalizeDegrees } from "../domain/interpolation";
+import { analyzeTrajectoryMotion, createSceneMetricCalibration } from "../domain/physics";
 import { rankOpenQuestions } from "../domain/reducer";
 import type {
   Claim,
@@ -45,8 +46,10 @@ import type {
   HypothesisBranch,
   OpenQuestion,
   ActorPose,
+  MeasurementSource,
   ReplayCase,
   ReportPreview,
+  VehicleClass,
   WorkspaceMode,
 } from "../domain/models";
 import { resolveEvidenceImageSource } from "./evidenceSource";
@@ -100,6 +103,15 @@ interface InspectorPanelProps {
   onSetClaimStatus: (claimId: string, status: Exclude<ClaimStatus, "confirmed">) => void;
   onToggleLock: (type: "claim", id: string, locked: boolean) => void;
   onUpdateActorPose: (actorId: string, pose: ActorPose) => void;
+  onUpdateActorSpecs: (
+    actorId: string,
+    update: {
+      dimensions: { length: number; width: number };
+      vehicleClass: VehicleClass;
+      dimensionsSource: MeasurementSource;
+      wheelbaseMeters?: number;
+    },
+  ) => void;
   onUpdateTrajectoryKeyframe: (
     trajectoryId: string,
     keyframeId: string,
@@ -580,6 +592,39 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
   const actorPose = actor
     ? (getActorPoseAtTime(props.replayCase, actor.id, props.currentTimeMs) ?? actor.pose)
     : undefined;
+  const trajectoryMotion = trajectory
+    ? analyzeTrajectoryMotion(trajectory, {
+        calibration: createSceneMetricCalibration({
+          sceneBounds: props.replayCase.environment.bounds,
+          widthMeters: props.replayCase.environment.calibration.widthMeters,
+          heightMeters: props.replayCase.environment.calibration.heightMeters,
+        }),
+      })
+    : undefined;
+  const trajectoryMotionIssues = trajectory
+    ? props.replayCase.consistencyIssues.filter(
+        (item) => item.scope === "motion" && item.affectedIds.includes(trajectory.id),
+      )
+    : [];
+  const trajectoryAgentAuthored = trajectory
+    ? trajectory.createdBy === "agent" || trajectory.changeHistory.at(-1)?.author === "agent"
+    : false;
+  const trajectoryAcceptedAgentProposal = trajectory
+    ? props.replayCase.proposals.some((proposal) => {
+        if (
+          proposal.status !== "accepted" ||
+          !proposal.decision ||
+          proposal.decision.decidedAt !== trajectory.changeHistory.at(-1)?.createdAt
+        ) {
+          return false;
+        }
+        return proposal.revisions
+          .find((revision) => revision.id === proposal.decision?.revisionId)
+          ?.changes.some(
+            (change) => change.kind === "trajectory-set" && change.trajectoryId === trajectory.id,
+          );
+      })
+    : false;
   if (!actor && !trajectory && !timelineEvent) return null;
 
   if (actor && actorPose) {
@@ -606,6 +651,10 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
           This is the vehicle pose at {formatSeconds(props.currentTimeMs)}. Cars follow their path
           as the playhead moves. Moving or rotating one here updates a nearby path point, or creates
           one at this time.
+        </p>
+        <p className="scene-selection-editor__provenance">
+          Geometry author: {actor.lastEditedBy ?? "legacy record"}
+          {actor.lastEditedAt ? ` · ${new Date(actor.lastEditedAt).toLocaleString()}` : ""}
         </p>
         {actorTrajectory?.locked && !actor.locked && (
           <p className="scene-selection-editor__hint" role="note">
@@ -707,12 +756,121 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
             Drag the round handle above the car. 0° points up, 90° right, 180° down, and 270° left.
           </small>
         </div>
+        <details className="vehicle-spec-editor">
+          <summary>Vehicle size and measurement</summary>
+          <form
+            className="scene-numeric-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              const wheelbaseValue = data.get("wheelbase");
+              const wheelbaseMeters =
+                typeof wheelbaseValue === "string" && wheelbaseValue.trim().length > 0
+                  ? Number(wheelbaseValue)
+                  : undefined;
+              props.onUpdateActorSpecs(actor.id, {
+                dimensions: {
+                  length: requiredNumber(data, "vehicle-length"),
+                  width: requiredNumber(data, "vehicle-width"),
+                },
+                vehicleClass: data.get("vehicle-class") as VehicleClass,
+                dimensionsSource: data.get("dimensions-source") as MeasurementSource,
+                ...(wheelbaseMeters === undefined ? {} : { wheelbaseMeters }),
+              });
+            }}
+          >
+            <div className="scene-numeric-form__grid">
+              <label>
+                <span>Length m</span>
+                <input
+                  name="vehicle-length"
+                  type="number"
+                  min="1.5"
+                  max="20"
+                  step="0.01"
+                  defaultValue={actor.dimensions.length}
+                  required
+                  disabled={actor.locked}
+                />
+              </label>
+              <label>
+                <span>Width m</span>
+                <input
+                  name="vehicle-width"
+                  type="number"
+                  min="0.4"
+                  max="4"
+                  step="0.01"
+                  defaultValue={actor.dimensions.width}
+                  required
+                  disabled={actor.locked}
+                />
+              </label>
+              <label>
+                <span>Wheelbase m</span>
+                <input
+                  name="wheelbase"
+                  type="number"
+                  min="0.8"
+                  max="12"
+                  step="0.01"
+                  defaultValue={actor.wheelbaseMeters ?? ""}
+                  disabled={actor.locked}
+                />
+              </label>
+            </div>
+            <div className="field-row">
+              <label className="field">
+                <span>Vehicle class</span>
+                <select
+                  name="vehicle-class"
+                  defaultValue={actor.vehicleClass}
+                  disabled={actor.locked}
+                >
+                  <option value="compact-car">Compact car</option>
+                  <option value="saloon">Saloon</option>
+                  <option value="suv">SUV</option>
+                  <option value="van">Van</option>
+                  <option value="pickup">Pickup</option>
+                  <option value="motorcycle">Motorcycle</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Dimension source</span>
+                <select
+                  name="dimensions-source"
+                  defaultValue={actor.dimensionsSource}
+                  disabled={actor.locked}
+                >
+                  <option value="measured">Measured</option>
+                  <option value="manufacturer">Manufacturer specification</option>
+                  <option value="template">Template estimate</option>
+                  <option value="estimated">Human estimate</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </label>
+            </div>
+            <p className="scene-selection-editor__hint">
+              The scene renders these metres to scale. Record the source so an estimate never looks
+              like a measurement.
+            </p>
+            <button className="button button--secondary" disabled={actor.locked}>
+              Apply vehicle specification
+            </button>
+          </form>
+        </details>
         <dl className="scene-selection-facts">
           <div>
             <dt>Dimensions</dt>
             <dd>
               {actor.dimensions.length.toFixed(1)} × {actor.dimensions.width.toFixed(1)}
+              {" m"}
             </dd>
+          </div>
+          <div>
+            <dt>Dimension source</dt>
+            <dd>{actor.dimensionsSource.replaceAll("-", " ")}</dd>
           </div>
           <div>
             <dt>Damage markers</dt>
@@ -747,6 +905,19 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
         </header>
         <div className="scene-selection-editor__meta">
           <span>{branch?.name ?? trajectory.branchId}</span>
+          <span
+            className={
+              trajectoryAgentAuthored || trajectoryAcceptedAgentProposal
+                ? "provenance-chip is-agent"
+                : "provenance-chip"
+            }
+          >
+            {trajectoryAgentAuthored
+              ? "Agent-authored geometry"
+              : trajectoryAcceptedAgentProposal
+                ? "Human-accepted agent proposal"
+                : "Human-authored geometry"}
+          </span>
           <label>
             <input
               type="checkbox"
@@ -766,11 +937,43 @@ function SceneSelectionEditor(props: InspectorPanelProps) {
           </p>
         )}
         <div className="trajectory-model-note">
-          <strong>A path point is the vehicle’s pose at a specific time.</strong>
+          <strong>Timed poses are measured in the calibrated local scene.</strong>
           <p>
-            REPLAY draws straight movement between points and interpolates heading. It does not
-            simulate steering, collision physics, or fault.
+            A path point is the vehicle’s pose at a specific time. REPLAY interpolates between
+            points and derives speed, acceleration, heading, yaw, turn radius, and footprint
+            contact. These are transparent review advisories, not a full vehicle-dynamics simulation
+            or a fault finding.
           </p>
+          {trajectoryMotion && (
+            <dl className="trajectory-metrics">
+              <div>
+                <dt>Path distance</dt>
+                <dd>{trajectoryMotion.summary.totalDistanceM.toFixed(1)} m</dd>
+              </div>
+              <div>
+                <dt>Peak segment speed</dt>
+                <dd>{(trajectoryMotion.summary.maxSpeedMps * 3.6).toFixed(1)} km/h</dd>
+              </div>
+              <div>
+                <dt>Minimum turn radius</dt>
+                <dd>
+                  {trajectoryMotion.summary.minimumTurnRadiusM === null
+                    ? "Straight"
+                    : `${trajectoryMotion.summary.minimumTurnRadiusM.toFixed(1)} m`}
+                </dd>
+              </div>
+              <div>
+                <dt>Review advisories</dt>
+                <dd>{trajectoryMotionIssues.length}</dd>
+              </div>
+            </dl>
+          )}
+          <small>
+            Calibration: {props.replayCase.environment.calibration.widthMeters} ×{" "}
+            {props.replayCase.environment.calibration.heightMeters} m ·{" "}
+            {props.replayCase.environment.calibration.source.replaceAll("-", " ")} · ±
+            {props.replayCase.environment.calibration.uncertaintyMeters} m
+          </small>
           <button
             type="button"
             className="button button--secondary"
@@ -2453,6 +2656,9 @@ function ConsistencyIssueRow({
     >
       <span>{issue.severity === "error" ? "!" : issue.severity === "warning" ? "△" : "?"}</span>
       <div>
+        <small className="issue-row__scope">
+          {issue.scope} · {issue.ruleId}
+        </small>
         <strong>{issue.title}</strong>
         <p>{issue.explanation}</p>
       </div>

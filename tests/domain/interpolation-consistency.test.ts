@@ -11,6 +11,8 @@ import {
   quantizeTimeMs,
   quantizeTimeInRange,
   sceneDeltaForCompassHeading,
+  sceneDeltaForMetricHeading,
+  sampleTrajectory,
   validateConsistency,
 } from "../../src/domain";
 import type { Trajectory } from "../../src/domain";
@@ -61,6 +63,38 @@ describe("trajectory interpolation", () => {
     expect(Math.hypot(delta.x * 10, delta.y * 7)).toBeCloseTo(96, 8);
   });
 
+  it("converts a real-metre heading through the case calibration", () => {
+    const delta = sceneDeltaForMetricHeading(45, 10, {
+      bounds: { minX: 0, minY: 0, maxX: 100, maxY: 100 },
+      calibration: {
+        widthMeters: 100,
+        heightMeters: 70,
+        source: "measured",
+        uncertaintyMeters: 0.2,
+      },
+    });
+    expect((delta.x / 100) * 100).toBeCloseTo(Math.SQRT1_2 * 10, 8);
+    expect((-delta.y / 100) * 70).toBeCloseTo(Math.SQRT1_2 * 10, 8);
+  });
+
+  it("uses a smooth time-aware curve for three or more poses and exposes the same render samples", () => {
+    const turning: Trajectory = {
+      ...trajectory,
+      keyframes: [
+        { id: "turn-1", actorId: "actor-test", timeMs: 0, x: 0, y: 0, rotationDeg: 90 },
+        { id: "turn-2", actorId: "actor-test", timeMs: 1_000, x: 10, y: 0, rotationDeg: 135 },
+        { id: "turn-3", actorId: "actor-test", timeMs: 2_000, x: 10, y: 10, rotationDeg: 180 },
+      ],
+    };
+    const beforeCorner = interpolateTrajectory(turning, 500);
+    const afterCorner = interpolateTrajectory(turning, 1_500);
+    expect(beforeCorner.y).toBeLessThan(0);
+    expect(afterCorner.x).toBeGreaterThan(10);
+    const samples = sampleTrajectory(turning, 4);
+    expect(samples).toHaveLength(9);
+    expect(samples[4]).toEqual(interpolateTrajectory(turning, 1_000));
+  });
+
   it("keeps newly-created two-point spans inside short and offset case ranges", () => {
     expect(initialTrajectoryTimes(10_300, { start: 10_000, end: 10_500 })).toEqual({
       start: 10_000,
@@ -75,8 +109,8 @@ describe("trajectory interpolation", () => {
   it("reads the active branch pose at an incident-relative time", () => {
     const replayCase = createDemoCase();
     expect(getActorPoseAtTime(replayCase, "actor-vehicle-a", 10_000)).toMatchObject({
-      x: 62,
-      y: 57,
+      x: 63,
+      y: 59,
     });
   });
 });

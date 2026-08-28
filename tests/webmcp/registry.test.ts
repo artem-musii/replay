@@ -249,7 +249,7 @@ function validActorInput(requestId = "request-actor-0001", expectedVersion = INI
     label: "Vehicle B",
     position: { x: 0.58, y: 0.42 },
     rotationDeg: 18,
-    dimensions: { width: 0.08, length: 0.18 },
+    dimensions: { width: 1.8, length: 4.3 },
     expectedVersion,
     requestId,
   };
@@ -637,7 +637,7 @@ describe("ReplayWebMCPRegistry", () => {
         label: "Vehicle B",
         position: { x: 0.58, y: 0.42 },
         rotationDeg: 18,
-        dimensions: { width: 0.08, length: 0.18 },
+        dimensions: { width: 1.8, length: 4.3 },
       },
       actor: "agent",
       origin: "webmcp",

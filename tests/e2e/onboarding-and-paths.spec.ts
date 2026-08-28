@@ -407,11 +407,15 @@ test.describe("onboarding and path authoring", () => {
     await vehicle.focus();
     await vehicle.press("ArrowRight");
     await expect(
-      page.getByRole("button", { name: /Vehicle A, position 28\.5, 50\.0/ }),
+      page.getByRole("button", {
+        name: /Vehicle A, position 28\.5 metres east and 35\.0 metres south/,
+      }),
     ).toBeVisible();
     await page.getByRole("button", { name: /^Vehicle A, position/ }).press("ArrowLeft");
     await expect(
-      page.getByRole("button", { name: /Vehicle A, position 28\.0, 50\.0/ }),
+      page.getByRole("button", {
+        name: /Vehicle A, position 28\.0 metres east and 35\.0 metres south/,
+      }),
     ).toBeVisible();
   });
 });

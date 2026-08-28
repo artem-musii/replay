@@ -167,10 +167,15 @@ export const webMCPInputSchemas = {
       rotationDeg: z.number().min(-360).max(360),
       dimensions: z
         .object({
-          width: z.number().positive().max(20),
-          length: z.number().positive().max(20),
+          width: z.number().min(0.4).max(4),
+          length: z.number().min(1.5).max(20),
         })
         .strict(),
+      vehicleClass: z
+        .enum(["compact-car", "saloon", "suv", "van", "pickup", "motorcycle", "unknown"])
+        .optional(),
+      dimensionsSource: z.enum(["template", "estimated", "unknown"]).optional(),
+      wheelbaseMeters: z.number().min(0.8).max(12).optional(),
       colorToken: z.string().trim().min(1).max(64).optional(),
       ...mutationMetadataShape,
     })

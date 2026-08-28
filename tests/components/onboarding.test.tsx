@@ -171,7 +171,7 @@ describe("ReplayGuide", () => {
       screen.getByRole("heading", { name: "Place vehicles and shape timed paths" }),
     ).toBeVisible();
     expect(
-      screen.getByText(/does not model steering, braking, collision forces, or fault/),
+      screen.getByText(/does not model driver control, collision forces, or fault/),
     ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
     expect(readReplayGuideProgress().completedSectionIds).toContain("scene");

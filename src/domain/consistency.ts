@@ -1,16 +1,43 @@
-import { distance, getActorPoseAtTime, pointInPolygon } from "./interpolation";
+import { getActorPoseAtTime, interpolateTrajectory, pointInPolygon } from "./interpolation";
 import { containsLiabilityConclusion } from "./languageSafety";
 import type {
+  ActorPose,
   ConsistencyIssue,
   ConsistencyScope,
   DamageRegion,
+  Point,
   ReplayCase,
+  SceneActor,
   TimelineEvent,
+  Trajectory,
 } from "./models";
+import {
+  analyzeTrajectoryMotion,
+  analyzeVehicleFootprintRelation,
+  createOrientedVehicleFootprint,
+  createSceneMetricCalibration,
+  normalizedSceneDistanceMeters,
+  normalizedScenePointToMeters,
+  type MetricPoint,
+  type MotionAdvisory,
+  type MotionAdvisoryThresholds,
+  type OrientedVehicleFootprint,
+  type SceneMetricCalibration,
+} from "./physics";
 import { validWorkspaceCitationPaths } from "./report";
+import { getRoadTemplate, isPointOnTemplateRoad } from "./roadTemplates";
 
 export type ConsistencyValidationScope =
-  "all" | "scene" | "timeline" | "geometry" | "damage" | "provenance" | "completeness" | "report";
+  | "all"
+  | "scene"
+  | "timeline"
+  | "geometry"
+  | "motion"
+  | "damage"
+  | "integrity"
+  | "provenance"
+  | "completeness"
+  | "report";
 
 export interface ConsistencyValidationOptions {
   scope?: ConsistencyValidationScope;
@@ -184,36 +211,288 @@ function timelineIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
   return issues;
 }
 
-function isWithinScene(replayCase: ReplayCase, x: number, y: number): boolean {
-  const { bounds, roadPolygon } = replayCase.environment;
-  const insideBounds = x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
-  if (!insideBounds || !pointInPolygon({ x, y }, roadPolygon)) return false;
+const FOOTPRINT_SAMPLE_SPACING_M = 0.5;
+const SWEEP_SAMPLE_SPACING_M = 0.75;
+const SWEEP_HEADING_STEP_DEG = 5;
+const MAX_SWEEP_SAMPLES_PER_SEGMENT = 256;
+const SPEED_REVIEW_BUFFER = 1.35;
 
-  if (replayCase.environment.sceneType === "intersection") {
-    // Mirrors the functional SVG template: a 21%-wide north/south road
-    // crossing a 30%-high east/west road.
-    return (x >= 39.5 && x <= 60.5) || (y >= 35 && y <= 65);
+interface MotionAdvisoryContext {
+  thresholds: MotionAdvisoryThresholds;
+  referenceSpeedLimitKph: number;
+  speedLimitSource: "posted" | "template-default";
+  roadCondition: ReplayCase["environment"]["roadCondition"];
+}
+
+const roadConditionMotionEnvelope = {
+  dry: {
+    maxAccelerationMps2: 5,
+    maxDecelerationMps2: 9,
+    maxLateralAccelerationMps2: 6,
+  },
+  wet: {
+    maxAccelerationMps2: 4,
+    maxDecelerationMps2: 7,
+    maxLateralAccelerationMps2: 4,
+  },
+  unknown: {
+    maxAccelerationMps2: 4.5,
+    maxDecelerationMps2: 8,
+    maxLateralAccelerationMps2: 5,
+  },
+} as const satisfies Record<
+  ReplayCase["environment"]["roadCondition"],
+  Pick<
+    Required<MotionAdvisoryThresholds>,
+    "maxAccelerationMps2" | "maxDecelerationMps2" | "maxLateralAccelerationMps2"
+  >
+>;
+
+function metricCalibrationForCase(replayCase: ReplayCase): SceneMetricCalibration {
+  return createSceneMetricCalibration({
+    sceneBounds: replayCase.environment.bounds,
+    widthMeters: replayCase.environment.calibration.widthMeters,
+    heightMeters: replayCase.environment.calibration.heightMeters,
+  });
+}
+
+function motionAdvisoryContextForCase(
+  replayCase: ReplayCase,
+  actor: SceneActor,
+): MotionAdvisoryContext {
+  const template = getRoadTemplate(replayCase.environment.sceneType);
+  const hasPostedLimit = replayCase.environment.postedSpeedLimitKph !== undefined;
+  const referenceSpeedLimitKph =
+    replayCase.environment.postedSpeedLimitKph ?? template.defaultSpeedLimitKph;
+  const conditionEnvelope = roadConditionMotionEnvelope[replayCase.environment.roadCondition];
+  const suppliedWheelbase = actor.wheelbaseMeters;
+  const effectiveWheelbaseM =
+    suppliedWheelbase !== undefined && Number.isFinite(suppliedWheelbase) && suppliedWheelbase > 0
+      ? suppliedWheelbase
+      : actor.dimensions.length * 0.6;
+
+  return {
+    referenceSpeedLimitKph,
+    speedLimitSource: hasPostedLimit ? "posted" : "template-default",
+    roadCondition: replayCase.environment.roadCondition,
+    thresholds: {
+      // Speed limits are a legal/context signal, not a physical maximum. The
+      // 35% buffer deliberately makes this a conservative review trigger.
+      maxSpeedMps: (referenceSpeedLimitKph / 3.6) * SPEED_REVIEW_BUFFER,
+      ...conditionEnvelope,
+      maxYawRateDegPerSecond: replayCase.environment.sceneType === "parking-area" ? 120 : 90,
+      maxHeadingMismatchDeg: 25,
+      // A 40 degree steering envelope is intentionally generous. Manufacturer
+      // data can replace this derived review threshold when available.
+      minTurnRadiusM: Math.max(1.5, effectiveWheelbaseM / Math.tan((40 * Math.PI) / 180)),
+    },
+  };
+}
+
+/**
+ * Returns the exact deterministic motion-review profile used by consistency
+ * validation. These thresholds surface cases for human review; they are not
+ * forensic limits and do not establish how a vehicle actually moved.
+ */
+export function motionAdvisoryThresholdsForCase(
+  replayCase: ReplayCase,
+  actor: SceneActor,
+): MotionAdvisoryThresholds {
+  return { ...motionAdvisoryContextForCase(replayCase, actor).thresholds };
+}
+
+function metricPointToScene(point: MetricPoint, calibration: SceneMetricCalibration): Point {
+  const sceneWidth = calibration.sceneBounds.maxX - calibration.sceneBounds.minX;
+  const sceneHeight = calibration.sceneBounds.maxY - calibration.sceneBounds.minY;
+  return {
+    x: calibration.sceneBounds.minX + (point.xM / calibration.widthMeters) * sceneWidth,
+    y: calibration.sceneBounds.minY + (point.yM / calibration.heightMeters) * sceneHeight,
+  };
+}
+
+function scenePointToTemplate(replayCase: ReplayCase, point: Point): Point {
+  const { bounds } = replayCase.environment;
+  return {
+    x: ((point.x - bounds.minX) / (bounds.maxX - bounds.minX)) * 100,
+    y: ((point.y - bounds.minY) / (bounds.maxY - bounds.minY)) * 100,
+  };
+}
+
+function pointOnSegment(point: Point, start: Point, end: Point): boolean {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  const cross = Math.abs((point.x - start.x) * dy - (point.y - start.y) * dx);
+  if (cross > Math.max(1, length) * 1e-8) return false;
+  const projection = (point.x - start.x) * dx + (point.y - start.y) * dy;
+  return projection >= -1e-8 && projection <= dx * dx + dy * dy + 1e-8;
+}
+
+function pointInPolygonInclusive(point: Point, polygon: Point[]): boolean {
+  if (pointInPolygon(point, polygon)) return true;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    if (start && end && pointOnSegment(point, start, end)) return true;
   }
+  return false;
+}
 
-  // The roundabout template is the union of its approach roads and outer
-  // ellipse, excluding the central island. SVG uses a 1000×700 viewBox, so
-  // the normalized horizontal and vertical radii differ.
-  const dx = x - 50;
-  const dy = y - 50;
-  const insideOuterRoundabout = (dx / 20.5) ** 2 + (dy / 29.3) ** 2 <= 1;
-  const insideIsland = (dx / 11.4) ** 2 + (dy / 16.3) ** 2 < 1;
-  const onHorizontalApproach = y >= 37.1 && y <= 62.9;
-  const onVerticalApproach = x >= 41 && x <= 59;
-  return !insideIsland && (insideOuterRoundabout || onHorizontalApproach || onVerticalApproach);
+function isPointOnConfiguredRoad(replayCase: ReplayCase, point: Point): boolean {
+  const { bounds, roadPolygon, sceneType } = replayCase.environment;
+  const coordinateTolerance = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 1e-9;
+  if (
+    point.x < bounds.minX - coordinateTolerance ||
+    point.x > bounds.maxX + coordinateTolerance ||
+    point.y < bounds.minY - coordinateTolerance ||
+    point.y > bounds.maxY + coordinateTolerance
+  ) {
+    return false;
+  }
+  return (
+    pointInPolygonInclusive(point, roadPolygon) &&
+    isPointOnTemplateRoad(sceneType, scenePointToTemplate(replayCase, point))
+  );
+}
+
+function footprintIsOnConfiguredRoad(
+  replayCase: ReplayCase,
+  footprint: OrientedVehicleFootprint,
+  calibration: SceneMetricCalibration,
+): boolean {
+  const longitudinalSteps = Math.max(1, Math.ceil(footprint.lengthM / FOOTPRINT_SAMPLE_SPACING_M));
+  const lateralSteps = Math.max(1, Math.ceil(footprint.widthM / FOOTPRINT_SAMPLE_SPACING_M));
+
+  // The lattice covers corners, edges, and interior rather than treating a
+  // vehicle as a point. Resolution stays below the built-in template surveys'
+  // stated uncertainty and is deterministic across UI and WebMCP calls.
+  for (let longitudinalIndex = 0; longitudinalIndex <= longitudinalSteps; longitudinalIndex += 1) {
+    const forwardOffsetM =
+      -footprint.lengthM / 2 + (footprint.lengthM * longitudinalIndex) / longitudinalSteps;
+    for (let lateralIndex = 0; lateralIndex <= lateralSteps; lateralIndex += 1) {
+      const rightOffsetM = -footprint.widthM / 2 + (footprint.widthM * lateralIndex) / lateralSteps;
+      const metricPoint = {
+        xM:
+          footprint.center.xM +
+          footprint.forwardAxis.xM * forwardOffsetM +
+          footprint.rightAxis.xM * rightOffsetM,
+        yM:
+          footprint.center.yM +
+          footprint.forwardAxis.yM * forwardOffsetM +
+          footprint.rightAxis.yM * rightOffsetM,
+      };
+      if (!isPointOnConfiguredRoad(replayCase, metricPointToScene(metricPoint, calibration))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function hasPositiveDimensions(actor: SceneActor): boolean {
+  return (
+    Number.isFinite(actor.dimensions.width) &&
+    actor.dimensions.width > 0 &&
+    Number.isFinite(actor.dimensions.length) &&
+    actor.dimensions.length > 0
+  );
+}
+
+function footprintForPose(
+  actor: SceneActor,
+  pose: ActorPose,
+  calibration: SceneMetricCalibration,
+): OrientedVehicleFootprint {
+  return createOrientedVehicleFootprint(pose, actor.dimensions, calibration);
+}
+
+function shortestHeadingDifference(first: number, second: number): number {
+  return Math.abs(((second - first + 540) % 360) - 180);
+}
+
+function estimatedSegmentTravelMeters(
+  trajectory: Trajectory,
+  startTimeMs: number,
+  endTimeMs: number,
+  calibration: SceneMetricCalibration,
+): number {
+  const estimateDivisions = 8;
+  let distanceMeters = 0;
+  let previous = interpolateTrajectory(trajectory, startTimeMs);
+  for (let index = 1; index <= estimateDivisions; index += 1) {
+    const sample = interpolateTrajectory(
+      trajectory,
+      startTimeMs + ((endTimeMs - startTimeMs) * index) / estimateDivisions,
+    );
+    distanceMeters += normalizedSceneDistanceMeters(previous, sample, calibration);
+    previous = sample;
+  }
+  return distanceMeters;
+}
+
+function sweptFootprintLeavesRoad(
+  replayCase: ReplayCase,
+  actor: SceneActor,
+  trajectory: Trajectory,
+  fromIndex: number,
+  calibration: SceneMetricCalibration,
+): boolean {
+  const from = trajectory.keyframes[fromIndex];
+  const to = trajectory.keyframes[fromIndex + 1];
+  if (!from || !to || to.timeMs <= from.timeMs) return false;
+  const travelMeters = estimatedSegmentTravelMeters(
+    trajectory,
+    from.timeMs,
+    to.timeMs,
+    calibration,
+  );
+  const headingChange = shortestHeadingDifference(from.rotationDeg, to.rotationDeg);
+  const sampleCount = Math.min(
+    MAX_SWEEP_SAMPLES_PER_SEGMENT,
+    Math.max(
+      1,
+      Math.ceil(travelMeters / SWEEP_SAMPLE_SPACING_M),
+      Math.ceil(headingChange / SWEEP_HEADING_STEP_DEG),
+    ),
+  );
+
+  for (let sampleIndex = 1; sampleIndex < sampleCount; sampleIndex += 1) {
+    const pose = interpolateTrajectory(
+      trajectory,
+      from.timeMs + ((to.timeMs - from.timeMs) * sampleIndex) / sampleCount,
+    );
+    const footprint = footprintForPose(actor, pose, calibration);
+    if (!footprintIsOnConfiguredRoad(replayCase, footprint, calibration)) return true;
+  }
+  return false;
+}
+
+function distanceFromPointToFootprint(
+  point: MetricPoint,
+  footprint: OrientedVehicleFootprint,
+): number {
+  const deltaX = point.xM - footprint.center.xM;
+  const deltaY = point.yM - footprint.center.yM;
+  const forwardDistance = Math.abs(
+    deltaX * footprint.forwardAxis.xM + deltaY * footprint.forwardAxis.yM,
+  );
+  const rightDistance = Math.abs(deltaX * footprint.rightAxis.xM + deltaY * footprint.rightAxis.yM);
+  return Math.hypot(
+    Math.max(0, forwardDistance - footprint.lengthM / 2),
+    Math.max(0, rightDistance - footprint.widthM / 2),
+  );
 }
 
 function geometryIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = [];
   const actorIds = new Set(replayCase.actors.map((actor) => actor.id));
   const knownBranchIds = new Set(replayCase.branches.map((branch) => branch.id));
+  const calibration = metricCalibrationForCase(replayCase);
+  const actorsById = new Map(replayCase.actors.map((actor) => [actor.id, actor]));
 
   for (const actor of replayCase.actors) {
-    if (actor.dimensions.width <= 0 || actor.dimensions.length <= 0) {
+    const validDimensions = hasPositiveDimensions(actor);
+    if (!validDimensions) {
       issues.push(
         issue(
           "geometry.invalid-actor-dimensions",
@@ -226,16 +505,27 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
         ),
       );
     }
-    if (!isWithinScene(replayCase, actor.pose.x, actor.pose.y)) {
+    if (
+      validDimensions &&
+      !footprintIsOnConfiguredRoad(
+        replayCase,
+        footprintForPose(actor, actor.pose, calibration),
+        calibration,
+      )
+    ) {
       issues.push(
         issue(
           "geometry.actor-outside-scene",
           "geometry",
           "warning",
-          "Vehicle is outside the road scene",
-          `${actor.label}’s current position is outside the configured road area.`,
+          "Vehicle footprint is outside the road scene",
+          `${actor.label}’s full ${actor.dimensions.length.toFixed(1)} m × ${actor.dimensions.width.toFixed(1)} m oriented footprint is not contained by the configured ${replayCase.environment.sceneType} road area. The check uses a ${FOOTPRINT_SAMPLE_SPACING_M.toFixed(2)} m footprint lattice and is a geometry review aid, not map-survey evidence.`,
           [actor.id],
-          ["Move the vehicle onto the road", "Review the scene template"],
+          [
+            "Move the full vehicle footprint onto the road",
+            "Review the scene calibration and road template",
+            "Preserve the discrepancy if the source material supports it",
+          ],
         ),
       );
     }
@@ -257,17 +547,30 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
         ),
       );
     }
+    const actor = actorsById.get(trajectory.actorId);
     for (const keyframe of trajectory.keyframes) {
-      if (!isWithinScene(replayCase, keyframe.x, keyframe.y)) {
+      if (
+        actor &&
+        hasPositiveDimensions(actor) &&
+        !footprintIsOnConfiguredRoad(
+          replayCase,
+          footprintForPose(actor, keyframe, calibration),
+          calibration,
+        )
+      ) {
         issues.push(
           issue(
             "geometry.keyframe-outside-scene",
             "geometry",
             "warning",
-            "Trajectory leaves the road scene",
-            "A trajectory keyframe lies outside the configured road area.",
-            [trajectory.id, keyframe.id],
-            ["Move the keyframe onto the road", "Review whether free placement is intentional"],
+            "Trajectory footprint leaves the road scene",
+            `The full oriented footprint for ${actor.label} at a keyframe is not contained by the configured ${replayCase.environment.sceneType} road area. This is a deterministic template check, not map-survey or forensic evidence.`,
+            [trajectory.branchId, trajectory.id, actor.id, keyframe.id],
+            [
+              "Move the full vehicle footprint onto the road",
+              "Review the scene calibration or template",
+              "Keep intentional off-road placement explicitly unresolved",
+            ],
           ),
         );
       }
@@ -277,17 +580,45 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
       const current = trajectory.keyframes[index];
       if (!previous || !current) continue;
       const elapsedSeconds = (current.timeMs - previous.timeMs) / 1_000;
-      const speed = elapsedSeconds > 0 ? distance(previous, current) / elapsedSeconds : Infinity;
-      if (!Number.isFinite(speed) || speed > 55) {
+      const speedMps =
+        elapsedSeconds > 0
+          ? normalizedSceneDistanceMeters(previous, current, calibration) / elapsedSeconds
+          : Infinity;
+      const continuityThresholdMps = actor
+        ? (motionAdvisoryThresholdsForCase(replayCase, actor).maxSpeedMps ?? 55) * 4
+        : 220;
+      if (!Number.isFinite(speedMps) || speedMps > continuityThresholdMps) {
         issues.push(
           issue(
             "geometry.trajectory-teleport",
             "geometry",
             "error",
             "Trajectory contains an abrupt jump",
-            `Adjacent keyframes imply ${Number.isFinite(speed) ? speed.toFixed(1) : "an infinite"} scene units per second. This is treated as a continuity error, not a physics conclusion.`,
+            `Adjacent keyframes imply ${Number.isFinite(speedMps) ? `${speedMps.toFixed(1)} m/s` : "an infinite speed"} after applying the ${calibration.widthMeters.toFixed(1)} m × ${calibration.heightMeters.toFixed(1)} m scene calibration. The structural continuity threshold is ${continuityThresholdMps.toFixed(1)} m/s (four times the conservative motion-review speed threshold); this is not a forensic conclusion.`,
             [trajectory.id, previous.id, current.id],
             ["Add an intermediate keyframe", "Correct the keyframe time or position"],
+          ),
+        );
+      }
+
+      if (
+        actor &&
+        hasPositiveDimensions(actor) &&
+        sweptFootprintLeavesRoad(replayCase, actor, trajectory, index - 1, calibration)
+      ) {
+        issues.push(
+          issue(
+            "geometry.trajectory-footprint-off-road",
+            "geometry",
+            "warning",
+            "Swept vehicle footprint leaves the road",
+            `${actor.label}’s interpolated full footprint leaves the configured ${replayCase.environment.sceneType} road area between adjacent keyframes. The deterministic sweep targets intervals no greater than ${SWEEP_SAMPLE_SPACING_M.toFixed(2)} m or ${String(SWEEP_HEADING_STEP_DEG)}°, with a transparent ${String(MAX_SWEEP_SAMPLES_PER_SEGMENT)}-sample per-segment safety cap, and samples each footprint at no more than ${FOOTPRINT_SAMPLE_SPACING_M.toFixed(2)} m; it is a review aid, not forensic truth.`,
+            [trajectory.branchId, trajectory.id, actor.id, previous.id, current.id],
+            [
+              "Add source-supported intermediate keyframes",
+              "Review the road template and calibration",
+              "Keep uncertainty visible if the exact path is unknown",
+            ],
           ),
         );
       }
@@ -309,20 +640,34 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
           ) {
             const first = linkedActors[firstIndex];
             const second = linkedActors[secondIndex];
-            if (!first || !second) continue;
+            if (
+              !first ||
+              !second ||
+              !hasPositiveDimensions(first) ||
+              !hasPositiveDimensions(second)
+            ) {
+              continue;
+            }
             const firstPose = getActorPoseAtTime(replayCase, first.id, impact.timeMs, branchId);
             const secondPose = getActorPoseAtTime(replayCase, second.id, impact.timeMs, branchId);
             if (!firstPose || !secondPose) continue;
-            const separation = distance(firstPose, secondPose);
-            const contactThreshold = (first.dimensions.width + second.dimensions.width) / 2 + 0.75;
-            if (separation > contactThreshold) {
+            const relation = analyzeVehicleFootprintRelation(
+              { pose: firstPose, dimensions: first.dimensions },
+              { pose: secondPose, dimensions: second.dimensions },
+              calibration,
+            );
+            const calibrationToleranceM = Math.max(
+              0.25,
+              replayCase.environment.calibration.uncertaintyMeters,
+            );
+            if (!relation.overlaps && relation.separationM > calibrationToleranceM) {
               issues.push(
                 issue(
                   "geometry.impact-separation",
                   "geometry",
                   "warning",
-                  "Vehicles do not meet at the impact time",
-                  `The vehicle centers are ${separation.toFixed(1)} m apart at the impact marker; current widths imply contact should be closer. This is a consistency check, not a forensic conclusion.`,
+                  "Vehicle footprints do not meet at the impact time",
+                  `The ${first.dimensions.length.toFixed(1)} m × ${first.dimensions.width.toFixed(1)} m and ${second.dimensions.length.toFixed(1)} m × ${second.dimensions.width.toFixed(1)} m oriented vehicle footprints have a ${relation.separationM.toFixed(2)} m gap at the impact time. That exceeds the ${calibrationToleranceM.toFixed(2)} m calibration-uncertainty allowance (${replayCase.environment.calibration.source} source). This is a deterministic consistency review, not a forensic conclusion or proof that contact did not occur.`,
                   [branchId, impact.id, first.id, second.id],
                   [
                     "Review the impact timestamp",
@@ -339,14 +684,24 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
       if (impact.location) {
         for (const actor of linkedActors) {
           const pose = getActorPoseAtTime(replayCase, actor.id, impact.timeMs, branchId);
-          if (pose && distance(pose, impact.location) > actor.dimensions.length / 2 + 2) {
+          if (!pose || !hasPositiveDimensions(actor)) continue;
+          const footprint = footprintForPose(actor, pose, calibration);
+          const markerGapM = distanceFromPointToFootprint(
+            normalizedScenePointToMeters(impact.location, calibration),
+            footprint,
+          );
+          const markerToleranceM = Math.max(
+            0.5,
+            replayCase.environment.calibration.uncertaintyMeters,
+          );
+          if (markerGapM > markerToleranceM) {
             issues.push(
               issue(
                 "geometry.impact-marker-distance",
                 "geometry",
                 "warning",
                 "Impact marker is not near a linked vehicle",
-                `The impact marker is not close to ${actor.label} at the selected time.`,
+                `The impact marker is ${markerGapM.toFixed(2)} m outside ${actor.label}’s oriented footprint at the selected time, beyond the ${markerToleranceM.toFixed(2)} m calibration-uncertainty allowance. This is a review aid, not a forensic contact-location conclusion.`,
                 [branchId, impact.id, actor.id],
                 ["Move the impact marker", "Review the actor trajectory or timestamp"],
               ),
@@ -355,6 +710,281 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
         }
       }
     }
+  }
+  return issues;
+}
+
+const motionIssueTitles: Record<MotionAdvisory["code"], string> = {
+  "motion.speed": "Segment speed exceeds the review envelope",
+  "motion.acceleration": "Acceleration exceeds the review envelope",
+  "motion.deceleration": "Deceleration exceeds the review envelope",
+  "motion.yaw-rate": "Heading changes unusually quickly",
+  "motion.heading-mismatch": "Vehicle heading differs from travel direction",
+  "motion.turn-radius": "Implied turn radius is unusually tight",
+  "motion.lateral-acceleration": "Lateral acceleration exceeds the review envelope",
+};
+
+function motionIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyIssue[] {
+  const issues: ConsistencyIssue[] = [];
+  const calibration = metricCalibrationForCase(replayCase);
+  const actorsById = new Map(replayCase.actors.map((actor) => [actor.id, actor]));
+
+  for (const trajectory of replayCase.trajectories.filter((item) =>
+    branchIds.includes(item.branchId),
+  )) {
+    const actor = actorsById.get(trajectory.actorId);
+    if (!actor || !hasPositiveDimensions(actor)) continue;
+    const hasStrictlyIncreasingTimes = trajectory.keyframes.every(
+      (keyframe, index) =>
+        index === 0 || keyframe.timeMs > (trajectory.keyframes[index - 1]?.timeMs ?? 0),
+    );
+    if (!hasStrictlyIncreasingTimes) continue;
+
+    const context = motionAdvisoryContextForCase(replayCase, actor);
+    const analysis = analyzeTrajectoryMotion(trajectory, {
+      calibration,
+      thresholds: context.thresholds,
+    });
+    const speedSource =
+      context.speedLimitSource === "posted"
+        ? `posted ${context.referenceSpeedLimitKph.toFixed(0)} km/h limit`
+        : `${context.referenceSpeedLimitKph.toFixed(0)} km/h ${replayCase.environment.sceneType} template default`;
+
+    for (const advisory of analysis.advisories) {
+      const isMinimum = advisory.code === "motion.turn-radius";
+      const thresholdRelation = isMinimum ? "minimum review threshold" : "review threshold";
+      issues.push(
+        issue(
+          advisory.code,
+          "motion",
+          "warning",
+          motionIssueTitles[advisory.code],
+          `${actor.label} implies ${advisory.observed.toFixed(2)} ${advisory.unit} between the cited keyframes; the ${thresholdRelation} is ${advisory.threshold.toFixed(2)} ${advisory.unit}. The exact deterministic profile uses the ${speedSource} with a ${Math.round((SPEED_REVIEW_BUFFER - 1) * 100)}% speed buffer, a ${context.roadCondition} road envelope (${String(context.thresholds.maxAccelerationMps2)} m/s² acceleration, ${String(context.thresholds.maxDecelerationMps2)} m/s² deceleration, ${String(context.thresholds.maxLateralAccelerationMps2)} m/s² lateral acceleration), and ${replayCase.environment.calibration.widthMeters.toFixed(1)} m × ${replayCase.environment.calibration.heightMeters.toFixed(1)} m ${replayCase.environment.calibration.source} scene calibration (±${replayCase.environment.calibration.uncertaintyMeters.toFixed(2)} m stated uncertainty). This is a deterministic review advisory, not a forensic finding, conclusion, or proof of actual motion.`,
+          [
+            trajectory.branchId,
+            actor.id,
+            trajectory.id,
+            advisory.fromKeyframeId,
+            advisory.toKeyframeId,
+          ],
+          [
+            "Review keyframe positions and timing against source evidence",
+            "Review vehicle dimensions, heading, and scene calibration",
+            "Keep unsupported motion details explicitly uncertain",
+          ],
+        ),
+      );
+    }
+  }
+  return issues;
+}
+
+function integrityIssues(replayCase: ReplayCase): ConsistencyIssue[] {
+  const issues: ConsistencyIssue[] = [];
+  const calibration = replayCase.environment.calibration;
+  if (["template", "estimated", "unknown"].includes(calibration.source)) {
+    issues.push(
+      issue(
+        "integrity.calibration-source",
+        "integrity",
+        "question",
+        "Scene scale is not survey verified",
+        `The ${calibration.widthMeters.toFixed(1)} m × ${calibration.heightMeters.toFixed(1)} m scene scale is labelled ${calibration.source} with ±${calibration.uncertaintyMeters.toFixed(2)} m stated uncertainty. Geometry and motion results remain review aids until a measured, surveyed, or scaled-map calibration is recorded.`,
+        [replayCase.id],
+        [
+          "Record a measured, surveyed, or scaled-map calibration when available",
+          "Keep the template or estimate and its uncertainty visible",
+        ],
+      ),
+    );
+  }
+  if (calibration.uncertaintyMeters === 0 && calibration.source !== "measured") {
+    issues.push(
+      issue(
+        "integrity.zero-calibration-uncertainty",
+        "integrity",
+        "question",
+        "Calibration declares no uncertainty",
+        `A ${calibration.source} calibration declares zero uncertainty. That precision may not match the recorded source and should be reviewed rather than treated as exact.`,
+        [replayCase.id],
+        ["Record a supported uncertainty value", "Document why zero uncertainty is appropriate"],
+      ),
+    );
+  }
+
+  const availableEvidence = replayCase.evidence.filter((asset) => !asset.deleted);
+  for (const actor of replayCase.actors) {
+    if (["template", "estimated", "unknown"].includes(actor.dimensionsSource)) {
+      issues.push(
+        issue(
+          "integrity.vehicle-dimension-source",
+          "integrity",
+          "question",
+          "Vehicle dimensions are not source verified",
+          `${actor.label}'s ${actor.dimensions.length.toFixed(2)} m × ${actor.dimensions.width.toFixed(2)} m footprint is labelled ${actor.dimensionsSource}. Contact and road-clearance checks use it as an explicit assumption, not as measured evidence.`,
+          [actor.id],
+          [
+            "Record measured or manufacturer dimensions when available",
+            "Keep estimated dimensions and their source visibly labelled",
+          ],
+        ),
+      );
+    } else if (!availableEvidence.some((asset) => asset.linkedSceneObjectIds.includes(actor.id))) {
+      issues.push(
+        issue(
+          "integrity.vehicle-dimension-evidence",
+          "integrity",
+          "question",
+          "Vehicle dimension source is not linked",
+          `${actor.label}'s dimensions are labelled ${actor.dimensionsSource}, but no available evidence record is linked to the vehicle. The label is preserved, but its supporting record is not inspectable in this case.`,
+          [actor.id],
+          [
+            "Link the supporting specification or measurement record",
+            "Relabel the dimensions as estimated",
+          ],
+        ),
+      );
+    }
+    if (actor.lastEditedBy === "agent") {
+      issues.push(
+        issue(
+          "integrity.agent-authored-actor-geometry",
+          "integrity",
+          "question",
+          "Vehicle geometry was last edited by an agent",
+          `${actor.label}'s position or specification is visibly agent-authored. It remains an attributable reconstruction input and has not become evidence or a confirmed fact.`,
+          [actor.id],
+          [
+            "Review or correct the geometry in the human interface",
+            "Keep the agent-authored input visibly unresolved",
+          ],
+        ),
+      );
+    }
+  }
+
+  for (const trajectory of replayCase.trajectories) {
+    if (trajectory.createdBy === "agent" || trajectory.changeHistory.at(-1)?.author === "agent") {
+      issues.push(
+        issue(
+          "integrity.agent-authored-trajectory",
+          "integrity",
+          "question",
+          "Trajectory was last authored by an agent",
+          "This path is visibly agent-authored geometry. Deterministic checks can test its internal consistency, but only source review and human action can accept, correct, or reject it.",
+          [trajectory.branchId, trajectory.actorId, trajectory.id],
+          [
+            "Review the path against recorded sources",
+            "Use a coordinated proposal for material multi-actor changes",
+          ],
+        ),
+      );
+    }
+  }
+
+  const importedActivity = replayCase.activity.filter(
+    (activity) => activity.actionType === "case.imported-untrusted",
+  );
+  if (importedActivity.length > 0) {
+    issues.push(
+      issue(
+        "integrity.unsigned-import",
+        "integrity",
+        "warning",
+        "Case history came from an unsigned import",
+        "This local case was opened from an unsigned structured export. REPLAY preserved its history as unverified, removed imported final snapshots, and requires fresh local human review. This detects an untrusted transfer boundary, not who changed it or why.",
+        [replayCase.id, ...importedActivity.map((activity) => activity.id)],
+        [
+          "Review imported sources and claims locally",
+          "Reconfirm eligible claims only after human review",
+        ],
+      ),
+    );
+  }
+
+  const malformedEvidence = availableEvidence.filter(
+    (asset) => !/^[a-f0-9]{64}$/i.test(asset.checksum),
+  );
+  if (malformedEvidence.length > 0) {
+    issues.push(
+      issue(
+        "integrity.evidence-checksum-format",
+        "integrity",
+        "warning",
+        "Evidence checksum is not a SHA-256 digest",
+        "One or more available evidence records do not carry the expected 64-character SHA-256 digest. This is a local integrity-format check and does not authenticate the original content or its author.",
+        malformedEvidence.map((asset) => asset.id),
+        [
+          "Re-add the source file to compute a local digest",
+          "Keep origin and authenticity unresolved",
+        ],
+      ),
+    );
+  }
+
+  const futureActivity = replayCase.activity.filter(
+    (activity) => activity.caseVersion > replayCase.caseVersion,
+  );
+  if (futureActivity.length > 0) {
+    issues.push(
+      issue(
+        "integrity.future-activity-version",
+        "integrity",
+        "error",
+        "Activity version exceeds the case version",
+        "The activity ledger contains an entry from a later case version than the open state. The record is internally inconsistent and should not be used for final reporting.",
+        [replayCase.id, ...futureActivity.map((activity) => activity.id)],
+        [
+          "Restore a matching case revision",
+          "Export the raw record for review before further edits",
+        ],
+      ),
+    );
+  }
+
+  for (const claim of replayCase.claims.filter(
+    (candidate) => candidate.status === "confirmed" && Boolean(candidate.confirmedAt),
+  )) {
+    const confirmedAt = claim.confirmedAt ?? "";
+    const laterSubstantiveChange = claim.changeHistory.find(
+      (change) => change.createdAt > confirmedAt && !/confirm/i.test(change.summary),
+    );
+    if (!laterSubstantiveChange) continue;
+    issues.push(
+      issue(
+        "integrity.stale-claim-attestation",
+        "integrity",
+        "error",
+        "Confirmed claim changed after attestation",
+        "The claim has a substantive change record after its recorded human confirmation. It must return to review before it can appear as confirmed.",
+        [claim.id, laterSubstantiveChange.id],
+        ["Return the claim to reported", "Ask a human to review the changed content and sources"],
+      ),
+    );
+  }
+
+  const untrustedProposalIds = replayCase.proposals
+    .filter(
+      (proposal) =>
+        proposal.revisions.some((revision) => !revision.authorshipTrusted) ||
+        proposal.decision?.humanAttestationTrusted === false,
+    )
+    .map((proposal) => proposal.id);
+  if (untrustedProposalIds.length > 0) {
+    issues.push(
+      issue(
+        "integrity.untrusted-proposal-history",
+        "integrity",
+        "warning",
+        "Proposal history requires local review",
+        "Imported proposal authorship or a human decision attestation is untrusted in this local copy. The recorded decision is history, not a fresh local confirmation.",
+        untrustedProposalIds,
+        [
+          "Review the proposal and current geometry locally",
+          "Do not treat the imported decision as local human attestation",
+        ],
+      ),
+    );
   }
   return issues;
 }
@@ -376,6 +1006,7 @@ function angularDifference(a: number, b: number): number {
 
 function damageIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = [];
+  const calibration = metricCalibrationForCase(replayCase);
   const allDamage = replayCase.actors.flatMap((actor) => actor.damageMarkers);
   if (allDamage.length === 0) {
     issues.push(
@@ -421,13 +1052,28 @@ function damageIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyI
         const firstPose = getActorPoseAtTime(replayCase, first.id, impact.timeMs, branchId);
         const secondPose = getActorPoseAtTime(replayCase, second.id, impact.timeMs, branchId);
         if (firstPose && secondPose) {
+          const firstMetricPose = normalizedScenePointToMeters(firstPose, calibration);
+          const secondMetricPose = normalizedScenePointToMeters(secondPose, calibration);
           const pairs = [
-            { actor: first, pose: firstPose, otherPose: secondPose },
-            { actor: second, pose: secondPose, otherPose: firstPose },
+            {
+              actor: first,
+              pose: firstPose,
+              metricPose: firstMetricPose,
+              otherMetricPose: secondMetricPose,
+            },
+            {
+              actor: second,
+              pose: secondPose,
+              metricPose: secondMetricPose,
+              otherMetricPose: firstMetricPose,
+            },
           ];
           for (const pair of pairs) {
             const contactWorldAngle =
-              (Math.atan2(pair.otherPose.x - pair.pose.x, -(pair.otherPose.y - pair.pose.y)) *
+              (Math.atan2(
+                pair.otherMetricPose.xM - pair.metricPose.xM,
+                -(pair.otherMetricPose.yM - pair.metricPose.yM),
+              ) *
                 180) /
               Math.PI;
             const localContactAngle =
@@ -855,9 +1501,18 @@ function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
 
 function requestedScopes(scope: ConsistencyValidationScope): Set<ConsistencyScope> {
   if (scope === "all") {
-    return new Set(["timeline", "geometry", "damage", "provenance", "completeness", "report"]);
+    return new Set([
+      "timeline",
+      "geometry",
+      "motion",
+      "damage",
+      "integrity",
+      "provenance",
+      "completeness",
+      "report",
+    ]);
   }
-  if (scope === "scene") return new Set(["geometry", "damage"]);
+  if (scope === "scene") return new Set(["geometry", "motion", "damage"]);
   return new Set([scope]);
 }
 
@@ -873,7 +1528,9 @@ export function validateConsistency(
   const issues: ConsistencyIssue[] = [];
   if (scopes.has("timeline")) issues.push(...timelineIssues(replayCase, branchIds));
   if (scopes.has("geometry")) issues.push(...geometryIssues(replayCase, branchIds));
+  if (scopes.has("motion")) issues.push(...motionIssues(replayCase, branchIds));
   if (scopes.has("damage")) issues.push(...damageIssues(replayCase, branchIds));
+  if (scopes.has("integrity")) issues.push(...integrityIssues(replayCase));
   if (scopes.has("provenance")) issues.push(...provenanceIssues(replayCase));
   if (scopes.has("completeness")) issues.push(...completenessIssues(replayCase));
   if (scopes.has("report")) issues.push(...reportIssues(replayCase));

@@ -2,7 +2,7 @@ import type { Claim, ReplayCase, ReportPreview, ReportSection, ReportStatement }
 import { evidenceBoundText } from "./languageSafety";
 
 export const REPORT_DISCLAIMER =
-  "REPLAY helps organize and visualize a factual account. Its consistency checks are informational and are not a forensic or legal determination. This report is not forensic analysis or legal advice and does not determine fault or liability.";
+  "REPLAY helps organize and visualize a factual account. Its consistency checks are informational and are not a forensic or legal determination. Geometry and motion checks use the recorded calibration, vehicle dimensions, timed poses, and declared advisory envelopes. This report is not forensic analysis or legal advice, a vehicle-dynamics reconstruction, lie detection, or a finding of fault or liability.";
 
 export interface BuildReportOptions {
   generatedAt?: string;
@@ -162,7 +162,7 @@ export function buildReportPreview(
       replayCase.actors.map((actor) =>
         statement(
           reportStatementId("actor", actor.id),
-          `${evidenceBoundText(actor.label)} is represented as an anonymous vehicle (${actor.dimensions.length.toFixed(1)} m × ${actor.dimensions.width.toFixed(1)} m).`,
+          `${evidenceBoundText(actor.label)} is represented as an anonymous ${actor.vehicleClass.replaceAll("-", " ")} (${actor.dimensions.length.toFixed(2)} m × ${actor.dimensions.width.toFixed(2)} m; dimensions source: ${actor.dimensionsSource.replaceAll("-", " ")}${actor.wheelbaseMeters === undefined ? "" : `; wheelbase: ${actor.wheelbaseMeters.toFixed(2)} m`}).`,
           "system",
           [],
           [],
@@ -176,7 +176,7 @@ export function buildReportPreview(
     section("environment", "Environment and road conditions", [
       statement(
         "report-environment",
-        `Scene: ${replayCase.environment.sceneType}; road condition: ${replayCase.environment.roadCondition}; weather: ${replayCase.environment.weather}; lighting: ${replayCase.environment.lighting}.`,
+        `Scene: ${replayCase.environment.sceneType}; road condition: ${replayCase.environment.roadCondition}; weather: ${replayCase.environment.weather}; lighting: ${replayCase.environment.lighting}; traffic side: ${replayCase.environment.trafficSide}. Local calibration: ${replayCase.environment.calibration.widthMeters.toFixed(1)} m × ${replayCase.environment.calibration.heightMeters.toFixed(1)} m, source ${replayCase.environment.calibration.source.replaceAll("-", " ")}, stated uncertainty ±${replayCase.environment.calibration.uncertaintyMeters.toFixed(1)} m${replayCase.environment.postedSpeedLimitKph === undefined ? "" : `; posted speed limit ${replayCase.environment.postedSpeedLimitKph.toFixed(0)} km/h`}.`,
         "system",
         [],
         [],

@@ -4,7 +4,7 @@
 
 ![Generated REPLAY product visual showing a roundabout reconstruction, trajectories, evidence, timeline, and provenance](public/assets/generated/replay-hero.webp)
 
-> REPLAY organizes and visualizes a factual account. Its consistency checks are informational, not a forensic or legal determination. It does not determine fault or liability.
+> REPLAY organizes and visualizes a factual account. Its calibrated geometry and motion checks are deterministic review aids, not a forensic reconstruction, collision-dynamics simulation, truth/lie detector, legal determination, or decision about fault or liability.
 
 ## Workspace preview
 
@@ -23,15 +23,17 @@ _Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The 
 
 To start without WebMCP, run the app locally and choose **Try the demo case**. Every core workspace feature remains available in an ordinary browser.
 
-The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. Opening `/#demo` resumes a valid saved seed-v1, seed-v2, or seed-v3 demo; use **Case options → Reset deterministic demo** to replace it with the current seed-v3 fixture.
+The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. In a local current-source build, valid saved seed-v1 through seed-v4 cases can resume; **Case options → Reset deterministic demo** replaces one with the seed-v4 fixture.
+
+The public URL still serves the verified `00688d8a51fb783dbf147e08ece60470b8877544` release described under [Testing](#testing). The calibrated-scene, motion-envelope, integrity, and four-scenario additions described below are implemented in current source and deterministic tests; they still require a new deployment and supported-model Site Tools traces. The public video is also pending. The [WebMCP Challenge rules](https://webmcp.devpost.com/rules) require a working live URL, public source and instructions, an English submission description, and a public demonstration video under three minutes. The submission deadline is **September 3, 2026 at 1:00 PM PDT**; see the [official challenge page](https://openai.com/webmcp-challenge/).
 
 ## Learn REPLAY in the product
 
-The onboarding is optional and replayable. Open **How to use REPLAY** from the landing page for the complete topic guide, choose **Guided demo · about 4 minutes** for a six-step workspace tour, or use **Guide** in the workspace at any time. The guide covers scene editing, timed path points, the straight-line interpolation model, lane snap, the timeline, provenance, evidence, hypotheses, files, reports, and human-only review boundaries.
+The onboarding is optional and replayable. Open **How to use REPLAY** from the landing page for the complete topic guide, choose **Guided demo · about 4 minutes** for a six-step workspace tour, or use **Guide** in the workspace at any time. The guide covers scene editing, timed path points, lane snap, the timeline, provenance, evidence, hypotheses, files, reports, and human-only review boundaries.
 
 For Site Tools/WebMCP, select the **Site Tools** status in the workspace. WebMCP is the browser bridge, not an embedded chat box: keep REPLAY open in a compatible ChatGPT, Codex, or other client, then ask in that client’s conversation. A registered-tool count means the connection is ready; **Manual mode** means the full visible workflow remains available without an agent. The guide includes four copyable, narrow prompts and a link to the technical registration inspector.
 
-Paths are timed poses rather than simulated driving physics. Set the playhead, select a vehicle or path, and add a point at that time. REPLAY moves in straight segments between points and interpolates heading through the shortest angle; add intermediate points to describe a curve. Lane snap affects nearby pointer drags only, while keyboard nudges and exact numeric fields remain precise. Select a vehicle to use its visible rotation handle, ±15° controls, or exact compass heading.
+Paths are timed poses rather than a collision-dynamics simulation. Set the playhead, select a vehicle or path, and add a point at that time. Two-point paths interpolate linearly; paths with three or more timed poses use a deterministic cubic Hermite curve, while heading follows the shortest angle. The renderer and swept-road checks sample the same curve. Lane snap affects nearby pointer drags only, while keyboard nudges and exact numeric fields remain precise. Select a vehicle to use its visible rotation handle, ±15° controls, or exact compass heading.
 
 ## The problem
 
@@ -44,7 +46,7 @@ REPLAY gives the case a shared, inspectable structure:
 - claims with explicit source and certainty labels;
 - local evidence with visible links into the case;
 - ranked open questions and alternative hypothesis branches;
-- deterministic consistency issues instead of model speculation;
+- calibrated metric geometry and deterministic consistency advisories instead of model speculation;
 - attributable human, agent, and system activity; and
 - a citation-bound factual report that only a person can finalize.
 
@@ -80,7 +82,11 @@ A useful collaboration cycle looks like this:
 
 ## Product tour
 
-The seeded **Roundabout incident — 17:42** case includes two generic vehicles, four clearly labeled synthetic demo photographs, confirmed and reported observations, known damage, final positions, open questions, and a deliberate trajectory/impact inconsistency. It never identifies a vehicle at fault.
+The seed-v4 **Roundabout incident — 17:42** case includes two vehicles with explicit dimension-source labels, calibrated metric scene bounds, four clearly labelled synthetic demo photographs, confirmed and reported observations, known damage, final positions, and open questions. Oriented vehicle footprints overlap at the reported contact instead of relying on centre-point distance, and the case never identifies a vehicle at fault.
+
+Current source also contains a deterministic four-scenario library: the calibrated roundabout; a low-speed straight-road rear-end braking account; a T-junction crossing with unresolved priority/signal details; and an adversarial parking-area account where a reported “stationary” statement conflicts with timestamped movement. The last case demonstrates contradiction detection through the same consistency command exposed to WebMCP. It does not label a person dishonest, prove deception, or infer why the account differs. The road-template layer covers five scene types overall: roundabout, intersection, T-junction, straight road, and parking area.
+
+Each scene records width/height in metres, a calibration source, and stated uncertainty. Vehicles record metre-scale length/width, vehicle class, dimension source, and optional wheelbase. REPLAY uses those inputs for oriented contact and road-clearance checks, samples the full swept vehicle footprint between timed poses, and emits deterministic advisories for speed, acceleration, deceleration, yaw rate, heading/travel mismatch, turn radius, and lateral acceleration. Thresholds use the recorded road context and declared inputs; they are review envelopes, not measurements of what physically happened.
 
 In the workspace you can:
 
@@ -112,7 +118,11 @@ The current implementation defines 19 narrow imperative tools:
 | Report preview       | `build_report_preview` once a baseline reconstruction exists                                                      |
 | Reviewed report      | `add_report_note` after a preview exists                                                                          |
 
+`validate_case_consistency` exposes `all`, `scene`, `timeline`, `geometry`, `motion`, `damage`, `integrity`, `provenance`, `completeness`, and `report` scopes. `scene` combines geometry, motion, and damage. This lets an agent surface calibrated footprint-separation, impact-marker, swept-road, motion-envelope, unsigned-import, source-quality, and report-readiness issues through the same rules the UI uses, without converting an advisory into a forensic, intent, or truth claim.
+
 The visible final-review form implements the standards/Chrome declarative tool contract as `finalize_factual_report` and intentionally omits automatic submission. OpenAI's current ChatGPT/Codex Site Tools browser does not expose declarative HTML form tools as Site Tools. ChatGPT Work or Codex may still interact with a form through ordinary browser capabilities, but that interaction is not a WebMCP call and must not be treated as authorization to operate REPLAY's human confirmation controls. Agent/WebMCP-origin commands cannot confirm claims, accept/reject/adjust proposals, or finalize reports; those boundaries are enforced in the domain layer.
+
+A human confirmation attests to one exact claim revision. Changing its statement or provenance, changing evidence/event/scene links, adding evidence to it, or deleting linked/source evidence demotes it to `reported`, clears its confirmation timestamp/flag, and appends an explicit change record. A semantic no-op does not demote it, and only a fresh human UI action can confirm it again. Unsigned structured import likewise clears imported trust attestations and finalized snapshots and is surfaced by the `integrity` checks.
 
 Every imperative result is marked as potentially untrusted output. Read calls, visible UI-only calls, and rejected calls may appear in a capped session invocation audit without mutating the durable case; successful domain mutations append canonical activity. WebMCP mutations are staged, compare-and-swap saved, and then committed to the live engine. Repeating a completed request with the same validated semantic intent returns `idempotent: true` at the original receipt's `caseVersion` without another save; reusing the ID for different intent is rejected. A cancellation before primary persistence begins appends neither audit layer, while a cancellation after a resolved save invokes compensation.
 
@@ -124,7 +134,7 @@ Primary external references: the [WebMCP Draft Community Group Report](https://w
 
 REPLAY is a static React 19 + strict TypeScript application built with Vite. The core workflow needs no server, account, analytics, location access, or runtime model API.
 
-- `src/domain/`: schema-v2 model, Zod schemas, command engine, locks, optimistic versioning, idempotency, proposals, undo/redo, consistency, hypotheses, import/export, and report projections.
+- `src/domain/`: schema-v2 model, Zod schemas, calibrated road templates, timed interpolation, metric geometry/motion analysis, demo scenarios, command engine, locks, optimistic versioning, idempotency, proposals, undo/redo, consistency, hypotheses, import/export, and report projections.
 - `src/components/`: landing page, optional guide and workspace tour, blank-case wizard, SVG scene, timeline, inspector, activity, report review, and WebMCP inspector.
 - `src/webmcp/`: schemas, tool definitions, annotations, instrumentation, registration lifecycle, feature detection, and debug state.
 - `src/integration/`: adapter from WebMCP operations to canonical domain queries and commands.
@@ -193,11 +203,11 @@ npm run test:e2e
 npm run build
 ```
 
-The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, consistency and interpolation, onboarding, timed path authoring and rotation, narrow/200%-text reflow, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
+The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, exact-revision claim attestations, unsigned import, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, calibrated geometry, motion envelopes, smooth timed interpolation, four demo scenarios, onboarding, timed path authoring and rotation, narrow/200%-text reflow, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
 
 **Current deployed release:** application commit [`00688d8a51fb783dbf147e08ece60470b8877544`](https://github.com/artem-musii/replay-sol/commit/00688d8a51fb783dbf147e08ece60470b8877544) passed [GitHub Actions run `33161848637`](https://github.com/artem-musii/replay-sol/actions/runs/33161848637), including verify job `98817932649` and deploy job `98818739202`: **136/136 Vitest tests across 15 files** and **108 Playwright project runs: 103 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 10 checked screenshot baselines. Pages deployment `6139340101` published artifact `9682041096` (3,009,246 bytes; SHA-256 `9fae713230ec290ca8255641b1d13c89d59b155041aa9a68403d3231caff645e`); all 43 public files byte-matched that artifact. A cache-busted public Lighthouse 13.4.1 audit scored **100/100/100/100** for performance, accessibility, best practices, and SEO, with FCP 503.479 ms, LCP/TTI 623.479 ms, Speed Index 745.184 ms, TBT 0 ms, and CLS 0 (report SHA-256 `7c903b69675faa5e70283876434cca6da501a56d8c44d058706c5c90262714e4`).
 
-A fresh live smoke opened the optional guide, checked the WebMCP experience, loaded the deterministic seed-v3 case, and exercised vehicle rotation, trajectory-point addition, uncertainty editing, and retained-recovery onboarding access. It completed with zero console warnings/errors, failed requests, or off-origin requests. A separate current Codex in-app-browser smoke surfaced all 18 baseline Site Tools and the visible `18 registered` state without invoking a tool. Those checks do not establish supported-model execution traces or broad native-client compatibility. The older `f980d28` results remain preserved as historical evidence. Supported-model/native Site Tools execution, screen-reader/cross-browser/export review, a dedicated header-capable origin, and the public video remain external gates.
+A fresh live smoke of that deployed commit opened the optional guide, checked the WebMCP experience, loaded its deterministic seed-v3 case, and exercised vehicle rotation, trajectory-point addition, uncertainty editing, and retained-recovery onboarding access. It completed with zero console warnings/errors, failed requests, or off-origin requests. A separate Codex in-app-browser smoke surfaced all 18 baseline Site Tools and the visible `18 registered` state without invoking a tool. Those historical deployed checks do not cover the current-source seed-v4 realism/integrity additions and do not establish supported-model execution traces or broad native-client compatibility. The older `f980d28` results remain preserved as historical evidence. A current-source deployment, supported-model/native Site Tools execution, screen-reader/cross-browser/export review, a dedicated header-capable origin, and the public video remain external gates.
 
 See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, Site Tools steps, and how to record results without conflating deterministic tests with probabilistic evals.
 
@@ -207,7 +217,7 @@ See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual check
 - The core app has no REPLAY-operated backend, analytics call, geolocation lookup, evidence-upload service, or runtime model API. This does not make an external Site Tools client part of the local-only boundary.
 - User statements, filenames, notes, and evidence metadata are treated as untrusted case data, not executable instructions.
 - “Confirmed” means explicitly confirmed by a person in REPLAY; it does not mean independently verified.
-- Consistency checks organize contradictions and missing information. They are not collision physics, truth assessment, legal advice, or a fault decision.
+- Consistency checks use declared calibration, vehicle dimensions, timed poses, road context, and explicit deterministic thresholds to organize contradictions and missing information. They are not a forensic reconstruction, collision-dynamics simulation, truth/lie assessment, legal advice, or a fault decision.
 - JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence bytes, and unsigned import deliberately clears or demotes local trust attestations and report snapshots.
 - Local browser storage is not application-level encrypted. GitHub Pages also shares the `artem-musii.github.io` storage origin with other projects. Do not use the prototype for highly sensitive production records without a dedicated origin, appropriate security review, and retention policy.
 

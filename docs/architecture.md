@@ -1,6 +1,6 @@
 # REPLAY architecture
 
-Status: implemented architecture snapshot, reconciled with the repository on 2026-08-28. This document distinguishes current behavior from release work that still requires manual or external verification.
+Status: current-source architecture snapshot, reconciled with the repository on 2026-08-28. The calibrated-scene, motion-envelope, integrity, attestation, seed-v4, and four-scenario work described here is implemented and deterministically tested in the working tree but has not yet been deployed or exercised by a supported Site Tools model. The verification section preserves the narrower evidence for the last deployed commit.
 
 ## Architectural objective
 
@@ -43,12 +43,15 @@ There is no Zustand or Immer store. `package.json` contains neither package.
 
 ### Domain model and validation
 
-`src/domain/models.ts` defines the TypeScript vocabulary for cases, actors, trajectories, events, evidence and annotation links, claims, branches, questions, agent proposals/revisions/decisions, issues, activity, report notes, and snapshots. `src/domain/schema.ts` supplies strict persisted-shape validation. `src/domain/importExport.ts` performs migration, unsigned-import trust reset, and cross-record reference checks for seed, import, engine state, and persistence loads.
+`src/domain/models.ts` defines the TypeScript vocabulary for cases, calibrated road environments, actors with explicit dimension-source labels, trajectories, events, evidence and annotation links, claims, branches, questions, agent proposals/revisions/decisions, issues, activity, report notes, and snapshots. Seed version 4 records scene width/height in metres, calibration source and uncertainty, plus vehicle class, metre-scale length/width, dimension source, and optional wheelbase. `src/domain/schema.ts` supplies strict persisted-shape validation. `src/domain/importExport.ts` performs migration, unsigned-import trust reset, and cross-record reference checks for seed, import, engine state, and persistence loads.
 
 Pure projections and deterministic rules stay outside React:
 
-- `src/domain/interpolation.ts` derives an actor pose at a time;
-- `src/domain/consistency.ts` emits structured issues without deciding fault;
+- `src/domain/roadTemplates.ts` defines calibrated roundabout, intersection, T-junction, straight-road, and parking-area templates;
+- `src/domain/interpolation.ts` derives actor poses with exact linear interpolation for a two-point path and a time-aware cubic Hermite curve for three or more timed poses, with shortest-angle heading interpolation;
+- `src/domain/physics.ts` converts normalized scene coordinates to metres, constructs oriented vehicle footprints, calculates contact/separation, and derives deterministic speed, acceleration, deceleration, yaw-rate, heading-mismatch, turn-radius, and lateral-acceleration metrics;
+- `src/domain/consistency.ts` emits calibrated geometry, motion, damage, integrity, provenance, completeness, timeline, and report issues without deciding fault or intent;
+- `src/domain/demoScenarios.ts` provides four deterministic synthetic accounts for roundabout, straight-road rear-end, T-junction crossing, and parking-area contradiction review;
 - `src/domain/report.ts` builds the evidence-bound preview;
 - `src/domain/hypotheses.ts` compares branches without ranking one as true.
 
@@ -73,6 +76,8 @@ Every successful engine command increments `caseVersion`, including proposal cre
 
 `proposal.create` is authorized only for agent/WebMCP origin. It stores immutable baseline and proposed geometry in a pending proposal without applying it. `proposal.adjust`, `proposal.accept`, and `proposal.reject` require a human/UI origin. Acceptance first validates every target baseline and lock, then applies the whole latest revision or rejects without a partial scene change.
 
+A human confirmation is an attestation to one exact claim revision, including statement, source type/IDs, evidence links, event links, and scene-object links. A substantive change to any of those fields, newly linking an evidence item or annotation to the claim, or deleting linked/source evidence demotes the claim to `reported`, clears `humanConfirmed`/`confirmedAt`, and appends an explicit claim change record. A semantic no-op preserves the attestation. Reconfirmation remains a human/UI-only command.
+
 History snapshots and the fast request-receipt map are process-memory features. Activity persists each request ID with its semantic caller-intent fingerprint, original activity `caseVersion`, summary, activity ID, and affected IDs. After reload, a matching request/intent returns a synthesized `idempotent: true` response at that original version; a different intent with the same ID returns `IDEMPOTENCY_CONFLICT`. Legacy activity without a fingerprint retains action-type-only compatibility. Exact prior result payloads are not stored in a separate durable receipt table.
 
 ### React state and UI projections
@@ -82,7 +87,7 @@ History snapshots and the fast request-receipt map are process-memory features. 
 The implemented manual path includes:
 
 - landing page, optional replayable guide and guided workspace tour, deterministic demo, blank-case wizard, and local resume;
-- actor placement and direct/exact rotation, timed trajectory-point creation/editing with explicit interpolation guidance, impact and damage marking, locks, timeline event creation/editing, and playback;
+- actor placement and direct/exact rotation, timed trajectory-point creation/editing with smooth time-aware interpolation, impact and damage marking, locks, timeline event creation/editing, and playback;
 - claims with explicit certainty and human confirmation;
 - local evidence upload, metadata, point/rectangle annotations, linking, and deletion;
 - questions, hypothesis forks/assumptions, branch overlay, and side-by-side summaries;
@@ -94,7 +99,7 @@ Report previews are replaceable React state and are invalidated after content mu
 
 ### Persistence sequencing, migration, and recovery
 
-`src/persistence/database.ts` stores cases and evidence blobs in separate Dexie tables. Case records contain validated JSON metadata and blob keys, never object URLs. Current schema-v2 state uses `replay-local-vault-v2`; the former `replay-local-vault` remains readable for migration/recovery so a rolled-back schema-v1 build cannot reject or delete newer state.
+`src/persistence/database.ts` stores cases and evidence blobs in separate Dexie tables. Case records contain validated JSON metadata and blob keys, never object URLs. Current schema-v2 state uses `replay-local-vault-v2`; the former `replay-local-vault` remains readable for migration/recovery so a rolled-back schema-v1 build cannot reject or delete newer state. Seed version and persistence schema version are separate concepts: the current deterministic fixture is seed-v4 while the persisted `ReplayCase` shape remains schema version 2.
 
 Current sequencing is:
 
@@ -124,6 +129,8 @@ Imperative handlers:
 - reveal affected objects where applicable;
 - return a compact result with current version, affected IDs, issues, and visible state.
 
+The `validate_case_consistency` tool accepts `all`, `scene`, `timeline`, `geometry`, `motion`, `damage`, `integrity`, `provenance`, `completeness`, and `report`. The composite `scene` scope runs geometry, motion, and damage. Geometry uses metric calibration, oriented footprints from source-labelled vehicle dimensions, calibration uncertainty, and sampled swept footprints against the configured road. Motion applies deterministic review envelopes for speed, acceleration, deceleration, yaw rate, heading/travel mismatch, turn radius, and lateral acceleration. Integrity covers calibration/dimension-source quality and unsigned-import signals. These outputs test internal consistency with recorded inputs and declared assumptions; they are not forensic findings, truth or lie detection, proof of actual motion, or intent attribution.
+
 Successful domain mutations already contain durable canonical activity. A successful/rejected read or UI-only invocation without a canonical activity ID is added to a separate capped session audit outside `ReplayCase`; `get_recent_activity` merges both views and filters by author before applying its limit. This preserves invocation visibility without changing case version, persistence, report eligibility, or canonical history.
 
 Cancellation is checked before adapter work, before staging, before the primary save, and before staged commit. A cancellation before primary persistence begins leaves live state, durable state, and both audit layers unchanged. If it arrives while a non-cancellable primary save is pending, the adapter waits for that save's outcome; a resolved save is compensated before `AbortError` is surfaced, while failed compensation returns/audits `PERSISTENCE_FAILED`. Deterministic adapter tests cover these branches; combined real-adapter + actual-Dexie/browser timing remains a manual integration gate.
@@ -134,7 +141,7 @@ The visible declarative form is named `finalize_factual_report`, includes `toold
 
 Reports are deterministic projections over a case version. Confirmed sections draw only from human-confirmed claims; reported, uncertain, disputed, and hypothetical material remains labelled. Human-reviewed report notes can enter a preview, while unreviewed agent notes remain excluded.
 
-Finalization creates an immutable snapshot through `report.finalize`, which the reducer rejects for agent/WebMCP origin. PDF, SVG, PNG, and JSON exports are explicit local UI actions. JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence blobs and contains the source case ID. The visible import flow creates a re-keyed local copy, then deliberately resets unsigned trust attestations and immutable snapshots. SVG/PNG render the visible scene. PDF embeds scene geometry only when the preview case version still equals the open case version; otherwise it explicitly omits newer geometry. Final release verification must still inspect downloaded files.
+Finalization creates an immutable snapshot through `report.finalize`, which the reducer rejects for agent/WebMCP origin. PDF, SVG, PNG, and JSON exports are explicit local UI actions. JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence blobs and contains the source case ID. The visible import flow creates a re-keyed local copy, deliberately clears or demotes human confirmations, answers, reviewed notes, and immutable snapshots because the transfer is unsigned, and records an import trust-reset signal for integrity review. SVG/PNG render the visible scene. PDF embeds scene geometry only when the preview case version still equals the open case version; otherwise it explicitly omits newer geometry. Final release verification must still inspect downloaded files.
 
 ## Error and recovery behavior
 
@@ -151,9 +158,11 @@ The artifact is a static application publishable over HTTPS. The repository incl
 
 ## Verification status
 
+The current working tree adds seed-v4 calibration/dimensions, five road templates, smooth timed interpolation, oriented contact and swept-road checks, seven motion-advisory classes, four deterministic scenarios, unsigned-import integrity reporting, and exact-revision claim-attestation invalidation. Those additions have focused deterministic coverage in the repository, but this document does not treat them as deployed, native-client, or supported-model evidence. A fresh production build/deployment and live supported-model traces remain pending.
+
 Application commit `00688d8a51fb783dbf147e08ece60470b8877544` passed the 2026-08-28 local and CI release gates: **136/136 Vitest tests across 15 files**, **103 passing plus 5 intentionally skipped Playwright project runs**, strict typecheck/lint/build, and 10 screenshot baselines. GitHub Actions run `33161848637` (verify job `98817932649`; deploy job `98818739202`) published Pages deployment `6139340101` from artifact `9682041096` (3,009,246 bytes; SHA-256 `9fae713230ec290ca8255641b1d13c89d59b155041aa9a68403d3231caff645e`), and all 43 public files byte-matched it. The public demo then passed a **100/100/100/100** Lighthouse 13.4.1 audit with FCP 503.479 ms, LCP/TTI 623.479 ms, Speed Index 745.184 ms, TBT 0 ms, and CLS 0; the report SHA-256 is `7c903b69675faa5e70283876434cca6da501a56d8c44d058706c5c90262714e4`.
 
-A fresh cache-busted live smoke opened the guide, checked the WebMCP experience, loaded seed-v3, and exercised vehicle rotation, trajectory-point addition, and uncertainty editing with zero console warnings/errors, failed requests, or off-origin requests. This browser evidence does not establish broad native-client compatibility, declarative behavior, or a supported-model trace.
+A fresh cache-busted live smoke of that deployed commit opened the guide, checked the WebMCP experience, loaded its seed-v3 fixture, and exercised vehicle rotation, trajectory-point addition, and uncertainty editing with zero console warnings/errors, failed requests, or off-origin requests. This historical release evidence does not cover the current-source seed-v4 realism/integrity additions and does not establish broad native-client compatibility, declarative behavior, or a supported-model trace.
 
 The historical `f980d28` snapshot remains preserved with **53/53 Vitest tests**, **32/32 Playwright runs**, axe/Lighthouse evidence, and its then-native 17→18 Site Tools smoke. Broad current native-client compatibility, complete screen-reader/WCAG conformance, dedicated-origin headers, exported-file fidelity, and supported-model eval traces remain external gates.
 

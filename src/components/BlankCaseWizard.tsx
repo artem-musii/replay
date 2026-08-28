@@ -1,12 +1,23 @@
-import { ArrowLeft, ArrowRight, Check, CloudRain, GitFork, Map } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
+  Check,
+  CloudRain,
+  CornerDownRight,
+  GitFork,
+  Map,
+  SquareParking,
+} from "lucide-react";
 import { useId, useState } from "react";
+import type { RoadSceneType } from "../domain/models";
 import { BrandMark } from "./BrandMark";
 
 export interface BlankCaseInput {
   title: string;
   incidentDate?: string;
   approximateTime?: string;
-  sceneType: "roundabout" | "intersection";
+  sceneType: RoadSceneType;
   roadCondition: "wet" | "dry" | "unknown";
   vehicleCount: 2 | 3 | 4;
   initialStatement?: string;
@@ -29,6 +40,24 @@ const sceneOptions = [
     label: "Intersection",
     helper: "Four-way road template",
     Icon: Map,
+  },
+  {
+    id: "t-junction" as const,
+    label: "T-junction",
+    helper: "Major road with one side road",
+    Icon: CornerDownRight,
+  },
+  {
+    id: "straight-road" as const,
+    label: "Straight road",
+    helper: "Rear-end and lane-change cases",
+    Icon: ArrowLeftRight,
+  },
+  {
+    id: "parking-area" as const,
+    label: "Parking area",
+    helper: "Low-speed aisle and reversing",
+    Icon: SquareParking,
   },
 ];
 

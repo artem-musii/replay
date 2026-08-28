@@ -5,11 +5,15 @@ import {
   CheckCircle2,
   CircleDotDashed,
   FileCheck2,
+  Gauge,
   LockKeyhole,
   MousePointer2,
+  Route,
+  ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
+import { DEMO_SCENARIO_METADATA, type DemoScenarioId } from "../domain/demoScenarios";
 import { BrandMark } from "./BrandMark";
 import { ReplayGuide, type GuideSectionId } from "./ReplayGuide";
 
@@ -20,6 +24,7 @@ interface LandingPageProps {
   onOpenGuidedDemo: () => void;
   onStartBlank: () => void;
   onOpenCollaboration: () => void;
+  onOpenScenario?: (id: DemoScenarioId) => void;
   onResumeCase?: () => void;
 }
 
@@ -51,6 +56,7 @@ export function LandingPage({
   onOpenGuidedDemo,
   onStartBlank,
   onOpenCollaboration,
+  onOpenScenario,
   onResumeCase,
 }: LandingPageProps) {
   const [guideSection, setGuideSection] = useState<GuideSectionId>();
@@ -157,6 +163,56 @@ export function LandingPage({
           </article>
         ))}
       </section>
+
+      {onOpenScenario && (
+        <section className="scenario-lab" aria-labelledby="scenario-lab-title">
+          <header className="scenario-lab__heading">
+            <div>
+              <p className="section-kicker">Deterministic scenario lab</p>
+              <h2 id="scenario-lab-title">Test the model on roads that behave differently.</h2>
+            </div>
+            <p>
+              Four synthetic cases cover calibrated contact, braking, crossing movement, and an
+              attributable record contradiction. WebMCP reports what conflicts without deciding why
+              it conflicts.
+            </p>
+          </header>
+          <div className="scenario-lab__grid">
+            {DEMO_SCENARIO_METADATA.map((scenario) => (
+              <article
+                key={scenario.id}
+                className={`scenario-card${scenario.adversarial ? " is-adversarial" : ""}`}
+              >
+                <div className="scenario-card__meta">
+                  <span>
+                    {scenario.adversarial ? (
+                      <ShieldAlert size={14} aria-hidden="true" />
+                    ) : scenario.validationFocus.includes("motion") ? (
+                      <Gauge size={14} aria-hidden="true" />
+                    ) : (
+                      <Route size={14} aria-hidden="true" />
+                    )}
+                    {scenario.adversarial ? "Contradiction test" : "Plausibility case"}
+                  </span>
+                  <small>{scenario.sceneType.replaceAll("-", " ")}</small>
+                </div>
+                <h3>{scenario.title}</h3>
+                <p>{scenario.summary}</p>
+                <footer>
+                  <small>{scenario.validationFocus.join(" · ")}</small>
+                  <button
+                    className="text-button"
+                    onClick={() => onOpenScenario(scenario.id)}
+                    aria-label={`Open ${scenario.title}`}
+                  >
+                    Open case <ArrowRight size={14} aria-hidden="true" />
+                  </button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section
         className="collaboration-section"

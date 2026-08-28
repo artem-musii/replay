@@ -75,7 +75,7 @@ export const GUIDE_SECTIONS: readonly GuideSection[] = [
       },
       {
         title: "Understand the movement model",
-        body: "REPLAY draws straight movement between points and turns the heading through the shortest angle. It does not model steering, braking, collision forces, or fault. Add intermediate points when a route needs a curve.",
+        body: "Two timed points produce a straight path. Three or more use a time-aware smooth curve through the recorded poses, while headings turn through the shortest angle. REPLAY derives review metrics from those inputs; it does not model driver control, collision forces, or fault.",
       },
       {
         title: "Use lane snap deliberately",

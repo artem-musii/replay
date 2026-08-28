@@ -126,6 +126,50 @@ function changeRecord(
   };
 }
 
+function sameIdSet(left: readonly string[], right: readonly string[]): boolean {
+  const leftIds = new Set(left);
+  const rightIds = new Set(right);
+  return leftIds.size === rightIds.size && [...leftIds].every((id) => rightIds.has(id));
+}
+
+function claimContentOrProvenanceChanged(
+  claim: Claim,
+  command: Extract<ReplayMutationCommand, { type: "claim.update" }>,
+): boolean {
+  return (
+    (command.statement !== undefined && command.statement !== claim.statement) ||
+    (command.sourceType !== undefined && command.sourceType !== claim.sourceType) ||
+    (command.sourceIds !== undefined && !sameIdSet(command.sourceIds, claim.sourceIds)) ||
+    (command.linkedEvidenceIds !== undefined &&
+      !sameIdSet(command.linkedEvidenceIds, claim.linkedEvidenceIds)) ||
+    (command.linkedEventIds !== undefined &&
+      !sameIdSet(command.linkedEventIds, claim.linkedEventIds)) ||
+    (command.linkedSceneObjectIds !== undefined &&
+      !sameIdSet(command.linkedSceneObjectIds, claim.linkedSceneObjectIds))
+  );
+}
+
+/** A human confirmation attests to one exact claim revision, including its provenance. */
+function invalidatePriorClaimConfirmation(
+  claim: Claim,
+  context: CommandExecutionContext,
+  command: ReplayMutationCommand,
+): boolean {
+  if (claim.status !== "confirmed" || !claim.humanConfirmed) return false;
+  claim.status = "reported";
+  claim.humanConfirmed = false;
+  delete claim.confirmedAt;
+  claim.updatedAt = context.now;
+  claim.changeHistory.push(
+    changeRecord(
+      context,
+      command,
+      "Prior human confirmation invalidated because claim content or provenance changed.",
+    ),
+  );
+  return true;
+}
+
 function lockError(id: string, type: string, lock: ItemLock): never {
   throw new DomainCommandError("LOCKED_ITEM", `${type} ${id} is locked`, {
     lockedItem: {
@@ -382,8 +426,11 @@ function applyCaseUpdate(
 function applyActorUpsert(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "actor.upsert" }>,
+  context: CommandExecutionContext,
 ): MutationOutcome {
   const incoming = structuredClone(command.sceneActor);
+  incoming.lastEditedBy = command.actor;
+  incoming.lastEditedAt = context.now;
   requireNeutralReportText(incoming.label);
   const existingIndex = state.actors.findIndex((actor) => actor.id === incoming.id);
   if (existingIndex >= 0) {
@@ -437,10 +484,13 @@ function applyActorUpsert(
 function applyActorPose(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "actor.update-pose" }>,
+  context: CommandExecutionContext,
 ): MutationOutcome {
   const actor = requireActor(state, command.actorId);
   ensureUnlocked(actor, "actor");
   actor.pose = structuredClone(command.pose);
+  actor.lastEditedBy = command.actor;
+  actor.lastEditedAt = context.now;
   return {
     nextState: state,
     affectedIds: [actor.id],
@@ -511,6 +561,8 @@ function applyTrajectorySet(
   const final = keyframes.at(-1);
   if (!final) fail("INVALID_COMMAND", "Trajectory requires at least one keyframe");
   actor.pose = { x: final.x, y: final.y, rotationDeg: final.rotationDeg };
+  actor.lastEditedBy = command.actor;
+  actor.lastEditedAt = context.now;
   appendBranchChange(branch, context, command, `Updated ${actor.label} trajectory.`);
   return {
     nextState: state,
@@ -870,6 +922,8 @@ function applyProposalAccept(
     if (change.kind === "actor-pose") {
       const actor = requireActor(state, change.actorId);
       actor.pose = structuredClone(change.proposedPose);
+      actor.lastEditedBy = "human";
+      actor.lastEditedAt = context.now;
       continue;
     }
     applyTrajectorySet(
@@ -1152,6 +1206,9 @@ function applyClaimUpdate(
   assertReferences(state, command.linkedEventIds ?? [], "event");
   assertReferences(state, command.linkedSceneObjectIds ?? [], "scene");
   assertReferences(state, command.sourceIds ?? [], "source");
+  if (claimContentOrProvenanceChanged(claim, command)) {
+    invalidatePriorClaimConfirmation(claim, context, command);
+  }
   if (command.statement !== undefined) claim.statement = command.statement;
   if (command.status !== undefined) {
     claim.status = command.status;
@@ -1342,6 +1399,19 @@ function applyEvidenceLink(
   if (command.targetType === "claim") {
     const claim = requireClaim(state, command.targetId);
     ensureUnlocked(claim, "claim");
+    const addsEvidence = !claim.linkedEvidenceIds.includes(asset.id);
+    const addsAnnotationLink = Boolean(
+      annotation &&
+      !asset.annotationLinks.some(
+        (candidate) =>
+          candidate.annotationId === annotation.id &&
+          candidate.targetType === "claim" &&
+          candidate.targetId === claim.id,
+      ),
+    );
+    if (addsEvidence || addsAnnotationLink) {
+      invalidatePriorClaimConfirmation(claim, context, command);
+    }
     claim.linkedEvidenceIds = unique([...claim.linkedEvidenceIds, asset.id]);
     asset.linkedClaimIds = unique([...asset.linkedClaimIds, claim.id]);
   } else if (command.targetType === "timeline-event") {
@@ -1434,17 +1504,32 @@ function applyEvidenceDelete(
     "Evidence deletion requires an explicit human confirmation",
   );
   const asset = requireEvidence(state, command.evidenceId);
+  const removedSourceIds = new Set([
+    asset.id,
+    ...asset.annotations.map((annotation) => annotation.id),
+  ]);
+  const claimsWithRemovedEvidence = state.claims.filter(
+    (claim) =>
+      claim.linkedEvidenceIds.includes(asset.id) ||
+      claim.sourceIds.some((sourceId) => removedSourceIds.has(sourceId)),
+  );
   const affectedIds = unique([
     asset.id,
     ...asset.annotations.map((annotation) => annotation.id),
     ...asset.linkedClaimIds,
+    ...claimsWithRemovedEvidence.map((claim) => claim.id),
     ...asset.linkedEventIds,
     ...asset.linkedSceneObjectIds,
     ...asset.linkedBranchIds,
     ...asset.annotationLinks.map((link) => link.targetId),
   ]);
   state.claims.forEach((claim) => {
-    claim.sourceIds = claim.sourceIds.filter((id) => id !== asset.id);
+    const removesSource = claim.sourceIds.some((sourceId) => removedSourceIds.has(sourceId));
+    const removesEvidenceLink = claim.linkedEvidenceIds.includes(asset.id);
+    if (removesSource || removesEvidenceLink) {
+      invalidatePriorClaimConfirmation(claim, context, command);
+    }
+    claim.sourceIds = claim.sourceIds.filter((id) => !removedSourceIds.has(id));
     claim.linkedEvidenceIds = claim.linkedEvidenceIds.filter((id) => id !== asset.id);
   });
   state.timelineEvents.forEach((event) => {
@@ -2076,9 +2161,9 @@ export function applyReplayMutation(
     case "case.update":
       return applyCaseUpdate(state, command);
     case "actor.upsert":
-      return applyActorUpsert(state, command);
+      return applyActorUpsert(state, command, context);
     case "actor.update-pose":
-      return applyActorPose(state, command);
+      return applyActorPose(state, command, context);
     case "trajectory.set":
       return applyTrajectorySet(state, command, context);
     case "proposal.create":

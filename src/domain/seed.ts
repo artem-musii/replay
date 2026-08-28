@@ -242,14 +242,14 @@ function buildDemoCase(): ReplayCase {
       [0, 28, 50, 146],
       [6_000, 35, 65, 125],
       [8_000, 50, 72, 78],
-      [10_000, 62, 57, 62],
+      [10_000, 63, 59, 62],
       [16_000, 74, 54, 80],
     ]),
     trajectory("trajectory-b-baseline", "actor-vehicle-b", [
       [0, 34, 61, 133],
       [6_000, 43, 73, 109],
       [8_000, 56, 72, 59],
-      [10_000, 65, 54, 60],
+      [10_000, 66, 56, 60],
       [16_000, 80, 52, 85],
     ]),
   ];
@@ -292,7 +292,7 @@ function buildDemoCase(): ReplayCase {
         certainty: "uncertain",
         linkedClaimIds: ["claim-initial-statement", "claim-impact-location"],
         linkedEvidenceIds: ["evidence-overview"],
-        location: { x: 64, y: 57 },
+        location: { x: 64.5, y: 57.5 },
       },
     ),
     event("event-stop-a", 16_000, "actor-stop", "Vehicle A final position", ["actor-vehicle-a"], {
@@ -377,6 +377,14 @@ function buildDemoCase(): ReplayCase {
       roadCondition: "wet",
       weather: "overcast",
       lighting: "dusk",
+      trafficSide: "right",
+      calibration: {
+        widthMeters: 100,
+        heightMeters: 70,
+        source: "template",
+        uncertaintyMeters: 1,
+      },
+      postedSpeedLimitKph: 40,
       bounds: { minX: 0, minY: 0, maxX: 100, maxY: 100 },
       roadPolygon: [
         { x: 0, y: 0 },
@@ -392,8 +400,13 @@ function buildDemoCase(): ReplayCase {
         label: "Vehicle A",
         kind: "vehicle",
         dimensions: { width: 1.82, length: 4.31 },
+        vehicleClass: "compact-car",
+        dimensionsSource: "manufacturer",
+        wheelbaseMeters: 2.6,
         colorToken: "vehicle-muted-blue",
         pose: { x: 74, y: 54, rotationDeg: 80 },
+        lastEditedBy: "human",
+        lastEditedAt: CREATED_AT,
         locked: false,
         damageMarkers: [
           {
@@ -413,8 +426,13 @@ function buildDemoCase(): ReplayCase {
         label: "Vehicle B",
         kind: "vehicle",
         dimensions: { width: 1.79, length: 4.22 },
+        vehicleClass: "compact-car",
+        dimensionsSource: "manufacturer",
+        wheelbaseMeters: 2.58,
         colorToken: "vehicle-silver",
         pose: { x: 80, y: 52, rotationDeg: 85 },
+        lastEditedBy: "human",
+        lastEditedAt: CREATED_AT,
         locked: false,
         damageMarkers: [
           {
@@ -472,7 +490,8 @@ function buildDemoCase(): ReplayCase {
       {
         id: "question-impact-location",
         question: "Where was the exact point of contact?",
-        reason: "The current marker is approximate and the seeded paths do not meet there.",
+        reason:
+          "The current marker is approximate. The calibrated vehicle footprints overlap, but the exact contact point within them is not established.",
         importance: "high",
         rankingReasons: ["resolves-contradiction"],
         relatedClaimIds: ["claim-impact-location"],
@@ -508,7 +527,7 @@ function buildDemoCase(): ReplayCase {
         origin: "system",
         actionType: "case.demo-loaded",
         summary:
-          "Loaded deterministic demo case with an intentionally inconsistent impact position.",
+          "Loaded a calibrated deterministic demo with sourced dimensions, timed poses, and an explicitly unresolved lane account.",
         affectedIds: ["case-demo-roundabout", "branch-baseline"],
         undoable: false,
         createdAt: CREATED_AT,

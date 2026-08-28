@@ -12,6 +12,21 @@ export function sceneDeltaForCompassHeading(rotationDeg: number, distancePx: num
   };
 }
 
+/** Converts a real local-scene distance into scene-coordinate deltas. */
+export function sceneDeltaForMetricHeading(
+  rotationDeg: number,
+  distanceMeters: number,
+  calibration: Pick<ReplayCase["environment"], "bounds" | "calibration">,
+): Point {
+  const radians = (rotationDeg * Math.PI) / 180;
+  const sceneWidth = calibration.bounds.maxX - calibration.bounds.minX;
+  const sceneHeight = calibration.bounds.maxY - calibration.bounds.minY;
+  return {
+    x: (Math.sin(radians) * distanceMeters * sceneWidth) / calibration.calibration.widthMeters,
+    y: (-Math.cos(radians) * distanceMeters * sceneHeight) / calibration.calibration.heightMeters,
+  };
+}
+
 export function quantizeTimeMs(timeMs: number, originMs = 0): number {
   return originMs + Math.round((timeMs - originMs) / REPLAY_TIME_STEP_MS) * REPLAY_TIME_STEP_MS;
 }
@@ -100,9 +115,56 @@ export function interpolateRotation(from: number, to: number, progress: number):
   return normalizeDegrees(start + delta * clamp(progress, 0, 1));
 }
 
+function hermitePosition(
+  trajectory: Trajectory,
+  lowerIndex: number,
+  upperIndex: number,
+  progress: number,
+): Point {
+  const lower = trajectory.keyframes[lowerIndex];
+  const upper = trajectory.keyframes[upperIndex];
+  if (!lower || !upper) throw new Error(`Trajectory ${trajectory.id} has an invalid segment`);
+  const previous = trajectory.keyframes[lowerIndex - 1];
+  const next = trajectory.keyframes[upperIndex + 1];
+  const duration = upper.timeMs - lower.timeMs;
+  if (duration <= 0) return { x: lower.x, y: lower.y };
+
+  const lowerSpan = previous ? upper.timeMs - previous.timeMs : duration;
+  const upperSpan = next ? next.timeMs - lower.timeMs : duration;
+  const lowerDerivative = {
+    x: (upper.x - (previous?.x ?? lower.x)) / Math.max(1, lowerSpan),
+    y: (upper.y - (previous?.y ?? lower.y)) / Math.max(1, lowerSpan),
+  };
+  const upperDerivative = {
+    x: ((next?.x ?? upper.x) - lower.x) / Math.max(1, upperSpan),
+    y: ((next?.y ?? upper.y) - lower.y) / Math.max(1, upperSpan),
+  };
+  const t = clamp(progress, 0, 1);
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1;
+  const h10 = t3 - 2 * t2 + t;
+  const h01 = -2 * t3 + 3 * t2;
+  const h11 = t3 - t2;
+  return {
+    x:
+      h00 * lower.x +
+      h10 * lowerDerivative.x * duration +
+      h01 * upper.x +
+      h11 * upperDerivative.x * duration,
+    y:
+      h00 * lower.y +
+      h10 * lowerDerivative.y * duration +
+      h01 * upper.y +
+      h11 * upperDerivative.y * duration,
+  };
+}
+
 /**
- * Returns a deterministic, clamped linear pose for a trajectory. Keyframes are
- * not mutated and rotation follows the shortest angular path.
+ * Returns a deterministic, clamped pose. Position follows a time-aware cubic
+ * Hermite curve through three or more timed points; a two-point path remains
+ * exactly linear. Keyframes are not mutated and rotation follows the shortest
+ * angular path. This is an interpolation model, not a vehicle dynamics model.
  */
 export function interpolateTrajectory(trajectory: Trajectory, timeMs: number): ActorPose {
   if (trajectory.keyframes.length === 0) {
@@ -121,23 +183,47 @@ export function interpolateTrajectory(trajectory: Trajectory, timeMs: number): A
 
   let lower = first;
   let upper = last;
+  let lowerIndex = 0;
+  let upperIndex = trajectory.keyframes.length - 1;
   for (let index = 1; index < trajectory.keyframes.length; index += 1) {
     const candidate = trajectory.keyframes[index];
     if (!candidate) continue;
     if (candidate.timeMs >= timeMs) {
       upper = candidate;
       lower = trajectory.keyframes[index - 1] ?? first;
+      lowerIndex = index - 1;
+      upperIndex = index;
       break;
     }
   }
 
   const duration = upper.timeMs - lower.timeMs;
   const progress = duration === 0 ? 0 : clamp((timeMs - lower.timeMs) / duration, 0, 1);
+  const position = hermitePosition(trajectory, lowerIndex, upperIndex, progress);
   return {
-    x: lower.x + (upper.x - lower.x) * progress,
-    y: lower.y + (upper.y - lower.y) * progress,
+    ...position,
     rotationDeg: interpolateRotation(lower.rotationDeg, upper.rotationDeg, progress),
   };
+}
+
+/** Samples the same curve used by playback for SVG rendering and swept checks. */
+export function sampleTrajectory(trajectory: Trajectory, samplesPerSegment = 12): ActorPose[] {
+  if (trajectory.keyframes.length === 0) return [];
+  if (trajectory.keyframes.length === 1) return [interpolateTrajectory(trajectory, 0)];
+  const samples: ActorPose[] = [];
+  const divisions = Math.max(1, Math.min(100, Math.round(samplesPerSegment)));
+  for (let index = 1; index < trajectory.keyframes.length; index += 1) {
+    const from = trajectory.keyframes[index - 1];
+    const to = trajectory.keyframes[index];
+    if (!from || !to) continue;
+    for (let sampleIndex = index === 1 ? 0 : 1; sampleIndex <= divisions; sampleIndex += 1) {
+      const progress = sampleIndex / divisions;
+      samples.push(
+        interpolateTrajectory(trajectory, from.timeMs + (to.timeMs - from.timeMs) * progress),
+      );
+    }
+  }
+  return samples;
 }
 
 export function getBranchTrajectory(

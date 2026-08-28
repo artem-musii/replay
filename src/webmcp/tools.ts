@@ -55,7 +55,7 @@ const metadata = {
   validate_case_consistency: {
     title: "Validate case consistency",
     description:
-      "Runs deterministic consistency rules for a branch and scope and returns structured issues rather than speculation. Use after reconstruction changes or before report review. It does not mutate factual case content or navigate the workspace. An open case is required.",
+      "Runs deterministic timeline, calibrated geometry, motion-envelope, provenance, integrity, completeness, and report rules for a branch or scope. Results are review advisories with explicit assumptions, not forensic findings or judgments about intent. Use after reconstruction changes or before report review. It does not mutate factual case content or navigate the workspace. An open case is required.",
     annotations: READ_UNTRUSTED,
   },
   focus_workspace_item: {
@@ -73,7 +73,7 @@ const metadata = {
   upsert_scene_actor: {
     title: "Add or update scene actor",
     description:
-      "Adds a vehicle actor or updates one existing actor's label, normalized position, rotation, dimensions, and optional color. Use to construct or correct the visible scene. It mutates canonical case content, updates the canvas and activity feed, and requires a scene plus the current case version; locked actors remain protected.",
+      "Adds a vehicle actor or updates one existing actor's label, normalized position, rotation, real dimensions in metres, vehicle class, estimated/template source, wheelbase, and optional color. An agent cannot label dimensions as measured or manufacturer-sourced; only the human UI can attest those sources. It mutates canonical case content, updates the canvas and activity feed, and requires a scene plus the current case version; locked actors remain protected.",
     annotations: WRITE_UNTRUSTED,
   },
   set_actor_trajectory: {

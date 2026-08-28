@@ -30,6 +30,30 @@ export const ClaimSourceTypeSchema = z.enum([
   "agent-inference",
 ]);
 
+export const RoadSceneTypeSchema = z.enum([
+  "roundabout",
+  "intersection",
+  "t-junction",
+  "straight-road",
+  "parking-area",
+]);
+
+export const MeasurementSourceSchema = z.enum([
+  "measured",
+  "manufacturer",
+  "template",
+  "estimated",
+  "unknown",
+]);
+export const CalibrationSourceSchema = z.enum([
+  "measured",
+  "survey",
+  "map",
+  "template",
+  "estimated",
+  "unknown",
+]);
+
 export const PointSchema = z.object({ x: finite, y: finite }).strict();
 
 export const ActorPoseSchema = PointSchema.extend({
@@ -58,10 +82,26 @@ export const ChangeRecordSchema = z
 
 export const EnvironmentStateSchema = z
   .object({
-    sceneType: z.enum(["roundabout", "intersection"]),
+    sceneType: RoadSceneTypeSchema,
     roadCondition: z.enum(["wet", "dry", "unknown"]),
     weather: z.enum(["clear", "rain", "overcast", "unknown"]),
     lighting: z.enum(["daylight", "dusk", "night", "unknown"]),
+    trafficSide: z.enum(["right", "left", "unknown"]).default("unknown"),
+    calibration: z
+      .object({
+        widthMeters: finite.positive().max(10_000),
+        heightMeters: finite.positive().max(10_000),
+        source: CalibrationSourceSchema,
+        uncertaintyMeters: finite.nonnegative().max(1_000),
+      })
+      .strict()
+      .default({
+        widthMeters: 100,
+        heightMeters: 70,
+        source: "template",
+        uncertaintyMeters: 1,
+      }),
+    postedSpeedLimitKph: finite.positive().max(300).optional(),
     bounds: z
       .object({ minX: finite, minY: finite, maxX: finite, maxY: finite })
       .strict()
@@ -100,9 +140,18 @@ export const SceneActorSchema = z
     id,
     label: shortText,
     kind: z.literal("vehicle"),
-    dimensions: z.object({ width: finite.positive(), length: finite.positive() }).strict(),
+    dimensions: z
+      .object({ width: finite.min(0.4).max(4), length: finite.min(1.5).max(20) })
+      .strict(),
+    vehicleClass: z
+      .enum(["compact-car", "saloon", "suv", "van", "pickup", "motorcycle", "unknown"])
+      .default("unknown"),
+    dimensionsSource: MeasurementSourceSchema.default("unknown"),
+    wheelbaseMeters: finite.positive().max(20).optional(),
     colorToken: z.string().trim().min(1).max(100),
     pose: ActorPoseSchema,
+    lastEditedBy: ActionAuthorSchema.optional(),
+    lastEditedAt: z.iso.datetime().optional(),
     locked: z.boolean(),
     lock: ItemLockSchema.optional(),
     damageMarkers: z.array(DamageMarkerSchema).max(100),
@@ -114,6 +163,13 @@ export const SceneActorSchema = z
         code: "custom",
         path: ["lock"],
         message: "Lock metadata must match locked state",
+      });
+    }
+    if (actor.wheelbaseMeters !== undefined && actor.wheelbaseMeters >= actor.dimensions.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["wheelbaseMeters"],
+        message: "Wheelbase must be shorter than overall vehicle length",
       });
     }
   });
@@ -654,7 +710,16 @@ export const ConsistencyIssueSchema = z
   .object({
     id,
     ruleId: id,
-    scope: z.enum(["timeline", "geometry", "damage", "provenance", "completeness", "report"]),
+    scope: z.enum([
+      "timeline",
+      "geometry",
+      "motion",
+      "damage",
+      "integrity",
+      "provenance",
+      "completeness",
+      "report",
+    ]),
     severity: z.enum(["error", "warning", "question"]),
     title: shortText,
     explanation: longText,

@@ -593,4 +593,63 @@ test.describe("production-critical regressions", () => {
     await inspectorTab(page, "Facts").click();
     await expect(page.getByText("4 confirmed", { exact: true })).toBeVisible();
   });
+
+  test("does not infer another editor from a delayed single-page lease check", async ({ page }) => {
+    await page.addInitScript(() => {
+      const originalRequest = navigator.locks.request.bind(navigator.locks);
+      Object.defineProperty(navigator.locks, "request", {
+        configurable: true,
+        value: (name: string, options: LockOptions, callback: (lock: Lock | null) => unknown) =>
+          new Promise((resolve, reject) => {
+            window.setTimeout(() => {
+              originalRequest(name, options, callback).then(resolve, reject);
+            }, 700);
+          }),
+      });
+    });
+
+    await openDemo(page);
+    await expect(page.locator(".workspace-conflict")).toHaveCount(0);
+    await expect(page.locator(".save-status")).toContainText("Saved locally");
+  });
+
+  test("lets a visible page take over a hidden editing lease and reload saved work", async ({
+    context,
+    page,
+  }) => {
+    await openDemo(page);
+    await expect(page.locator(".workspace-conflict")).toHaveCount(0);
+    await inspectorTab(page, "Facts").click();
+    await page
+      .getByRole("button", {
+        name: /Vehicle A was leaving the roundabout when Vehicle B made contact/,
+      })
+      .click();
+    await page.getByRole("button", { name: "Confirm as human-reviewed" }).click();
+    await expect.poll(() => persistedDemoVersion(page)).toBe(3);
+
+    const contender = await context.newPage();
+    await contender.goto("/#demo");
+    await expect(contender.locator("main.workspace")).toBeVisible();
+    const conflict = contender.locator(".workspace-conflict");
+    await expect(conflict).toContainText("Another page context still owns this case");
+    await expect(conflict).toContainText("hidden or recently closed tab");
+
+    await conflict.getByRole("button", { name: "Take over & reload" }).click();
+    const takeover = contender.getByRole("alertdialog", { name: "Take over editing?" });
+    await expect(takeover).toContainText("newest saved copy");
+    await expect(takeover.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await takeover.getByRole("button", { name: "Take over & reload" }).click();
+    await expect(contender.locator("main.workspace")).toBeVisible();
+    await expect(contender.locator(".workspace-conflict")).toHaveCount(0);
+    await expect(contender.locator(".save-status")).toContainText("Saved locally");
+    await expect(contender.locator(".workspace-case-title")).toContainText("v3");
+    await inspectorTab(contender, "Facts").click();
+    await expect(contender.getByText("5 confirmed", { exact: true })).toBeVisible();
+
+    await expect(page.locator(".workspace-conflict")).toContainText(
+      "Another page context still owns this case",
+    );
+    await expect(page.getByRole("button", { name: "Take over & reload" })).toBeVisible();
+  });
 });

@@ -183,7 +183,18 @@ export type WorkspaceItemType = (typeof WORKSPACE_ITEM_TYPES)[number];
 export const ACTIVITY_AUTHOR_FILTERS = ["human", "agent", "system", "all"] as const;
 export type ActivityAuthorFilter = (typeof ACTIVITY_AUTHOR_FILTERS)[number];
 
-export const CONSISTENCY_SCOPES = ["all", "scene", "timeline", "provenance", "report"] as const;
+export const CONSISTENCY_SCOPES = [
+  "all",
+  "scene",
+  "timeline",
+  "geometry",
+  "motion",
+  "damage",
+  "integrity",
+  "provenance",
+  "completeness",
+  "report",
+] as const;
 export type ConsistencyScope = (typeof CONSISTENCY_SCOPES)[number];
 
 export const TOOL_GROUPS = ["base", "scene", "facts", "hypothesis", "report"] as const;

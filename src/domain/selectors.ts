@@ -71,7 +71,7 @@ export function getCaseSummary(replayCase: ReplayCase): ReplayCaseSummary {
     },
     finalizedSnapshotCount: replayCase.reportSnapshots.length,
     safetyNotice:
-      "Consistency checks are informational and are not a forensic or legal determination.",
+      "Geometry and motion results are deterministic review advisories based on recorded calibration, dimensions, timed poses, and declared envelopes. They are not forensic findings, lie detection, or fault and liability determinations.",
   };
 }
 

@@ -1,6 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
-import { createBlankCase, createDemoCase, type ReplayCase } from "./domain";
+import {
+  createBlankCase,
+  createDemoCase,
+  createDemoScenario,
+  type DemoScenarioId,
+  type ReplayCase,
+} from "./domain";
 import {
   deleteCaseLocally,
   loadCaseById,
@@ -289,6 +295,14 @@ export function App() {
           onOpenCollaboration={() =>
             document.getElementById("collaboration")?.scrollIntoView({ behavior: "smooth" })
           }
+          onOpenScenario={(scenarioId: DemoScenarioId) => {
+            if (scenarioId === "roundabout-calibrated") {
+              openCase(savedDemoCase ?? createDemoCase(), false, true);
+              return;
+            }
+            setStartWorkspaceTour(false);
+            openCase(createDemoScenario(scenarioId));
+          }}
         />
       )}
       {view === "wizard" && (

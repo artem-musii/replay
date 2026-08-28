@@ -1,7 +1,17 @@
 export const REPLAY_SCHEMA_VERSION = 2 as const;
-export const REPLAY_SEED_VERSION = 3 as const;
+export const REPLAY_SEED_VERSION = 4 as const;
 
 export type ActorKind = "vehicle";
+
+export type RoadSceneType =
+  "roundabout" | "intersection" | "t-junction" | "straight-road" | "parking-area";
+
+export type VehicleClass =
+  "compact-car" | "saloon" | "suv" | "van" | "pickup" | "motorcycle" | "unknown";
+
+export type MeasurementSource = "measured" | "manufacturer" | "template" | "estimated" | "unknown";
+export type CalibrationSource =
+  "measured" | "survey" | "map" | "template" | "estimated" | "unknown";
 
 export type ClaimStatus =
   "confirmed" | "reported" | "likely" | "uncertain" | "disputed" | "unknown" | "agent-hypothesis";
@@ -70,10 +80,18 @@ export interface ChangeRecord {
 }
 
 export interface EnvironmentState {
-  sceneType: "roundabout" | "intersection";
+  sceneType: RoadSceneType;
   roadCondition: "wet" | "dry" | "unknown";
   weather: "clear" | "rain" | "overcast" | "unknown";
   lighting: "daylight" | "dusk" | "night" | "unknown";
+  trafficSide: "right" | "left" | "unknown";
+  calibration: {
+    widthMeters: number;
+    heightMeters: number;
+    source: CalibrationSource;
+    uncertaintyMeters: number;
+  };
+  postedSpeedLimitKph?: number | undefined;
   bounds: {
     minX: number;
     minY: number;
@@ -102,8 +120,14 @@ export interface SceneActor {
     width: number;
     length: number;
   };
+  vehicleClass: VehicleClass;
+  dimensionsSource: MeasurementSource;
+  wheelbaseMeters?: number | undefined;
   colorToken: string;
   pose: ActorPose;
+  /** Last canonical geometry/specification author; absent only on legacy imports. */
+  lastEditedBy?: ActionAuthor | undefined;
+  lastEditedAt?: string | undefined;
   locked: boolean;
   lock?: ItemLock | undefined;
   damageMarkers: DamageMarker[];
@@ -348,7 +372,14 @@ export interface AgentProposal {
 }
 
 export type ConsistencyScope =
-  "timeline" | "geometry" | "damage" | "provenance" | "completeness" | "report";
+  | "timeline"
+  | "geometry"
+  | "motion"
+  | "damage"
+  | "integrity"
+  | "provenance"
+  | "completeness"
+  | "report";
 
 export interface ConsistencyIssue {
   [key: string]: unknown;

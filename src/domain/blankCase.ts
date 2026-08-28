@@ -2,8 +2,9 @@ import { z } from "zod";
 
 import { validateConsistency } from "./consistency";
 import { REPLAY_SCHEMA_VERSION } from "./models";
-import type { Claim, ReplayCase, SceneActor } from "./models";
-import { parseReplayCase } from "./schema";
+import type { Claim, ReplayCase, RoadSceneType, SceneActor } from "./models";
+import { getRoadTemplate } from "./roadTemplates";
+import { parseReplayCase, RoadSceneTypeSchema } from "./schema";
 
 export const BlankCaseInputSchema = z
   .object({
@@ -14,7 +15,7 @@ export const BlankCaseInputSchema = z
       .string()
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
       .optional(),
-    sceneType: z.enum(["roundabout", "intersection"]),
+    sceneType: RoadSceneTypeSchema,
     roadCondition: z.enum(["wet", "dry", "unknown"]),
     vehicleCount: z.number().int().min(1).max(6),
     initialStatement: z.string().trim().min(1).max(10_000).optional(),
@@ -26,7 +27,7 @@ export interface BlankCaseInput {
   title: string;
   incidentDate?: string | undefined;
   approximateTime?: string | undefined;
-  sceneType: "roundabout" | "intersection";
+  sceneType: RoadSceneType;
   roadCondition: "wet" | "dry" | "unknown";
   vehicleCount: number;
   initialStatement?: string | undefined;
@@ -45,23 +46,8 @@ function initialActorPose(
   sceneType: BlankCaseInput["sceneType"],
   index: number,
 ): SceneActor["pose"] {
-  const sharedApproachSlots: SceneActor["pose"][] = [
-    { x: 24, y: 56.4, rotationDeg: 90 },
-    { x: 76, y: 43.6, rotationDeg: 270 },
-    { x: 45.5, y: 20, rotationDeg: 180 },
-    { x: 54.5, y: 80, rotationDeg: 0 },
-  ];
-  const extraSlots: SceneActor["pose"][] =
-    sceneType === "roundabout"
-      ? [
-          { x: 35, y: 65, rotationDeg: 125 },
-          { x: 65, y: 35, rotationDeg: 305 },
-        ]
-      : [
-          { x: 16, y: 56.4, rotationDeg: 90 },
-          { x: 84, y: 43.6, rotationDeg: 270 },
-        ];
-  const pose = [...sharedApproachSlots, ...extraSlots][index] ?? sharedApproachSlots[0];
+  const poses = getRoadTemplate(sceneType).initialActorPoses;
+  const pose = poses[index] ?? poses[0];
   if (!pose) throw new Error("REPLAY could not choose an initial vehicle position.");
   return pose;
 }
@@ -74,11 +60,15 @@ export function createBlankCase(
   const parsed = BlankCaseInputSchema.parse(input);
   const now = options.now ?? new Date().toISOString();
   const caseId = options.caseId ?? parsed.caseId ?? `case-${crypto.randomUUID()}`;
+  const roadTemplate = getRoadTemplate(parsed.sceneType);
   const actors: SceneActor[] = Array.from({ length: parsed.vehicleCount }, (_, index) => ({
     id: `actor-vehicle-${String.fromCharCode(97 + index)}`,
     label: actorLabel(index),
     kind: "vehicle",
     dimensions: { width: 1.8, length: 4.3 },
+    vehicleClass: "saloon",
+    dimensionsSource: "template",
+    wheelbaseMeters: 2.65,
     colorToken:
       index === 0
         ? "vehicle-muted-blue"
@@ -86,6 +76,8 @@ export function createBlankCase(
           ? "vehicle-silver"
           : `vehicle-neutral-${String(index + 1)}`,
     pose: initialActorPose(parsed.sceneType, index),
+    lastEditedBy: "human",
+    lastEditedAt: now,
     locked: false,
     damageMarkers: [],
   }));
@@ -128,15 +120,18 @@ export function createBlankCase(
     caseVersion: 1,
     ...(parsed.incidentDate ? { incidentDate: parsed.incidentDate } : {}),
     ...(parsed.approximateTime ? { approximateTime: parsed.approximateTime } : {}),
-    sceneTemplateId:
-      parsed.sceneType === "roundabout"
-        ? "scene-european-roundabout"
-        : "scene-four-way-intersection",
+    sceneTemplateId: roadTemplate.id,
     environment: {
       sceneType: parsed.sceneType,
       roadCondition: parsed.roadCondition,
       weather: "unknown",
       lighting: "unknown",
+      trafficSide: "unknown",
+      calibration: {
+        ...roadTemplate.calibration,
+        source: "template",
+      },
+      postedSpeedLimitKph: roadTemplate.defaultSpeedLimitKph,
       bounds: { minX: 0, minY: 0, maxX: 100, maxY: 100 },
       roadPolygon: [
         { x: 0, y: 0 },

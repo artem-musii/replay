@@ -19,17 +19,17 @@ describe("versioned case schemas and seeds", () => {
 
     expect(first).toEqual(second);
     expect(first.schemaVersion).toBe(2);
-    expect(first.seedVersion).toBe(3);
+    expect(first.seedVersion).toBe(4);
     expect(ReplayCaseSchema.parse(first)).toEqual(first);
     expect(validateCaseReferences(first)).toEqual([]);
   });
 
-  it("contains the deliberate impact-position inconsistency and no fault conclusion", () => {
+  it("uses calibrated footprints without a false impact-separation warning or fault conclusion", () => {
     const replayCase = createDemoCase();
     const ruleIds = replayCase.consistencyIssues.map((issue) => issue.ruleId);
     expect(
       replayCase.consistencyIssues.some((issue) => issue.ruleId === "geometry.impact-separation"),
-    ).toBe(true);
+    ).toBe(false);
     expect(ruleIds).not.toContain("geometry.actor-outside-scene");
     expect(ruleIds).not.toContain("geometry.keyframe-outside-scene");
     expect(ruleIds).not.toContain("damage.contact-direction-hint");
@@ -52,7 +52,7 @@ describe("versioned case schemas and seeds", () => {
       [0, 34, 61, 133],
       [6_000, 43, 73, 109],
       [8_000, 56, 72, 59],
-      [10_000, 65, 54, 60],
+      [10_000, 66, 56, 60],
       [16_000, 80, 52, 85],
     ]);
     expect(vehicleB.keyframes[3]!.x).toBeGreaterThan(vehicleA.keyframes[3]!.x);
