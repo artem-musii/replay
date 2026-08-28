@@ -4,7 +4,7 @@ Last updated: 2026-08-28
 
 ## Current milestone
 
-The schema-v2/proposal application is implemented, CI-verified, and deployed to GitHub Pages. Application commit [`df599f37e59e562ffaee919fdc4072eec9265f51`](https://github.com/artem-musii/replay-sol/commit/df599f37e59e562ffaee919fdc4072eec9265f51) passed [Actions run `33125071538`](https://github.com/artem-musii/replay-sol/actions/runs/33125071538), produced the verified Pages artifact, and is live at the public URL. Submission completion now depends on supported-model/native Site Tools traces, manual accessibility/cross-browser/export review, a dedicated header-capable origin for production-like response-policy claims, and the public demo video.
+The onboarding/path-authoring/schema-v2 application is implemented, CI-verified, and deployed to GitHub Pages. Application commit [`00688d8a51fb783dbf147e08ece60470b8877544`](https://github.com/artem-musii/replay-sol/commit/00688d8a51fb783dbf147e08ece60470b8877544) passed [Actions run `33161848637`](https://github.com/artem-musii/replay-sol/actions/runs/33161848637), produced the verified Pages artifact, and is live at the public URL. Submission completion now depends on supported-model/native Site Tools execution traces, manual accessibility/cross-browser/export review, a dedicated header-capable origin for production-like response-policy claims, and the public demo video.
 
 ## Implemented product
 
@@ -28,18 +28,18 @@ The 2026-08-27 baseline for commit `f980d28` remains preserved in `docs/testing.
 
 ### Current deployed release
 
-The release contains proposal, persistence, semantic-intent idempotency, staged WebMCP save/commit/compensation, dialog, iframe, evidence-link, override/focus, reset, and export regression coverage. The clean 2026-08-28 local gate recorded:
+The release contains proposal, persistence, semantic-intent idempotency, staged WebMCP save/commit/compensation, onboarding, timed path/range/heading editing, narrow and 200%-text reflow, dialog, iframe, evidence-link, override/focus, reset, and export regression coverage. The clean 2026-08-28 local gate recorded:
 
 - `npm ci` passing for 287 packages with no deprecation warnings and `npm audit` reporting 0 vulnerabilities after upgrades to `eslint` 10.9.1, `@eslint/js` 10.0.1, and `eslint-plugin-react-hooks` 7.1.1 plus a self-hosted Inter 5.3.0 font dependency; the Node.js floor is 22.13;
 - format, lint with 0 warnings, strict typecheck, production build, and `git diff --check` passing;
-- **119/119 Vitest tests across 14 files**, with coverage of **52.9% statements, 41.46% branches, 49.43% functions, and 54.77% lines**; and
-- **78 Playwright project runs in 30.9 seconds: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 9 checked screenshot baselines.
+- **136/136 Vitest tests across 15 files**, with coverage of **52.67% statements, 41.53% branches, 49.55% functions, and 54.77% lines**; and
+- **108 Playwright project runs: 103 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 10 checked screenshot baselines.
 
-GitHub Actions verify job `98701114804` independently passed dependency installation, formatting, lint, typecheck, **119/119 Vitest tests**, **73 passing and 5 intentionally skipped Playwright project runs**, and the production build. Deploy job `98701763882` published Pages deployment `6132593328` from artifact `9668071269` (SHA-256 `b35ee8311e9f94928ff3fc1a38e93d4d77282271874bb7481d2bae8cd4e9b8c4`). All 43 deployed files returned successfully and byte-matched the workflow artifact.
+GitHub Actions verify job `98817932649` independently passed dependency installation, formatting, lint, typecheck, **136/136 Vitest tests**, **103 passing and 5 intentionally skipped Playwright project runs**, and the production build. Deploy job `98818739202` published Pages deployment `6139340101` from artifact `9682041096` (3,009,246 bytes; SHA-256 `9fae713230ec290ca8255641b1d13c89d59b155041aa9a68403d3231caff645e`). All 43 public files returned successfully and byte-matched the workflow artifact.
 
-A cache-busted public Lighthouse 13.4.1 run scored **100 performance, 100 accessibility, 100 best practices, and 100 SEO**, with FCP 385.565 ms, LCP/TTI 505.565 ms, Speed Index 565.156 ms, TBT 0 ms, and CLS 0. A fresh live browser loaded the application and four active evidence images with 200 responses, made no off-origin requests, emitted no console warnings/errors, preserved a human UI observation across a full reload, and returned to deterministic seed-v2 state after explicit reset.
+A cache-busted public Lighthouse 13.4.1 run scored **100 performance, 100 accessibility, 100 best practices, and 100 SEO**, with FCP 503.479 ms, LCP/TTI 623.479 ms, Speed Index 745.184 ms, TBT 0 ms, and CLS 0; the report SHA-256 is `7c903b69675faa5e70283876434cca6da501a56d8c44d058706c5c90262714e4`.
 
-An injected standards-compatible `document.modelContext` registry harness verified the deployed bundle's 18→19 imperative lifecycle and expected annotations. `get_case_summary` read schema v2 without canonical mutation; a branch-scoped `add_observation` durably advanced to case version 2; exact replay returned the original receipt with `idempotent: true`; changed intent under that request ID returned `IDEMPOTENCY_CONFLICT` without a version increment; and an ordinary-UI report preview added `add_report_note`. A cache-busted new-document navigation retained the durable version-2 observation with **Saved locally**, correctly cleared the transient preview and injected registry, and exposed the client's native manual mode; visible UI reset then removed the observation and restored seed-v2 case version 1. This was a **runtime-polyfilled contract smoke**, not native OpenAI Site Tools discovery, a supported-model trace, or declarative-form activation. Native current-client evidence remains outstanding.
+A fresh cache-busted live smoke opened the optional guide, checked the WebMCP experience, loaded the deterministic seed-v3 case, and exercised vehicle rotation, trajectory-point addition, uncertainty editing, and retained-recovery onboarding access. It recorded zero console warnings/errors, failed requests, and off-origin requests. A separate current Codex in-app-browser smoke surfaced all 18 baseline tools and the visible `18 registered` state without invoking one. Supported-model execution, declarative-form activation, and broad native-client compatibility remain outstanding.
 
 ## Known implementation limits
 
@@ -54,7 +54,7 @@ An injected standards-compatible `document.modelContext` registry harness verifi
 
 ## Deployment status
 
-The current schema-v2/proposal application is available at [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/) from commit `df599f37e59e562ffaee919fdc4072eec9265f51`. Initial deployment evidence used commit `c95df75`; the historical audited baseline used `f980d28` and remains preserved without being conflated with the current release.
+The current schema-v2/proposal application is available at [artem-musii.github.io/replay-sol](https://artem-musii.github.io/replay-sol/) from commit `00688d8a51fb783dbf147e08ece60470b8877544`. Initial deployment evidence used commit `c95df75`; the historical audited baseline used `f980d28` and remains preserved without being conflated with the current release.
 
 GitHub Pages shares the `artem-musii.github.io` storage origin with other projects and does not honor `public/_headers`; use the public build only with synthetic/non-sensitive data. The application-level framing guard helps at runtime, while response-level `Permissions-Policy`, COOP/COEP, `X-Content-Type-Options`, and frame policy still require a dedicated header-capable origin.
 

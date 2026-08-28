@@ -8,7 +8,7 @@ The hero supports product communication. The other four images are fictional, sy
 
 ## Active release files
 
-The application/seed reference this set. All active files are public in Pages deployment `6132593328`; the all-43-file deployment audit returned them successfully and byte-matched them to artifact `9668071269`. A fresh live-browser audit also loaded all four current evidence images with 200 responses.
+The application/seed reference this set. All active files are public in Pages deployment `6139340101`; the all-43-file deployment audit returned them successfully and byte-matched them to artifact `9682041096`. A fresh live-browser audit also loaded all four current evidence images with 200 responses.
 
 | File                                                                                        | Purpose                               |  Dimensions |     WebP size | SHA-256                                                            |
 | ------------------------------------------------------------------------------------------- | ------------------------------------- | ----------: | ------------: | ------------------------------------------------------------------ |

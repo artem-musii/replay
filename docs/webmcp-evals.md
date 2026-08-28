@@ -2,7 +2,7 @@
 
 Machine-readable suite: [`../evals/webmcp-evals.json`](../evals/webmcp-evals.json)
 
-Status: **probabilistic evaluation specification, not model results**, reconciled 2026-08-28. Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` passed **119/119 Vitest tests** and **78 Playwright runs: 73 passed, 5 intentionally skipped, and 0 failed** in CI and is deployed. A runtime-injected registry verified the deployed 18→19 tool contract, but that polyfill is not native Site Tools or a supported-model run. Every live supported-model scenario below remains pending.
+Status: **probabilistic evaluation specification, not model results**, reconciled 2026-08-28. Application commit `00688d8a51fb783dbf147e08ece60470b8877544` passed **136/136 Vitest tests** and **108 Playwright runs: 103 passed, 5 intentionally skipped, and 0 failed** in CI and is deployed. The current deterministic suite verifies the polyfilled 18→19 tool contract, while a separate current in-app-browser smoke surfaced the 18 native baseline registrations without invoking them. Neither is a supported-model tool-execution run. Every live supported-model scenario below remains pending.
 
 ## What the suite evaluates
 

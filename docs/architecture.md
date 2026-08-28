@@ -81,8 +81,8 @@ History snapshots and the fast request-receipt map are process-memory features. 
 
 The implemented manual path includes:
 
-- landing page, deterministic demo, blank-case wizard, and local resume;
-- actor placement and rotation, trajectory creation/editing, impact and damage marking, locks, timeline event creation/editing, and playback;
+- landing page, optional replayable guide and guided workspace tour, deterministic demo, blank-case wizard, and local resume;
+- actor placement and direct/exact rotation, timed trajectory-point creation/editing with explicit interpolation guidance, impact and damage marking, locks, timeline event creation/editing, and playback;
 - claims with explicit certainty and human confirmation;
 - local evidence upload, metadata, point/rectangle annotations, linking, and deletion;
 - questions, hypothesis forks/assumptions, branch overlay, and side-by-side summaries;
@@ -151,9 +151,9 @@ The artifact is a static application publishable over HTTPS. The repository incl
 
 ## Verification status
 
-Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` passed the 2026-08-28 local and CI release gates: **119/119 Vitest tests across 14 files**, **73 passing plus 5 intentionally skipped Playwright project runs**, strict typecheck/lint/build, and nine screenshot baselines. GitHub Actions run `33125071538` deployed the byte-verified Pages artifact; the public demo then passed current asset/network/console/persistence/reset checks and a **100/100/100/100** Lighthouse audit.
+Application commit `00688d8a51fb783dbf147e08ece60470b8877544` passed the 2026-08-28 local and CI release gates: **136/136 Vitest tests across 15 files**, **103 passing plus 5 intentionally skipped Playwright project runs**, strict typecheck/lint/build, and 10 screenshot baselines. GitHub Actions run `33161848637` (verify job `98817932649`; deploy job `98818739202`) published Pages deployment `6139340101` from artifact `9682041096` (3,009,246 bytes; SHA-256 `9fae713230ec290ca8255641b1d13c89d59b155041aa9a68403d3231caff645e`), and all 43 public files byte-matched it. The public demo then passed a **100/100/100/100** Lighthouse 13.4.1 audit with FCP 503.479 ms, LCP/TTI 623.479 ms, Speed Index 745.184 ms, TBT 0 ms, and CLS 0; the report SHA-256 is `7c903b69675faa5e70283876434cca6da501a56d8c44d058706c5c90262714e4`.
 
-A runtime-injected standards-compatible registry exercised the deployed 18→19 WebMCP contract, including read/mutate/idempotency/conflict, the transient report-preview lifecycle, durable observation persistence across a cache-busted new-document navigation, and reset. Because the audit client exposed no native `document.modelContext`, this is polyfilled contract evidence—not native Site Tools discovery, declarative behavior, or a supported-model trace.
+A fresh cache-busted live smoke opened the guide, checked the WebMCP experience, loaded seed-v3, and exercised vehicle rotation, trajectory-point addition, and uncertainty editing with zero console warnings/errors, failed requests, or off-origin requests. This browser evidence does not establish broad native-client compatibility, declarative behavior, or a supported-model trace.
 
 The historical `f980d28` snapshot remains preserved with **53/53 Vitest tests**, **32/32 Playwright runs**, axe/Lighthouse evidence, and its then-native 17→18 Site Tools smoke. Broad current native-client compatibility, complete screen-reader/WCAG conformance, dedicated-origin headers, exported-file fidelity, and supported-model eval traces remain external gates.
 

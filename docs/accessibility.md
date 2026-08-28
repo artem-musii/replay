@@ -20,7 +20,7 @@ The `f980d28` Playwright suite passed **32/32 project runs**: 16 scenarios in de
 
 Lighthouse 13.4.1 scored both the seeded local production-preview workspace and the public GitHub Pages build **100 for accessibility** for that historical commit. A label-in-name diagnostic found during the first audit was corrected before those recorded runs.
 
-The current `df599f37e59e562ffaee919fdc4072eec9265f51` release adds automated focus trapping, Escape/cancel behavior, focus restoration, 320px reflow, exact scene editors, and iframe-guard regressions. Its clean Playwright gate completed **78 runs: 73 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, including the axe states. The deployed public Lighthouse 13.4.1 audit scored **100 for accessibility**.
+The current `00688d8a51fb783dbf147e08ece60470b8877544` release adds automated focus trapping, Escape/cancel behavior, focus restoration, 320px and 200%-text reflow, exact trajectory/rotation editors, reachable mobile guide and tour controls, and iframe-guard regressions. Its clean Playwright gate completed **108 runs: 103 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, including the axe states and 10 checked screenshot baselines. The deployed public Lighthouse 13.4.1 audit scored **100 for accessibility**; the complete 100/100/100/100 report has SHA-256 `7c903b69675faa5e70283876434cca6da501a56d8c44d058706c5c90262714e4`.
 
 These automated checks are guardrails, not a substitute for assistive-technology review. The historical `f980d28` results above remain preserved rather than being substituted for current manual evidence.
 

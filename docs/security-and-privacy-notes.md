@@ -192,7 +192,7 @@ There is no analytics by default. If diagnostics are ever added, they require a 
 
 The historical `f980d28` snapshot recorded passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). It remains preserved but predates schema v2, proposals, persistence recovery/CAS, and the current 19-tool inventory.
 
-Application commit `df599f37e59e562ffaee919fdc4072eec9265f51` passed strict typecheck/build, **119/119 Vitest tests**, and **73 passing plus 5 intentionally skipped Playwright runs** in CI before deployment. Public verification byte-matched all 43 artifact files, observed no off-origin or failed requests and no console warnings/errors, and confirmed ordinary-UI persistence/reset. Runtime corrupt-blob rejection remains implemented source behavior rather than a directly exercised database test.
+Application commit `00688d8a51fb783dbf147e08ece60470b8877544` passed strict typecheck/build, **136/136 Vitest tests across 15 files**, and **103 passing plus 5 intentionally skipped Playwright runs, with 0 failures**, in CI before deployment. The 108 browser runs include onboarding/manual-WebMCP guidance, path-point creation and drag behavior, vehicle rotation, overlap routing, impact-placement priority, and secondary-pointer isolation. Public verification byte-matched all 43 artifact files and observed no off-origin or failed requests and no console warnings/errors while exercising the guide, WebMCP explanation, seed-v3 146°→161° rotation, sixth trajectory point, and uncertainty copy. Runtime corrupt-blob rejection remains implemented source behavior rather than a directly exercised database test.
 
 The following remain manual or external gates:
 

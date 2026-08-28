@@ -2,14 +2,15 @@
 
 Use a ChatGPT/Codex desktop build, model, and workspace that currently support Site Tools. WebMCP is evolving and availability may vary by client rollout.
 
-The public GitHub Pages link serves the current schema-v2/proposal application from commit `df599f37e59e562ffaee919fdc4072eec9265f51`. The deployment and a runtime-polyfilled 18→19 contract smoke are verified, but native Site Tools discovery/execution and supported-model behavior must still be recorded in a compatible current client.
+The public GitHub Pages link serves the current onboarding/path-authoring/schema-v2 application from commit `00688d8a51fb783dbf147e08ece60470b8877544`. Its deterministic 18→19 contract coverage and native discovery of the 18 baseline tools in the Codex in-app browser are verified. Native tool execution and supported-model behavior must still be recorded in a compatible current client.
 
 ## Open a clean fixture
 
 1. Open the [public deterministic demo](https://artem-musii.github.io/replay-sol/#demo), or locally run `npm run build && npm run preview` and open `http://127.0.0.1:4173/#demo` in the built-in browser. The public site shares the `artem-musii.github.io` storage origin, so use only synthetic/non-sensitive data.
 2. Reset the demo before each run. A valid saved seed-v1, seed-v2, or seed-v3 case otherwise resumes; reset replaces it with the current seed-v3 fixture.
-3. Open **Case options → WebMCP inspector** and record the browser/client version, page URL, case version, and registered tools.
-4. Expect 18 imperative tools before a report preview and 19 after `build_report_preview` makes `add_report_note` available. The added scene tool is `propose_scene_changes`.
+3. Check the header status. **Site Tools · 18 registered** means the page bridge is ready; **Manual mode** means the complete visible workflow remains available without an agent. Open **Guide → Site Tools** for the connection explanation and copyable conversation starters.
+4. Open **Case options → WebMCP inspector** and record the browser/client version, page URL, case version, and registered tools.
+5. Expect 18 imperative tools before a report preview and 19 after `build_report_preview` makes `add_report_note` available. The added scene tool is `propose_scene_changes`.
 
 ## Primary human-agent sequence
 
@@ -25,7 +26,7 @@ Verify after every mutation that the compact result, persisted case, live engine
 
 A direct public-origin native smoke run on 2026-08-27 verified the historical `f980d28` 17/18-tool lifecycle, read/mutate/revert behavior, report-preview transition, non-autosubmitting finalization form, and IndexedDB restoration.
 
-For the current release, the audit client's missing native `document.modelContext` was replaced temporarily with a standards-compatible runtime registry. That **non-native polyfill** verified 18 baseline tools, read/mutate/idempotency/conflict behavior, the ordinary-UI report-preview transition to 19 tools, durable observation persistence across a cache-busted new-document navigation, correct clearing of the transient preview/injected registry, and explicit reset. It is a deployed-bundle contract smoke—not Site Tools discovery, declarative-form proof, or a supported-model score. Repeat the prompt sequence natively for each supported model/client.
+The current deterministic suite uses a standards-compatible runtime registry to verify 18 baseline tools, read/mutate/idempotency/conflict behavior, and the ordinary-UI report-preview transition to 19 tools. A prior `df599f3` deployed-bundle audit used that **non-native polyfill** to verify durable observation persistence across a cache-busted new-document navigation, clearing of the transient preview/injected registry, and explicit reset; those historical live results are not attributed to the current artifact or treated as a supported-model score. A separate current Codex in-app-browser smoke surfaced the deployed page's 18 baseline tools and visible ready count without invoking them. Repeat the prompt sequence natively for each supported model/client.
 
 ## Safety checks
 
