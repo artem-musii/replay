@@ -340,7 +340,7 @@ img {
 .vault-recovery-notice {
   position: fixed;
   z-index: 1500;
-  top: 12px;
+  top: 84px;
   left: 50%;
   transform: translateX(-50%);
   width: min(760px, calc(100vw - 24px));
@@ -368,6 +368,32 @@ img {
   background: transparent;
   color: var(--muted);
   font-size: 1rem;
+}
+
+@media (max-width: 640px) {
+  .vault-recovery-notice {
+    top: 76px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .vault-recovery-notice div {
+    min-width: 0;
+  }
+  .vault-recovery-notice span {
+    overflow-wrap: anywhere;
+  }
+  .vault-recovery-notice > .button {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    white-space: normal;
+  }
+  .vault-recovery-notice > button:last-child {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 @keyframes loading-spin {
   to {

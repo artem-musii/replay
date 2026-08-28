@@ -242,6 +242,55 @@ test.describe("onboarding and path authoring", () => {
     }
   });
 
+  test("keeps retained-recovery controls clear of landing help", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await openLanding(page);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open("replay-local-vault-v2");
+          request.onerror = () => reject(request.error ?? new Error("Could not open local vault."));
+          request.onsuccess = () => {
+            const database = request.result;
+            const transaction = database.transaction("cases", "readwrite");
+            transaction.objectStore("cases").put({
+              id: "case-retained-recovery",
+              updatedAt: 42,
+              schemaVersion: 2,
+              payload: { id: "case-retained-recovery" },
+            });
+            transaction.oncomplete = () => {
+              database.close();
+              resolve();
+            };
+            transaction.onerror = () =>
+              reject(transaction.error ?? new Error("Could not seed retained recovery."));
+          };
+        }),
+    );
+
+    await page.reload();
+    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+    const notice = page.getByRole("alert");
+    const navigation = page.getByRole("navigation", { name: "Primary navigation" });
+    const help = page.getByRole("button", { name: "How to use REPLAY" });
+    await expect(notice).toBeVisible();
+
+    const [noticeBox, navigationBox, helpBox] = await Promise.all([
+      notice.boundingBox(),
+      navigation.boundingBox(),
+      help.boundingBox(),
+    ]);
+    if (!noticeBox || !navigationBox || !helpBox) {
+      throw new Error("Recovery-notice geometry is unavailable.");
+    }
+    expect(noticeBox.y).toBeGreaterThanOrEqual(navigationBox.y + navigationBox.height);
+    expect(helpBox.x + helpBox.width).toBeLessThanOrEqual(320);
+
+    await help.click();
+    await expect(page.getByRole("dialog", { name: "Learn REPLAY" })).toBeVisible();
+  });
+
   test("keeps mobile help and every tour control visible at 200% text", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 900 });
     await openLanding(page);
