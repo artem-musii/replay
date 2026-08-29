@@ -15,25 +15,25 @@
   "currentPublicRelease": {
     "evidenceClass": "deterministic-ci-and-deployment",
     "date": "2026-08-29",
-    "applicationCommit": "b2e93905ff349a29f21b0b544a59e3afc738671d",
-    "actionsRun": "33272807674",
-    "verifyJob": "99154232692",
-    "deployJob": "99155253861",
-    "verifyDeploymentJob": "99155282304",
-    "pagesDeployment": "6159696063",
-    "deploymentStatus": "17508077549",
+    "applicationCommit": "b252fbde9551d0a1d2c41a1282ced66dc8ae1b20",
+    "actionsRun": "33274844653",
+    "verifyJob": "99159652619",
+    "deployJob": "99160674554",
+    "verifyDeploymentJob": "99160705929",
+    "pagesDeployment": "6160091470",
+    "deploymentStatus": "17509031583",
     "pagesArtifact": {
-      "id": "9720702224",
-      "compressedBytes": 3655213,
-      "sha256": "17357bb96e0ac622b190377e81a415df47704c9b7a42dc78763b1aa0293b7fbe"
+      "id": "9721285202",
+      "compressedBytes": 3655679,
+      "sha256": "5505a03a515a0c455f786a0f9fec7a6d9376d7046c77072d9df6d9c2412d8e1b"
     },
     "releaseEvidenceArtifact": {
-      "id": "9720702014",
-      "sha256": "08190cf5f735812766331a5fd4c7110e919515c9a7756962f23991d5a65640ab"
+      "id": "9721284748",
+      "sha256": "280d1f1c3e345b0a10655ec2afdbf3ed29b39c6f56155ea7e775f72a49c0c875"
     },
     "diagnosticArtifacts": {
-      "configuredBase": "9720701858",
-      "test": "9720692628"
+      "configuredBase": "9721284459",
+      "test": "9721275110"
     },
     "ci": {
       "vitest": {
@@ -72,10 +72,10 @@
     },
     "livePayload": {
       "files": 46,
-      "bytes": 5297260,
-      "manifestSha256": "586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87",
+      "bytes": 5297092,
+      "manifestSha256": "22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9",
       "allFilesByteMatched": true,
-      "verificationMethod": "Automated post-deploy verification job 99155282304 fetched release-evidence.json and byte/hash-matched every public payload path to the exact clean build artifact.",
+      "verificationMethod": "Automated post-deploy verification job 99160705929 fetched release-evidence.json and byte/hash-matched every public payload path to the exact clean build artifact.",
       "automatedReleaseEvidenceAvailable": true
     },
     "behavioralModelResult": false,

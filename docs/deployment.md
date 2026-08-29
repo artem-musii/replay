@@ -1,11 +1,11 @@
 # Deploying REPLAY
 
-Last verified public status (**2026-08-29**): application commit [`b2e93905ff349a29f21b0b544a59e3afc738671d`](https://github.com/artem-musii/replay/commit/b2e93905ff349a29f21b0b544a59e3afc738671d) is deployed and byte-verified on GitHub Pages.
+Last verified public status (**2026-08-29**): application commit [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20) is deployed and byte-verified on GitHub Pages.
 
 - Landing: [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)
 - Deterministic demo: [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo)
 - Repository: [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)
-- Current application: commit `b2e93905ff349a29f21b0b544a59e3afc738671d`, successful [GitHub Actions run `33272807674`](https://github.com/artem-musii/replay/actions/runs/33272807674)
+- Current application: commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`, successful [GitHub Actions run `33274844653`](https://github.com/artem-musii/replay/actions/runs/33274844653)
 
 REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API.
 
@@ -65,25 +65,25 @@ The current public application payload originated from the attested workflow bel
 
 | Item                      | Exact result                                                                                                                                |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Payload origin commit     | `b2e93905ff349a29f21b0b544a59e3afc738671d`                                                                                                  |
-| Actions workflow          | `33272807674`, successful                                                                                                                   |
-| Verify/build job          | `99154232692`, successful                                                                                                                   |
-| Deploy job                | `99155253861`, successful                                                                                                                   |
-| Verify-deployment job     | `99155282304`, successful                                                                                                                   |
-| Pages artifact            | `9720702224`, 3,655,213 compressed bytes                                                                                                    |
-| Pages artifact SHA-256    | `17357bb96e0ac622b190377e81a415df47704c9b7a42dc78763b1aa0293b7fbe`                                                                          |
-| Release-evidence artifact | `9720702014`, SHA-256 `08190cf5f735812766331a5fd4c7110e919515c9a7756962f23991d5a65640ab`                                                    |
-| Configured diagnostics    | `9720701858`                                                                                                                                |
-| Test diagnostics          | `9720692628`                                                                                                                                |
-| Pages deployment          | `6159696063`, status `17508077549`, successful                                                                                              |
+| Payload origin commit     | `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`                                                                                                  |
+| Actions workflow          | `33274844653`, successful                                                                                                                   |
+| Verify/build job          | `99159652619`, successful                                                                                                                   |
+| Deploy job                | `99160674554`, successful                                                                                                                   |
+| Verify-deployment job     | `99160705929`, successful                                                                                                                   |
+| Pages artifact            | `9721285202`, 3,655,679 compressed bytes                                                                                                    |
+| Pages artifact SHA-256    | `5505a03a515a0c455f786a0f9fec7a6d9376d7046c77072d9df6d9c2412d8e1b`                                                                          |
+| Release-evidence artifact | `9721284748`, SHA-256 `280d1f1c3e345b0a10655ec2afdbf3ed29b39c6f56155ea7e775f72a49c0c875`                                                    |
+| Configured diagnostics    | `9721284459`                                                                                                                                |
+| Test diagnostics          | `9721275110`                                                                                                                                |
+| Pages deployment          | `6160091470`, status `17509031583`, successful                                                                                              |
 | Vitest                    | **460/460** across 37 files                                                                                                                 |
 | Coverage                  | Statements **63.78% (6,781/10,631)**; branches **54.28% (4,500/8,289)**; functions **62.04% (1,628/2,624)**; lines **65.85% (6,276/9,530)** |
 | Playwright                | **221 passed, 9 intentional mobile screenshot-owner skips, 0 failed** across 230 runs                                                       |
 | Configured-base matrix    | **12/12 passed**                                                                                                                            |
-| Live payload              | **46 files**, **5,297,260 bytes**, all byte-matched                                                                                         |
-| Payload manifest hash     | `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`                                                                          |
+| Live payload              | **46 files**, **5,297,092 bytes**, all byte-matched                                                                                         |
+| Payload manifest hash     | `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`                                                                          |
 
-The live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) names the latest clean wrapper commit, Node.js and npm versions, the `/replay/` base, and the payload values above. The payload is the same seed-v6 application when it remains 46 files / 5,297,260 bytes with manifest SHA-256 `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that wrapper's exact build artifact and exported manifest digest.
+The live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) names the latest clean wrapper commit, Node.js and npm versions, the `/replay/` base, and the payload values above. The payload is the same seed-v6 application when it remains 46 files / 5,297,092 bytes with manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that wrapper's exact build artifact and exported manifest digest.
 
 ### Superseded `cd88755b` release evidence
 
@@ -107,7 +107,7 @@ The current seed-v6 release additionally contains stable `#case/<encoded-case-id
 
 ### Current release CI gate
 
-Against exact commit `b2e93905ff349a29f21b0b544a59e3afc738671d`, the workflow passed dependency installation and audits, formatting, lint, strict typecheck, Vitest with coverage, the full Playwright suite, both production-build/artifact gates, the configured-base focused matrix, Pages deployment, and post-deploy byte verification. The exact results are in the release table above. Manual screen-reader/cross-browser/export fidelity, native compatible Site Tools/supported-model behavior, YouTube publication, and a header-capable production origin remain separate evidence boundaries.
+Against exact commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`, the workflow passed dependency installation and audits, formatting, lint, strict typecheck, Vitest with coverage, the full Playwright suite, both production-build/artifact gates, the configured-base focused matrix, Pages deployment, and post-deploy byte verification. The exact results are in the release table above. Manual screen-reader/cross-browser/export fidelity, native compatible Site Tools/supported-model behavior, YouTube publication, and a header-capable production origin remain separate evidence boundaries.
 
 ### Superseded `00688d8a` local gate
 
@@ -170,7 +170,7 @@ curl -fsS -o /dev/null https://artem-musii.github.io/replay/site.webmanifest
 curl -fsS -o /dev/null https://artem-musii.github.io/replay/sitemap.xml
 ```
 
-The current automated acceptance audit fetched every path declared by the deployed evidence manifest. All 46 public payload files / 5,297,260 bytes returned successfully and were byte-identical to the verified build; the stable live manifest SHA-256 was `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`.
+The current automated acceptance audit fetched every path declared by the deployed evidence manifest. All 46 public payload files / 5,297,092 bytes returned successfully and were byte-identical to the verified build; the stable live manifest SHA-256 was `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`.
 
 Inspect the returned HTML for its title, description, canonical URL, favicon, absolute social image, CSP meta, and referrer meta. Confirm no generated source PNG is present in the clean build or loaded by the UI.
 

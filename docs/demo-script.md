@@ -2,13 +2,13 @@
 
 Target edited runtime: **2:34**. Hard ceiling: **2:45**. The uploaded public YouTube video must remain below three minutes and include clear audio. [Official video requirements](https://webmcp.devpost.com/rules)
 
-This is a recording runbook, not evidence that a video exists. The final seed-v6 application payload originates at commit `b2e93905ff349a29f21b0b544a59e3afc738671d`; record only after the remaining supported-model and recording gates in [hackathon-readiness.md](hackathon-readiness.md) pass.
+This is a recording runbook, not evidence that a video exists. The final seed-v6 application payload originates at commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`; record only after the remaining supported-model and recording gates in [hackathon-readiness.md](hackathon-readiness.md) pass.
 
 The main proof is one continuous roundabout case: **typed read and validation → reversible proposal → visible review decision → attributable inference → cited draft → visible finalization**. The WebMCP difference must be visible before motion detail: the agent works in the exact case the reviewer sees, while no Site Tool can operate the consequential review commands. One brief, clearly labelled closing cutaway shows the same release handling an unmeasured high-speed account.
 
 ## Preflight — not part of the video
 
-1. Confirm the final HTTPS `/#demo` URL loads, the live `release-evidence.json` names the latest clean wrapper commit, and the application payload remains 46 files / 5,297,260 bytes with manifest SHA-256 `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`; then use that same URL everywhere in the video and submission.
+1. Confirm the final HTTPS `/#demo` URL loads, the live `release-evidence.json` names the latest clean wrapper commit, and the application payload remains 46 files / 5,297,092 bytes with manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`; then use that same URL everywhere in the video and submission.
 2. Use the latest ChatGPT/Codex desktop app with **GPT-5.6 Sol or GPT-5.6 Terra**. OpenAI currently says Luna has WebMCP disabled; Site Tools availability remains rollout- and workspace-dependent. [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)
 3. Confirm the page reports Site Tools available. In preflight only, inspect the registered tools and verify native `get_workspace_state`, `validate_case_consistency`, `propose_scene_changes`, and `build_report_preview` calls against the deployed URL. Close the technical inspector before recording.
 4. Start from a new chat, clean browser profile, and fresh seed-v6 **Roundabout reconstruction** run. Confirm the fixture is synthetic, calibrated, contains no personal data, and shows no recovery warning from an earlier local state. Rehearsals must use disposable runs because proposals, observations, and finalization change state. Prepare one fresh **High-speed braking account** run from the same deployed release for the closing cutaway and label it as a separate synthetic case.
