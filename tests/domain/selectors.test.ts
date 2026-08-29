@@ -14,6 +14,7 @@ describe("workspace selectors", () => {
       type: "proposal.create",
       actor: "agent",
       origin: "webmcp",
+      poseAt: { branchId: "branch-baseline", timeMs: 7_000 },
       requestId: "selector-proposal-request",
       proposalId: "proposal-selector-test",
       title: "Reviewable position alternative",

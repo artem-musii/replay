@@ -1,8 +1,4 @@
 @import "./landing.css";
-@import "./scene.css";
-@import "./inspector.css";
-@import "./debug.css";
-@import "./workspace.css";
 
 :root {
   --font-sans: "Inter Variable", Inter, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
@@ -22,9 +18,11 @@
   --field: oklch(0.27 0.04 185);
   --field-hover: oklch(0.33 0.05 185);
   --confirmed: oklch(0.55 0.095 180);
+  --confirmed-text: oklch(0.4 0.085 180);
   --uncertain: oklch(0.72 0.13 80);
   --conflict: oklch(0.47 0.14 30);
   --agent: oklch(0.57 0.105 275);
+  --agent-text: oklch(0.43 0.105 275);
   --selection: oklch(0.58 0.13 240);
   --selection-text: oklch(0.48 0.13 240);
   --focus: oklch(0.53 0.17 245);
@@ -34,6 +32,31 @@
 
 * {
   box-sizing: border-box;
+}
+
+.origin-privacy-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in oklch, var(--uncertain), var(--rule) 52%);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--uncertain) 10%, var(--paper-raised));
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.origin-privacy-warning svg {
+  width: 18px;
+  min-width: 18px;
+  color: var(--conflict);
+}
+.origin-privacy-warning strong {
+  color: var(--ink);
+}
+.origin-privacy-warning code {
+  color: inherit;
+  font-size: 0.94em;
 }
 
 html {
@@ -104,6 +127,9 @@ img {
   color: var(--paper-raised);
   padding: 10px 14px;
   border-radius: 8px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .skip-link:focus {
@@ -248,6 +274,17 @@ img {
   box-shadow: 0 0 0 3px oklch(0.58 0.13 240 / 0.13);
   outline: none;
 }
+.field input[aria-invalid="true"] {
+  border-color: var(--conflict);
+}
+.field input[aria-invalid="true"]:focus {
+  border-color: var(--conflict);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--conflict) 16%, transparent);
+}
+.field .field__error {
+  color: var(--conflict);
+  line-height: 1.4;
+}
 .field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -337,13 +374,19 @@ img {
   color: var(--muted);
   line-height: 1.65;
 }
-.vault-recovery-notice {
+.app-notice-stack {
   position: fixed;
   z-index: 1500;
   top: 84px;
   left: 50%;
   transform: translateX(-50%);
   width: min(760px, calc(100vw - 24px));
+  display: grid;
+  gap: 12px;
+  pointer-events: none;
+}
+.vault-recovery-notice {
+  width: 100%;
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
@@ -353,6 +396,10 @@ img {
   border-radius: 10px;
   background: var(--paper-raised);
   box-shadow: var(--shadow-soft);
+  pointer-events: auto;
+}
+.vault-recovery-notice--persistent {
+  grid-template-columns: 1fr auto;
 }
 .vault-recovery-notice div {
   display: grid;
@@ -363,7 +410,7 @@ img {
   font-size: 0.75rem;
   line-height: 1.4;
 }
-.vault-recovery-notice > button:last-child {
+.vault-recovery-notice > button:not(.button) {
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -371,8 +418,10 @@ img {
 }
 
 @media (max-width: 640px) {
-  .vault-recovery-notice {
+  .app-notice-stack {
     top: 76px;
+  }
+  .vault-recovery-notice {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
   }
@@ -388,7 +437,7 @@ img {
     width: 100%;
     white-space: normal;
   }
-  .vault-recovery-notice > button:last-child {
+  .vault-recovery-notice > button:not(.button) {
     grid-column: 2;
     grid-row: 1;
     min-width: 44px;

@@ -26,13 +26,17 @@ test.describe("explicit human workspace journeys", () => {
 
     await openDemo(page);
     await page
-      .getByRole("navigation", { name: "Case workspaces" })
-      .getByRole("button", { name: /^Questions/ })
+      .getByRole("tablist", { name: "Case workspaces" })
+      .getByRole("tab", { name: /^Questions/ })
       .click();
 
     const questionCard = page.getByRole("article").filter({
       has: page.getByRole("heading", { name: question, exact: true }),
     });
+    const relatedItems = questionCard.getByLabel("Related case items");
+    await expect(relatedItems.getByRole("button", { name: "Path · Vehicle A" })).toBeVisible();
+    await expect(relatedItems.getByRole("button", { name: "Path · Vehicle B" })).toBeVisible();
+    await expect(relatedItems.getByRole("button", { name: "Hypothesis · Baseline" })).toBeVisible();
     await questionCard.getByRole("button", { name: "Answer", exact: true }).click();
     await questionCard.getByLabel("Answer", { exact: true }).fill(answer);
     await questionCard.getByLabel("Also create a reported observation").check();
@@ -81,6 +85,67 @@ test.describe("explicit human workspace journeys", () => {
     await expect(definitionFor(page.getByLabel("Selected observation"), "Evidence")).toHaveText(
       "1",
     );
+  });
+
+  test("removes a mistaken evidence relationship without deleting the local image", async ({
+    page,
+  }) => {
+    const sourceStatement = "The road surface was wet after light rain.";
+
+    await openDemo(page);
+    await inspectorTab(page, "Evidence").click();
+    await page.getByRole("button", { name: /^Wet road markings.*Demo$/ }).click();
+    const evidenceDetail = page.locator("section.evidence-detail");
+    const removeSource = evidenceDetail.getByRole("button", {
+      name: new RegExp(`Remove cited source link to Observation · ${sourceStatement}`),
+    });
+    await expect(removeSource).toBeVisible();
+    await removeSource.click();
+
+    await expect(page.locator(".workspace-case-title small")).toHaveText("v2");
+    await expect(removeSource).toHaveCount(0);
+    await expect(evidenceDetail.getByText("Wet road markings", { exact: false })).toBeVisible();
+    await expect(page.locator(".save-status")).toContainText("Saved locally");
+
+    await inspectorTab(page, "Facts").click();
+    const observation = claimRow(page, sourceStatement);
+    await expect(observation).toContainText("Reported · photo");
+
+    await page.reload();
+    await inspectorTab(page, "Evidence").click();
+    await page.getByRole("button", { name: /^Wet road markings.*Demo$/ }).click();
+    await expect(
+      page.locator("section.evidence-detail").getByRole("button", {
+        name: new RegExp(`Remove cited source link to Observation · ${sourceStatement}`),
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("requires and preserves a cited image for photo and document observations", async ({
+    page,
+  }) => {
+    const statement = "The overview image shows both vehicles near the roundabout exit.";
+
+    await openDemo(page);
+    await inspectorTab(page, "Facts").click();
+    await page.getByRole("button", { name: "Add observation", exact: true }).click();
+    const observationInput = page.getByRole("textbox", { name: "Observation", exact: true });
+    const addForm = page.locator("form").filter({ has: observationInput });
+    await observationInput.fill(statement);
+    await addForm.getByLabel("Source").selectOption("photo");
+    await expect(
+      addForm.getByRole("button", { name: "Add observation", exact: true }),
+    ).toBeDisabled();
+    await addForm.getByLabel("Cited photo").selectOption({ index: 1 });
+    await addForm.getByRole("button", { name: "Add observation", exact: true }).click();
+
+    const observation = claimRow(page, statement);
+    await expect(observation).toContainText("Reported · photo");
+    await observation.click();
+    const detail = page.getByLabel("Selected observation");
+    await expect(detail.getByText("Cited sources")).toBeVisible();
+    await expect(detail.getByRole("button", { name: /^Evidence ·/ })).toHaveCount(1);
+    await expect(detail.getByRole("button", { name: "Confirm as human-reviewed" })).toBeEnabled();
   });
 
   test("undoes and redoes a visible human observation with state and activity restored", async ({

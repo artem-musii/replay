@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, MousePointerClick, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import {
@@ -7,6 +7,7 @@ import {
   WORKSPACE_TOUR_STEP_COUNT,
 } from "../onboarding/progress";
 import { WORKSPACE_TOUR_STEPS } from "../onboarding/workspaceTour";
+import type { WorkspaceTourActionId } from "../onboarding/workspaceTour";
 import "../styles/guide.css";
 
 export interface WorkspaceTourProps {
@@ -14,6 +15,7 @@ export interface WorkspaceTourProps {
   onStepChange: (step: number) => void;
   onExit: () => void;
   onFinish: () => void;
+  onTryAction?: (actionId: WorkspaceTourActionId) => void;
 }
 
 function boundedStep(step: number): number {
@@ -21,7 +23,13 @@ function boundedStep(step: number): number {
   return Math.max(0, Math.min(WORKSPACE_TOUR_STEP_COUNT - 1, Math.trunc(step)));
 }
 
-export function WorkspaceTour({ step, onStepChange, onExit, onFinish }: WorkspaceTourProps) {
+export function WorkspaceTour({
+  step,
+  onStepChange,
+  onExit,
+  onFinish,
+  onTryAction,
+}: WorkspaceTourProps) {
   const currentStep = boundedStep(step);
   const definition = WORKSPACE_TOUR_STEPS[currentStep];
   const tourRef = useRef<HTMLElement>(null);
@@ -30,6 +38,7 @@ export function WorkspaceTour({ step, onStepChange, onExit, onFinish }: Workspac
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
   const pendingFocusRef = useRef<"back" | "primary" | null>(null);
   if (!definition) throw new Error(`Missing workspace tour step: ${String(currentStep)}`);
+  const tryAction = definition.action;
 
   useEffect(() => {
     recordWorkspaceTourStep(currentStep);
@@ -123,6 +132,15 @@ export function WorkspaceTour({ step, onStepChange, onExit, onFinish }: Workspac
       >
         <h2 id="workspace-tour-title">{definition.title}</h2>
         <p id="workspace-tour-body">{definition.body}</p>
+        {tryAction && onTryAction && (
+          <button
+            className="button button--secondary workspace-tour__try"
+            type="button"
+            onClick={() => onTryAction(tryAction.id)}
+          >
+            <MousePointerClick size={14} aria-hidden="true" /> {tryAction.label}
+          </button>
+        )}
       </div>
       <footer>
         <button className="button button--quiet" type="button" onClick={onExit}>

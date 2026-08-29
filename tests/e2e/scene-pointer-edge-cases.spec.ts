@@ -19,6 +19,51 @@ async function editVehicleAPath(page: Page): Promise<Locator> {
 }
 
 test.describe("scene pointer edge cases", () => {
+  test("touch pointers receive non-scaling vehicle and impact hit geometry", async ({ page }) => {
+    await openDemo(page);
+
+    const isCoarsePointer = await page.evaluate(
+      () => matchMedia("(pointer: coarse), (any-pointer: coarse)").matches,
+    );
+    const vehicleHit = page.locator(".vehicle-hit").first();
+    const impactHit = page.locator(".impact-marker__hit");
+
+    await expect(vehicleHit).toHaveCSS("stroke-width", "44px");
+    await expect(impactHit).toHaveCSS("stroke-width", "44px");
+    await expect(vehicleHit).toHaveCSS("vector-effect", "non-scaling-stroke");
+    await expect(impactHit).toHaveCSS("vector-effect", "non-scaling-stroke");
+    await expect(vehicleHit).toHaveCSS("pointer-events", isCoarsePointer ? "stroke" : "none");
+    await expect(impactHit).toHaveCSS("pointer-events", isCoarsePointer ? "stroke" : "none");
+
+    if (!isCoarsePointer) return;
+
+    const vehicleA = page.getByRole("button", { name: /^Vehicle A, position/ });
+    const vehicleBody = await vehicleA.locator(".vehicle-body").boundingBox();
+    if (!vehicleBody) throw new Error("Expected Vehicle A artwork to have a bounding box");
+    const vehicleProbe = await page.evaluate(
+      ({ x, y }) => {
+        const target = document.elementFromPoint(x, y);
+        return target?.classList.contains("vehicle-hit") ?? false;
+      },
+      {
+        x: vehicleBody.x + vehicleBody.width / 2 - 21,
+        y: vehicleBody.y + vehicleBody.height / 2,
+      },
+    );
+    expect(vehicleProbe).toBe(true);
+
+    const impactMarker = page.getByRole("button", { name: /^Approximate impact at/ });
+    const impactCenter = await centerOf(impactMarker.locator("circle").nth(1));
+    const impactProbe = await page.evaluate(
+      ({ x, y }) => {
+        const target = document.elementFromPoint(x, y);
+        return target?.classList.contains("impact-marker__hit") ?? false;
+      },
+      { x: impactCenter.x + 21, y: impactCenter.y },
+    );
+    expect(impactProbe).toBe(true);
+  });
+
   test("impact placement wins over a path point under a vehicle", async ({ page }) => {
     await openDemo(page);
     const point = await editVehicleAPath(page);

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ActivityPanel } from "../../src/components/ActivityPanel";
@@ -23,6 +23,27 @@ function renderTimeline(overrides: Partial<TimelineProps> = {}) {
     ...overrides,
   };
   return { ...render(<Timeline {...props} />), props };
+}
+
+function createTrajectoryWithKeyframeTimes(times: readonly number[]) {
+  const source = createDemoCase().trajectories[0];
+  if (!source || source.keyframes.length < times.length) {
+    throw new Error("Demo trajectory cannot supply the requested keyframe fixture.");
+  }
+  return {
+    ...source,
+    keyframes: times.map((timeMs, index) => {
+      const keyframe = source.keyframes[index];
+      if (!keyframe) {
+        throw new Error("Demo trajectory cannot supply the requested keyframe fixture.");
+      }
+      return { ...keyframe, timeMs };
+    }),
+  };
+}
+
+function timelinePercent(timeMs: number, range: TimelineProps["timeRangeMs"]): string {
+  return `${String(((timeMs - range.start) / (range.end - range.start)) * 100)}%`;
 }
 
 function preparePointerDrag(element: HTMLElement): void {
@@ -92,6 +113,36 @@ describe("Timeline", () => {
     expect(onMoveEvent).toHaveBeenCalledWith("event-impact", 9_900);
   });
 
+  it("emits one selection transition for an editable marker pointer click", () => {
+    const onSelectEvent = vi.fn();
+    const onSelectKeyframe = vi.fn();
+    renderTimeline({
+      onSelectEvent,
+      onSelectKeyframe,
+      onMoveEvent: vi.fn(),
+      onMoveKeyframe: vi.fn(),
+    });
+    const impact = screen.getByRole("button", { name: /Approximate contact at 0:10\.0/i });
+    const keyframe = screen.getByRole("button", {
+      name: /Vehicle A path keyframe at 0:08\.0/i,
+    });
+    preparePointerDrag(impact);
+    preparePointerDrag(keyframe);
+
+    fireEvent.pointerDown(impact, { pointerId: 21, buttons: 1 });
+    fireEvent.click(impact);
+    fireEvent.pointerDown(keyframe, { pointerId: 22, buttons: 1 });
+    fireEvent.click(keyframe);
+
+    expect(onSelectEvent).toHaveBeenCalledOnce();
+    expect(onSelectEvent).toHaveBeenCalledWith("event-impact");
+    expect(onSelectKeyframe).toHaveBeenCalledOnce();
+    expect(onSelectKeyframe).toHaveBeenCalledWith(
+      "trajectory-a-baseline",
+      "trajectory-a-baseline-keyframe-5",
+    );
+  });
+
   it("previews a multi-step event drag and commits it once on pointer up", () => {
     const onTimeChange = vi.fn();
     const onMoveEvent = vi.fn();
@@ -116,13 +167,24 @@ describe("Timeline", () => {
   });
 
   it("previews a multi-step keyframe drag and commits it once on pointer up", () => {
+    const fixtureTimes = [6_000, 8_000, 9_000] as const;
+    const trajectory = createTrajectoryWithKeyframeTimes(fixtureTimes);
+    const target = trajectory.keyframes[1];
+    if (!target) throw new Error("Editable keyframe fixture was not created.");
+    const minimumTime = fixtureTimes[0] + 100;
+    const maximumTime = fixtureTimes[2] - 100;
     const onTimeChange = vi.fn();
     const onMoveKeyframe = vi.fn();
-    const { container } = renderTimeline({ onTimeChange, onMoveKeyframe });
-    const track = getTimelineTrack(container);
-    const keyframe = screen.getByRole("button", {
-      name: /Vehicle A path keyframe at 0:08\.0/i,
+    const { container, props } = renderTimeline({
+      trajectories: [trajectory],
+      onTimeChange,
+      onMoveKeyframe,
     });
+    const track = getTimelineTrack(container);
+    const keyframe = within(
+      screen.getByRole("group", { name: "Vehicle A path keyframes" }),
+    ).getAllByRole("button")[1];
+    if (!keyframe) throw new Error("Editable keyframe control was not rendered.");
 
     preparePointerDrag(keyframe);
 
@@ -131,41 +193,68 @@ describe("Timeline", () => {
     fireEvent.pointerMove(track, { pointerId: 11, clientX: 912, buttons: 1 });
 
     expect(onMoveKeyframe).not.toHaveBeenCalled();
-    expect(onTimeChange.mock.calls).toEqual([[6_100], [8_900]]);
-    expect(keyframe.style.left).toBe("44.5%");
+    expect(onTimeChange.mock.calls).toEqual([[minimumTime], [maximumTime]]);
+    expect(keyframe.style.left).toBe(timelinePercent(maximumTime, props.timeRangeMs));
 
     fireEvent.pointerUp(track, { pointerId: 11, clientX: 912, buttons: 0 });
 
     expect(onMoveKeyframe).toHaveBeenCalledOnce();
-    expect(onMoveKeyframe).toHaveBeenCalledWith(
-      "trajectory-a-baseline",
-      "trajectory-a-baseline-keyframe-5",
-      8_900,
-    );
+    expect(onMoveKeyframe).toHaveBeenCalledWith(trajectory.id, target.id, maximumTime);
   });
 
   it("rolls back a transient drag preview without committing on pointer cancel", () => {
+    const fixtureTimes = [6_000, 8_000, 9_000] as const;
+    const trajectory = createTrajectoryWithKeyframeTimes(fixtureTimes);
+    const target = trajectory.keyframes[1];
+    if (!target) throw new Error("Editable keyframe fixture was not created.");
+    const maximumTime = fixtureTimes[2] - 100;
     const onTimeChange = vi.fn();
     const onMoveKeyframe = vi.fn();
-    const { container } = renderTimeline({ onTimeChange, onMoveKeyframe });
-    const track = getTimelineTrack(container);
-    const keyframe = screen.getByRole("button", {
-      name: /Vehicle A path keyframe at 0:08\.0/i,
+    const { container, props } = renderTimeline({
+      trajectories: [trajectory],
+      onTimeChange,
+      onMoveKeyframe,
     });
+    const track = getTimelineTrack(container);
+    const keyframe = within(
+      screen.getByRole("group", { name: "Vehicle A path keyframes" }),
+    ).getAllByRole("button")[1];
+    if (!keyframe) throw new Error("Editable keyframe control was not rendered.");
 
     preparePointerDrag(keyframe);
 
     fireEvent.pointerDown(keyframe, { pointerId: 13, clientX: 412, buttons: 1 });
     fireEvent.pointerMove(track, { pointerId: 13, clientX: 612, buttons: 1 });
 
-    expect(onTimeChange).toHaveBeenCalledWith(8_900);
-    expect(keyframe.style.left).toBe("44.5%");
+    expect(onTimeChange).toHaveBeenCalledWith(maximumTime);
+    expect(keyframe.style.left).toBe(timelinePercent(maximumTime, props.timeRangeMs));
 
     fireEvent.pointerCancel(track, { pointerId: 13 });
 
     expect(onMoveKeyframe).not.toHaveBeenCalled();
     expect(onTimeChange).toHaveBeenLastCalledWith(10_000);
-    expect(keyframe.style.left).toBe("40%");
+    expect(keyframe.style.left).toBe(timelinePercent(target.timeMs, props.timeRangeMs));
+  });
+
+  it("separates dense event and keyframe hit targets into aligned rows", () => {
+    const trajectory = createTrajectoryWithKeyframeTimes([9_600, 10_000, 10_300]);
+    const { container } = renderTimeline({ trajectories: [trajectory] });
+    const firstStart = screen.getByRole("button", {
+      name: /Vehicle A enters the reviewed interval at 0:00\.0/i,
+    });
+    const secondStart = screen.getByRole("button", {
+      name: /Vehicle B enters the reviewed interval at 0:00\.0/i,
+    });
+    expect(firstStart.dataset.timelineRow).not.toBe(secondStart.dataset.timelineRow);
+
+    const lane = screen.getByRole("group", { name: "Vehicle A path keyframes" });
+    const denseKeyframes = within(lane).getAllByRole("button");
+    expect(denseKeyframes).toHaveLength(3);
+    expect(new Set(denseKeyframes.map((marker) => marker.dataset.timelineRow)).size).toBe(3);
+
+    const laneLabel = container.querySelector<HTMLElement>(".timeline__lane-labels > div");
+    expect(lane.style.getPropertyValue("--timeline-keyframe-dense-height")).toBe("72px");
+    expect(laneLabel?.style.getPropertyValue("--timeline-keyframe-dense-height")).toBe("72px");
   });
 
   it("preserves millisecond timing for close imported keyframes", () => {
@@ -254,6 +343,89 @@ describe("Timeline", () => {
     expect(invoker).toHaveFocus();
     expect(onAddEvent).not.toHaveBeenCalled();
   });
+
+  it("pauses playback and keeps the branch and time captured when add-event opens", () => {
+    const onAddEvent = vi.fn(() => true);
+    const onPlayingChange = vi.fn();
+    const { props, rerender } = renderTimeline({
+      isPlaying: true,
+      onAddEvent,
+      onPlayingChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add timeline event" }));
+    expect(onPlayingChange).toHaveBeenCalledWith(false);
+    fireEvent.change(screen.getByRole("textbox", { name: "Event title" }), {
+      target: { value: "Captured playback observation" },
+    });
+
+    rerender(
+      <Timeline
+        {...props}
+        currentTimeMs={12_500}
+        activeBranchId="branch-alternative"
+        isPlaying={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add at 0:10.0" }));
+
+    expect(onAddEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchId: "branch-baseline",
+        timeMs: 10_000,
+        title: "Captured playback observation",
+      }),
+    );
+  });
+
+  it("discards add-event fields on cancel and after a successful submission", () => {
+    const onAddEvent = vi.fn(() => true);
+    renderTimeline({ onAddEvent, events: [], trajectories: [] });
+
+    const openButton = screen.getByRole("button", { name: "Add timeline event" });
+    const open = () => {
+      fireEvent.click(openButton);
+      const dialog = screen.getByRole("dialog", { name: "Add timeline event" });
+      return {
+        dialog,
+        title: within(dialog).getByRole("textbox", { name: "Event title" }),
+        type: within(dialog).getByRole("combobox", { name: "Event type" }),
+        certainty: within(dialog).getByRole("combobox", { name: "Certainty" }),
+        actor: within(dialog).getByRole("combobox", { name: "Linked actor" }),
+      };
+    };
+    const populate = (editor: ReturnType<typeof open>) => {
+      fireEvent.change(editor.title, {
+        target: { value: "Context-specific draft" },
+      });
+      fireEvent.change(editor.type, {
+        target: { value: "maneuver" },
+      });
+      fireEvent.change(editor.certainty, {
+        target: { value: "disputed" },
+      });
+      fireEvent.change(editor.actor, {
+        target: { value: "actor-vehicle-b" },
+      });
+    };
+    const expectDefaults = (editor: ReturnType<typeof open>) => {
+      expect(editor.title).toHaveValue("");
+      expect(editor.type).toHaveValue("observation");
+      expect(editor.certainty).toHaveValue("reported");
+      expect(editor.actor).toHaveValue("all");
+    };
+
+    let editor = open();
+    populate(editor);
+    fireEvent.click(within(editor.dialog).getByRole("button", { name: "Cancel" }));
+    editor = open();
+    expectDefaults(editor);
+
+    populate(editor);
+    fireEvent.click(within(editor.dialog).getByRole("button", { name: "Add at 0:10.0" }));
+    editor = open();
+    expectDefaults(editor);
+  });
 });
 
 describe("ActivityPanel", () => {
@@ -304,5 +476,30 @@ describe("ActivityPanel", () => {
     render(<ActivityPanel activities={activities} onRevert={vi.fn()} />);
 
     expect(screen.queryByRole("button", { name: /Revert agent action/i })).not.toBeInTheDocument();
+  });
+
+  it("separates session-only Site Tool calls from durable case changes", () => {
+    const sessionActivities: ActivityEvent[] = [
+      {
+        id: "activity-tool-read",
+        caseVersion: 3,
+        author: "agent",
+        origin: "webmcp",
+        actionType: "webmcp.get_workspace_state",
+        summary: "Ran get workspace state: Read the current scene.",
+        affectedIds: [],
+        undoable: false,
+        createdAt: "2026-08-27T10:02:00.000Z",
+      },
+    ];
+
+    render(<ActivityPanel activities={activities} sessionActivities={sessionActivities} />);
+
+    expect(screen.getByRole("region", { name: "Case changes" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Site Tool calls" })).toBeInTheDocument();
+    expect(screen.getByText("Session only")).toBeInTheDocument();
+    expect(screen.getByText("No case change · observed v3")).toBeInTheDocument();
+    expect(screen.getByLabelText("Durable case changes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Session-only Site Tool calls")).toBeInTheDocument();
   });
 });

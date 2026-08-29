@@ -131,7 +131,6 @@ export function createBlankCase(
         ...roadTemplate.calibration,
         source: "template",
       },
-      postedSpeedLimitKph: roadTemplate.defaultSpeedLimitKph,
       bounds: { minX: 0, minY: 0, maxX: 100, maxY: 100 },
       roadPolygon: [
         { x: 0, y: 0 },
@@ -190,6 +189,7 @@ export function createBlankCase(
       },
     ],
     consistencyIssues: [],
+    completenessAttestations: [],
     reportNotes: [],
     reportSnapshots: [],
     workspaceMode: "scene",

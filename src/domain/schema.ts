@@ -3,9 +3,60 @@ import { z } from "zod";
 import { REPLAY_SCHEMA_VERSION, REPLAY_SEED_VERSION } from "./models";
 import type { ReplayCase } from "./models";
 
-const id = z.string().trim().min(1).max(128);
-const shortText = z.string().trim().min(1).max(500);
-const longText = z.string().trim().min(1).max(10_000);
+// These envelopes are deliberately wider than REPLAY's authored 0..100 scenes
+// and seconds-long timelines, while keeping every subtract/multiply/divide in
+// canvas, calibrated-geometry, and timeline conversion comfortably finite.
+export const REPLAY_MAX_SCENE_COORDINATE = 1_000_000;
+export const REPLAY_MAX_ROTATION_DEGREES = 1_000_000;
+export const REPLAY_MAX_TIMELINE_MS = 31_536_000_000;
+export const REPLAY_MIN_SCENE_SPAN = 0.001;
+export const REPLAY_MIN_CALIBRATION_METERS = 0.01;
+export const REPLAY_MIN_TIMELINE_SPAN_MS = 1;
+
+function isXml10Serializable(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) return false;
+    if (codePoint > 0xffff) index += 1;
+    if (codePoint === 0x09 || codePoint === 0x0a || codePoint === 0x0d) continue;
+    if (codePoint >= 0x20 && codePoint <= 0xd7ff) continue;
+    if (codePoint >= 0xe000 && codePoint <= 0xfffd) continue;
+    if (codePoint >= 0x10000 && codePoint <= 0x10ffff) continue;
+    return false;
+  }
+  return true;
+}
+
+/** Validates raw text before any trimming so unsafe controls are rejected, never normalized away. */
+export function xmlSafeString<TSchema extends z.ZodType<string, string>>(schema: TSchema) {
+  return z
+    .string()
+    .refine(isXml10Serializable, {
+      message: "Text contains a character that XML 1.0 cannot serialize",
+    })
+    .pipe(schema);
+}
+
+export const XmlSafeIdSchema = xmlSafeString(z.string().trim().min(1).max(128));
+export const XmlSafeShortTextSchema = xmlSafeString(z.string().trim().min(1).max(500));
+export const XmlSafeLongTextSchema = xmlSafeString(z.string().trim().min(1).max(10_000));
+export const SceneCoordinateSchema = z
+  .number()
+  .refine((value) => Math.abs(value) <= REPLAY_MAX_SCENE_COORDINATE, {
+    message: "Scene coordinate magnitude must not exceed 1,000,000",
+  });
+export const RotationDegreesSchema = z
+  .number()
+  .refine((value) => Math.abs(value) <= REPLAY_MAX_ROTATION_DEGREES, {
+    message: "Rotation magnitude must not exceed 1,000,000 degrees",
+  });
+export const TimelineMillisecondsSchema = z.number().nonnegative().max(REPLAY_MAX_TIMELINE_MS, {
+  message: "Timeline value must not exceed 31,536,000,000 milliseconds",
+});
+
+const id = XmlSafeIdSchema;
+const shortText = XmlSafeShortTextSchema;
+const longText = XmlSafeLongTextSchema;
 const isoDateTime = z.iso.datetime({ offset: true });
 const finite = z.number();
 
@@ -54,17 +105,19 @@ export const CalibrationSourceSchema = z.enum([
   "unknown",
 ]);
 
-export const PointSchema = z.object({ x: finite, y: finite }).strict();
+export const PointSchema = z
+  .object({ x: SceneCoordinateSchema, y: SceneCoordinateSchema })
+  .strict();
 
 export const ActorPoseSchema = PointSchema.extend({
-  rotationDeg: finite,
+  rotationDeg: RotationDegreesSchema,
 }).strict();
 
 export const ItemLockSchema = z
   .object({
     lockedBy: ActionAuthorSchema,
     lockedAt: isoDateTime,
-    reason: z.string().trim().max(1_000).optional(),
+    reason: xmlSafeString(z.string().trim().max(1_000)).optional(),
   })
   .strict();
 
@@ -89,8 +142,16 @@ export const EnvironmentStateSchema = z
     trafficSide: z.enum(["right", "left", "unknown"]).default("unknown"),
     calibration: z
       .object({
-        widthMeters: finite.positive().max(10_000),
-        heightMeters: finite.positive().max(10_000),
+        widthMeters: finite
+          .min(REPLAY_MIN_CALIBRATION_METERS, {
+            message: "Calibrated scene width must be at least 0.01 metres",
+          })
+          .max(10_000),
+        heightMeters: finite
+          .min(REPLAY_MIN_CALIBRATION_METERS, {
+            message: "Calibrated scene height must be at least 0.01 metres",
+          })
+          .max(10_000),
         source: CalibrationSourceSchema,
         uncertaintyMeters: finite.nonnegative().max(1_000),
       })
@@ -103,11 +164,24 @@ export const EnvironmentStateSchema = z
       }),
     postedSpeedLimitKph: finite.positive().max(300).optional(),
     bounds: z
-      .object({ minX: finite, minY: finite, maxX: finite, maxY: finite })
+      .object({
+        minX: SceneCoordinateSchema,
+        minY: SceneCoordinateSchema,
+        maxX: SceneCoordinateSchema,
+        maxY: SceneCoordinateSchema,
+      })
       .strict()
       .refine((bounds) => bounds.maxX > bounds.minX && bounds.maxY > bounds.minY, {
         message: "Environment bounds must have positive area",
-      }),
+      })
+      .refine(
+        (bounds) =>
+          bounds.maxX - bounds.minX >= REPLAY_MIN_SCENE_SPAN &&
+          bounds.maxY - bounds.minY >= REPLAY_MIN_SCENE_SPAN,
+        {
+          message: "Environment bounds must span at least 0.001 scene units on each axis",
+        },
+      ),
     roadPolygon: z.array(PointSchema).min(3).max(1_000),
   })
   .strict();
@@ -148,7 +222,7 @@ export const SceneActorSchema = z
       .default("unknown"),
     dimensionsSource: MeasurementSourceSchema.default("unknown"),
     wheelbaseMeters: finite.positive().max(20).optional(),
-    colorToken: z.string().trim().min(1).max(100),
+    colorToken: xmlSafeString(z.string().trim().min(1).max(100)),
     pose: ActorPoseSchema,
     lastEditedBy: ActionAuthorSchema.optional(),
     lastEditedAt: z.iso.datetime().optional(),
@@ -177,7 +251,7 @@ export const SceneActorSchema = z
 export const ActorKeyframeSchema = ActorPoseSchema.extend({
   id,
   actorId: id,
-  timeMs: finite.nonnegative(),
+  timeMs: TimelineMillisecondsSchema,
 }).strict();
 
 export const TrajectorySchema = z
@@ -239,8 +313,56 @@ export const AgentProposalChangeSchema = z.discriminatedUnion("kind", [
       actorId: id,
       basePose: ActorPoseSchema,
       proposedPose: ActorPoseSchema,
+      branchId: id.optional(),
+      targetTimeMs: TimelineMillisecondsSchema.optional(),
+      baseTrajectory: z
+        .object({
+          trajectoryId: id,
+          keyframes: z.array(ActorKeyframeSchema).min(1).max(2_000),
+          visible: z.boolean(),
+        })
+        .strict()
+        .optional(),
     })
-    .strict(),
+    .strict()
+    .superRefine((change, ctx) => {
+      if (change.baseTrajectory && (!change.branchId || change.targetTimeMs === undefined)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [change.branchId ? "targetTimeMs" : "branchId"],
+          message: "A reviewed trajectory baseline requires its hypothesis branch and target time",
+        });
+      }
+      const keyframes = change.baseTrajectory?.keyframes;
+      if (!keyframes) return;
+      const ids = new Set<string>();
+      let previousTime = -Infinity;
+      keyframes.forEach((keyframe, index) => {
+        if (keyframe.actorId !== change.actorId) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["baseTrajectory", "keyframes", index, "actorId"],
+            message: "Proposal keyframe actor must match the changed actor",
+          });
+        }
+        if (ids.has(keyframe.id)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["baseTrajectory", "keyframes", index, "id"],
+            message: "Proposal keyframe IDs must be unique",
+          });
+        }
+        ids.add(keyframe.id);
+        if (keyframe.timeMs <= previousTime) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["baseTrajectory", "keyframes", index, "timeMs"],
+            message: "Proposal keyframe times must be strictly increasing",
+          });
+        }
+        previousTime = keyframe.timeMs;
+      });
+    }),
   z
     .object({
       id,
@@ -447,7 +569,7 @@ export const TimelineEventSchema = z
   .object({
     id,
     branchId: id,
-    timeMs: finite.nonnegative(),
+    timeMs: TimelineMillisecondsSchema,
     type: z.enum(["actor-start", "maneuver", "impact", "observation", "evidence", "actor-stop"]),
     title: shortText,
     certainty: ClaimStatusSchema,
@@ -524,7 +646,7 @@ export const EvidenceAnnotationSchema = z.discriminatedUnion("kind", [
     kind: z.literal("point"),
     x: finite.min(0).max(1),
     y: finite.min(0).max(1),
-    label: z.string().trim().max(500).optional(),
+    label: xmlSafeString(z.string().trim().max(500)).optional(),
   }).strict(),
   AnnotationBaseSchema.extend({
     kind: z.literal("rectangle"),
@@ -532,7 +654,7 @@ export const EvidenceAnnotationSchema = z.discriminatedUnion("kind", [
     y: finite.min(0).max(1),
     width: finite.positive().max(1),
     height: finite.positive().max(1),
-    label: z.string().trim().max(500).optional(),
+    label: xmlSafeString(z.string().trim().max(500)).optional(),
   }).strict(),
 ]);
 
@@ -555,21 +677,21 @@ export const EvidenceAnnotationLinkSchema = z
 export const EvidenceAssetSchema = z
   .object({
     id,
-    name: z.string().trim().min(1).max(255),
+    name: xmlSafeString(z.string().trim().min(1).max(255)),
     mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
     sizeBytes: z
       .number()
       .int()
       .positive()
       .max(20 * 1024 * 1024),
-    localBlobKey: z.string().trim().min(1).max(500),
-    checksum: z.string().trim().min(8).max(256),
+    localBlobKey: xmlSafeString(z.string().trim().min(1).max(500)),
+    checksum: xmlSafeString(z.string().trim().min(8).max(256)),
     syntheticDemoAsset: z.boolean(),
     source: z.enum(["demo", "local-upload", "import"]),
     capturedAt: isoDateTime.optional(),
     createdAt: isoDateTime,
-    notes: z.string().max(10_000).optional(),
-    tags: z.array(z.string().trim().min(1).max(100)).max(100),
+    notes: xmlSafeString(z.string().max(10_000)).optional(),
+    tags: z.array(xmlSafeString(z.string().trim().min(1).max(100))).max(100),
     annotations: z.array(EvidenceAnnotationSchema).max(1_000),
     annotationLinks: z.array(EvidenceAnnotationLinkSchema).max(10_000),
     linkedClaimIds: z.array(id).max(500),
@@ -643,7 +765,7 @@ export const OpenQuestionSchema = z
     relatedSceneObjectIds: z.array(id).max(500),
     relatedBranchIds: z.array(id).max(500),
     status: z.enum(["open", "answered", "deferred", "dismissed"]),
-    answer: z.string().trim().min(1).max(10_000).optional(),
+    answer: xmlSafeString(z.string().trim().min(1).max(10_000)).optional(),
     answerSource: ClaimSourceTypeSchema.optional(),
     createdBy: ActionAuthorSchema,
     createdAt: isoDateTime,
@@ -666,7 +788,7 @@ export const ActivityEventSchema = z
     caseVersion: z.number().int().nonnegative(),
     author: ActionAuthorSchema,
     origin: ActionOriginSchema,
-    actionType: z.string().trim().min(1).max(200),
+    actionType: xmlSafeString(z.string().trim().min(1).max(200)),
     classification: z.literal("human-override").optional(),
     overridesActivityId: id.optional(),
     summary: shortText,
@@ -733,7 +855,7 @@ export const ReportCitationSchema = z
   .object({
     claimIds: z.array(id).max(5_000),
     evidenceIds: z.array(id).max(5_000),
-    workspacePaths: z.array(z.string().trim().min(1).max(500)).max(10_000),
+    workspacePaths: z.array(xmlSafeString(z.string().trim().min(1).max(500))).max(10_000),
   })
   .strict();
 
@@ -741,7 +863,7 @@ export const ReportStatementSchema = z
   .object({
     id,
     text: longText,
-    certainty: z.enum(["confirmed", "reported", "uncertain", "hypothesis", "system"]),
+    certainty: z.enum(["confirmed", "reported", "uncertain", "hypothesis", "attested", "system"]),
     citations: ReportCitationSchema,
   })
   .strict();
@@ -762,6 +884,15 @@ export const ReportPreviewSchema = z
     unresolvedQuestionIds: z.array(id).max(10_000),
     missingRequirements: z.array(shortText).max(100),
     disclaimer: longText,
+    reviewBinding: z
+      .object({
+        algorithm: z.literal("SHA-256"),
+        fingerprint: z.string().regex(/^sha256-[a-f0-9]{64}$/),
+        branchIds: z.array(id).max(1_000),
+        includeHypotheses: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -801,6 +932,29 @@ export const ReportNoteSchema = z
     }
   });
 
+const CompletenessAttestationBaseSchema = z.object({
+  id,
+  attestedBy: z.literal("human"),
+  origin: z.literal("ui"),
+  attestedAt: isoDateTime,
+  basisFingerprint: z.string().regex(/^completeness-v1-sha256-[a-f0-9]{64}$/),
+  humanAttestationTrusted: z.boolean(),
+});
+
+export const CompletenessAttestationSchema = z.discriminatedUnion("kind", [
+  CompletenessAttestationBaseSchema.extend({
+    kind: z.literal("no-evidence-supplied"),
+  }).strict(),
+  CompletenessAttestationBaseSchema.extend({
+    kind: z.literal("actor-damage"),
+    actorId: id,
+    outcome: z.enum(["unknown", "not-assessed"]),
+  }).strict(),
+  CompletenessAttestationBaseSchema.extend({
+    kind: z.literal("uncertainty-review-completed"),
+  }).strict(),
+]);
+
 export const WorkspaceSelectionSchema = z
   .object({
     type: z.enum([
@@ -816,6 +970,19 @@ export const WorkspaceSelectionSchema = z
     id,
   })
   .strict();
+
+export const TimeRangeSchema = z
+  .object({
+    start: TimelineMillisecondsSchema,
+    end: TimelineMillisecondsSchema.positive(),
+  })
+  .strict()
+  .refine((range) => range.end > range.start, {
+    message: "Time range end must follow start",
+  })
+  .refine((range) => range.end - range.start >= REPLAY_MIN_TIMELINE_SPAN_MS, {
+    message: "Time range must span at least 1 millisecond",
+  });
 
 export const ReplayCaseSchema = z
   .object({
@@ -835,10 +1002,7 @@ export const ReplayCaseSchema = z
       .optional(),
     sceneTemplateId: id,
     environment: EnvironmentStateSchema,
-    timeRangeMs: z
-      .object({ start: finite.nonnegative(), end: finite.positive() })
-      .strict()
-      .refine((range) => range.end > range.start, { message: "Time range end must follow start" }),
+    timeRangeMs: TimeRangeSchema,
     actors: z.array(SceneActorSchema).min(1).max(100),
     trajectories: z.array(TrajectorySchema).max(10_000),
     timelineEvents: z.array(TimelineEventSchema).max(10_000),
@@ -853,6 +1017,10 @@ export const ReplayCaseSchema = z
       .default(() => []),
     activity: z.array(ActivityEventSchema).max(100_000),
     consistencyIssues: z.array(ConsistencyIssueSchema).max(100_000),
+    completenessAttestations: z
+      .array(CompletenessAttestationSchema)
+      .max(1_000)
+      .default(() => []),
     reportNotes: z.array(ReportNoteSchema).max(10_000),
     reportSnapshots: z.array(ReportSnapshotSchema).max(1_000),
     selectedItem: WorkspaceSelectionSchema.optional(),

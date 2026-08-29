@@ -1,159 +1,148 @@
 # REPLAY under-three-minute demo script
 
-Target edited runtime: **2:52**. Hard ceiling: **2:55**. The uploaded public YouTube video must remain below three minutes and include clear audio. [Official video requirements](https://webmcp.devpost.com/rules)
+Target edited runtime: **2:34**. Hard ceiling: **2:45**. The uploaded public YouTube video must remain below three minutes and include clear audio. [Official video requirements](https://webmcp.devpost.com/rules)
 
 This is a recording runbook, not evidence that a video or final deployment exists. Record only after the release gates in [hackathon-readiness.md](hackathon-readiness.md) pass.
 
+The main proof is one continuous roundabout case: **typed read and validation → reversible proposal → visible review decision → attributable inference → cited draft → visible finalization**. The WebMCP difference must be visible before motion detail: the agent works in the exact case the reviewer sees, while no Site Tool can operate the consequential review commands. One brief, clearly labelled closing cutaway shows the same release handling an unmeasured high-speed account.
+
 ## Preflight — not part of the video
 
-1. Use the exact final HTTPS URL and commit named in the Devpost submission. Start from the landing page in a clean browser profile with only synthetic demo data.
+1. Freeze one clean commit, deploy that exact commit, and use its final HTTPS `/#demo` URL everywhere in the video and submission.
 2. Use the latest ChatGPT/Codex desktop app with **GPT-5.6 Sol or GPT-5.6 Terra**. OpenAI currently says Luna has WebMCP disabled; Site Tools availability remains rollout- and workspace-dependent. [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)
-3. Confirm the page reports Site Tools available. In preflight only, inspect the registered tools and verify that native `get_workspace_state` and `validate_case_consistency` calls succeed. Close the technical inspector before recording.
-4. From the scenario lab, open **Roundabout reconstruction**. If a saved demo exists, use **Case options → Reset deterministic demo**. Confirm the fixture is synthetic, the scene is calibrated, and no personal data is present.
-5. Rehearse the prompts below against a disposable reset. The final take must begin from another clean reset because WebMCP mutations change case version and activity.
-6. Keep the agent conversation, Site Tools call activity, and REPLAY workspace legible at 1080p or better. Disable notifications, unrelated extensions, credentials, copyrighted music, and unrelated third-party branding.
-7. You may edit out model latency, but preserve truthful call order and one coherent case version. Never splice a result from a different build, scenario state, or model into the sequence.
+3. Confirm the page reports Site Tools available. In preflight only, inspect the registered tools and verify native `get_workspace_state`, `validate_case_consistency`, `propose_scene_changes`, and `build_report_preview` calls against the deployed URL. Close the technical inspector before recording.
+4. Start from a new chat, clean browser profile, and fresh seed-v6 **Roundabout reconstruction** run. Confirm the fixture is synthetic, calibrated, contains no personal data, and shows no recovery warning from an earlier local state. Rehearsals must use disposable runs because proposals, observations, and finalization change state. Prepare one fresh **High-speed braking account** run from the same deployed release for the closing cutaway and label it as a separate synthetic case.
+5. Record at 2560 × 1440 or higher and export at 1440p. Use alternating full-screen crops for native Site Tools/Sources and REPLAY rather than a permanently split view whose text becomes illegible after YouTube compression. Hide notifications, credentials, unrelated extensions, browser history, and third-party branding.
+6. Edit out model latency if needed, but preserve truthful call order and one coherent case version throughout the main roundabout proof. Never splice a result from a different build, model, or run into that cause-and-effect sequence. The closing range cutaway may use separately labelled synthetic runs from the same deployed release; do not present their state or results as part of the roundabout call trace.
 
 ## Timed script
 
-### 0:00–0:12 — Real problem, real product
+### 0:00–0:07 — The problem in one screen
 
-**Picture:** Start on the landing scenario lab. Show the four cards, then click **Open case** on **Roundabout reconstruction**.
+**Picture:** Begin directly in the seeded roundabout workspace. Keep the scene, timeline, inspector, and attributed activity visible.
 
 **Narration:**
 
 > Minor road incidents leave fragments: memory, damage, photos, timing, and disagreement. REPLAY gives a person and an agent one inspectable case instead of flattening everything into chat.
 
-### 0:12–0:30 — Calibrated physical model
-
-**Picture:** In the roundabout workspace, open **Physical model**. Show scene width/height, uncertainty, calibration source, road condition, and speed limit. Close it, select Vehicle A, open **Vehicle size and measurement**, then select its path to show distance, peak speed, turn radius, and advisory count.
-
-**Narration:**
-
-> Road scale, uncertainty, vehicle footprints, wheelbase, and measurement source stay visible. Timed poses produce transparent motion and contact advisories—not a claim of perfect physics or fault.
-
-**Pass cue:** The displayed values and source labels match the final fixture. No value is presented as measured when its source is template or estimated.
-
-### 0:30–0:56 — Actual WebMCP read and validation
+### 0:07–0:36 — The outcome-driven Site Tools proof
 
 **Agent prompt — use verbatim:**
 
-> Use this page's Site Tools to read the scene, claims, and timeline. Run the full consistency check. Summarize the calibration, vehicle dimension sources, confirmed versus reported information, and the top review advisory. Do not change the case or infer fault.
+> Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.
 
-**Expected native calls:** `get_workspace_state`, then `validate_case_consistency` with `scope: "all"`; `focus_workspace_item` is optional if the agent identifies one issue.
+**Expected native calls:** one `get_workspace_state` request for `scene`, `questions`, `claims`, and `evidence`; `validate_case_consistency` with `scope: "all"`; `focus_workspace_item` on the blocking lane-position question; then `propose_scene_changes` with one conservative `trajectory-keyframe-patch` per current vehicle. The model chooses the existing interior point or points and normalized deltas, while the tool contract preserves IDs, times, both path endpoints, and every unrelated value. No evidence bytes are exposed—only structured metadata and relationships.
 
-**Picture:** Keep Site Tools activity and the workspace visible. Briefly reveal the returned tool names and let the selected issue appear in REPLAY.
+**Picture:** Show native Site Tools activity, the focused blocking question, the pending proposal overlay/card, and the separated activity lanes. Pause long enough to read **Site Tool calls · Session only** beside **Case changes**.
 
 **Narration:**
 
-> The agent is reading the same structured scene I see, then asking REPLAY's deterministic engine to validate it. The result preserves confirmed, reported, unknown, and advisory information separately.
+> A screenshot can show two cars, but not which timed points, evidence relationships, locks, or version are safe to use. Site Tools expose that typed live state. The agent created one conservative two-car alternative as a visible proposal; the original geometry and the unresolved question have not changed.
 
-**Pass cue:** Both calls are native WebMCP/Site Tools calls. A registered-tool count, ordinary browser automation, or debug-inspector execution is not a substitute.
+**Pass cue:** The read, validation, and focus calls say **No case change · observed vN**. The proposal names its assumptions, changes only existing interior path points for both vehicles, preserves endpoints/IDs/times, creates one agent/WebMCP case change, and remains pending. No claim is added or confirmed, and the base paths are unchanged. Remove idle model latency with straight cuts while preserving the real call order and results.
 
-### 0:56–1:20 — Proposal versus inference
+During preflight, run this exact outcome prompt repeatedly on the final deployed build and use only a result that is genuinely conservative and easy to explain. If the supported model cannot produce a reliable bounded proposal, use the in-product exact-coordinate prompt as the deterministic fallback; do not splice a fallback result into a take that shows a different prompt. In either path, show the native proposal input first, then use a cropped or zoomed REPLAY view so the base-versus-proposal overlay and proposal card are legible.
+
+### 0:36–0:50 — Show the visible review boundary, immediately
+
+**Picture:** Open the proposal card, show the visible adjust/accept/reject controls, then choose **Reject** in the UI. Pause on the human/UI-origin case-change entry while the session call remains in its separate lane.
+
+**Narration:**
+
+> The geometry is plausible, but no evidence establishes either lane-crossing explanation. Site Tools expose no accept or reject action, so the decision stays in the visible review flow. REPLAY has surfaced what is missing without turning an alternative into fact.
+
+**Pass cue:** Rejection is human/UI-authored. No agent call operates the decision control.
+
+### 0:50–1:07 — Prove the collision has a visible authored effect
+
+**Picture:** Select **Approximate contact**, show the adjacent-path readout, choose **Play authored motion around impact**, and let the three-second 2× preview run. Briefly reveal **Scene calibration** or the path metrics after playback.
+
+**Narration:**
+
+> At the approximate contact, the template-scaled footprints meet. Authored paths slow—23.9 to 18.1 and 23.3 to 18.1 kilometres per hour—and Vehicle B visibly deflects before the paths separate. These are adjacent-leg averages, not a collision simulation or causal proof.
+
+**Pass cue:** Impact-time poses are explicit path points; the inspector says adjacent-leg average speed, before → after, and retains the non-simulation disclaimer. Vehicle dimension and calibration source labels remain visible and honest.
+
+### 1:07–1:31 — Preserve the reason and prepare review
 
 **Agent prompt — use verbatim:**
 
-> With Site Tools, create a review-only coordinated proposal for both current vehicle paths; keep it inside the road and do not apply it. Separately add one branch-scoped agent hypothesis: “The available paths may permit more than one lane-crossing explanation.” Link it to the two paths. Do not claim fault or intent.
+> Refresh the case after my rejection. Preserve this branch-scoped agent hypothesis: “The current geometry permits more than one lane-crossing explanation, and the available evidence does not establish which occurred.” Link both current trajectories only as context, with no provenance sources, and keep it unconfirmed. Then prepare a neutral baseline report for my review. Do not change geometry, add a report note, confirm anything, finalize anything, or infer fault.
 
-**Expected native calls:** a narrow state read if needed, `propose_scene_changes`, and `add_observation` with agent-hypothesis status, agent-inference source, the active branch, and both trajectory IDs.
+**Expected native calls:** one compact refresh such as `get_case_summary` or targeted state read, `add_observation` with agent-hypothesis/agent-inference provenance and both trajectories in `relatedIds`, then `build_report_preview` at the returned current version. There must be no report-note or finalization call.
 
-**Picture:** Show the pending proposal overlay and proposal card while the base geometry remains unchanged. Then open **Facts** and select the new hypothesis.
-
-**Narration:**
-
-> These are two different agent contributions. Geometry is a preview that only a person can accept or reject. The text is stored as an attributable agent hypothesis, never as a confirmed fact.
-
-**Pass cue:** The proposal remains pending; no proposed geometry is applied. Activity attributes the calls to agent/WebMCP. The new fact shows **Agent hypothesis**, source **agent inference**, and no human-confirm button.
-
-### 1:20–1:39 — Human-only confirmation
-
-**Picture:** Still in **Facts**, select the human-authored reported statement beginning “Vehicle A was leaving the roundabout…” and click **Confirm as human-reviewed**. Pause on its **Confirmed by human** badge and human/UI activity entry.
+**Picture:** Briefly show **Agent hypothesis**, **agent inference**, both path links, and the agent/WebMCP case-change entry; then show the neutral report preview with open questions, limitations, and citation summaries intact.
 
 **Narration:**
 
-> The agent cannot confirm its own inference. I can explicitly review a human statement, and REPLAY records that exact human action and provenance.
+> The agent preserves why the alternative was rejected as attributable, branch-scoped inference—not evidence or a confirmed observation—then prepares the same case for review.
 
-**Pass cue:** Only the selected human-authored statement becomes confirmed. The agent hypothesis remains unconfirmed and the proposal remains pending.
+### 1:31–1:58 — Visible review and finalization
 
-### 1:39–2:07 — Agent preview, human finalization
-
-**Agent prompt — use verbatim:**
-
-> Build a neutral cited report preview from the current case. Keep the agent hypothesis in the hypothesis appendix, keep open questions explicit, and do not confirm or finalize anything.
-
-**Expected native call:** `build_report_preview`, preceded by a compact state/version read if needed. There must be no WebMCP report-finalization call.
-
-**Picture:** Show the cited preview and its limitations. Click **Review and finalize** yourself, check the three acknowledgements, choose **Continue to confirmation**, then manually click **Finalize factual report**.
+**Picture:** From the preview prepared in the preceding beat, show human-readable citation summaries, limitations, and the adjacent **Review and finalize** action. Open it in the UI, inspect the labelled unconfirmed and hypothesis content, check the four acknowledgements, choose **Continue to confirmation**, then click **Finalize factual report**.
 
 **Narration:**
 
-> Site Tools can prepare a citation-bound preview. Finalization is deliberately human-only: I review open questions, acknowledge the method limits, review confirmed facts, and make the final click.
+> Agent: read, validate, propose, draft. Reviewer: attest, decide, finalize. Site Tools can prepare this citation-bound preview, but they expose no finalization call. I review open questions, method limits, confirmed facts, and every labelled unconfirmed or hypothesis statement. These acknowledgements review inclusion and labels; they do not confirm those statements. REPLAY stores a version-bound snapshot that cannot be edited in place.
 
-**Pass cue:** The immutable snapshot and activity entry are human/UI-authored. If the preview shows a missing requirement, stop the take and fix the fixture or prompt; never edit around a failed finalization.
+**Pass cue:** No Site Tool operates an acknowledgement or either finalization action. If any requirement blocks finalization, stop and fix the run; do not edit around the failure.
 
-### 2:07–2:20 — Open the adversarial case
+### 1:58–2:15 — Recap native WebMCP evidence
 
-**Picture:** Click **Close workspace** from Case options, scroll to the scenario lab, and open **Parking-area account contradiction**.
-
-**Narration:**
-
-> Plausible cases should stay quiet. This synthetic adversarial case tests whether the same product can surface a contradictory record without accusing a person.
-
-### 2:20–2:46 — Motion and integrity review
-
-**Agent prompt — use verbatim:**
-
-> Use this page's Site Tools to read the parking scene, claims, and timeline and run the full consistency check. State the reported stationary account separately from the timestamped movement. Name the motion and integrity rule IDs and their assumptions. Do not characterize any person's truthfulness, fault, or intent.
-
-**Expected native calls:** `get_workspace_state`, `validate_case_consistency` with `scope: "all"`, and optionally `focus_workspace_item` for the most relevant trajectory or issue.
-
-**Picture:** Show the reported stationary claim beside the timestamped path, then cut to the visible issue list. Focus the speed/deceleration advisory. Briefly expose the integrity questions about estimated calibration or dimension sourcing.
+**Picture:** Open the built-in browser's **Recently used** and **Sources** view full-screen. Show the deployed REPLAY origin and the successful state read, validation, focus, proposal, attributed-inference, and report-preview calls. Keep inputs/results legible; the in-app **18 registered** badge alone is not invocation proof.
 
 **Narration:**
 
-> REPLAY does not call anyone dishonest. It shows the conflict: one account is reported as stationary, while the timestamped path implies movement outside the declared envelope. Integrity advisories expose which scale and vehicle inputs are estimated or unsupported.
+> The native trace ties every structured read, check, proposal, and report preview to this same deployed page and case. Human decisions remain visible in REPLAY, not hidden inside an agent call.
 
-**Expected current fixture:** motion includes `motion.speed` and `motion.deceleration`; integrity includes calibration and/or dimension-source questions. The structural `geometry.trajectory-teleport` issue may also appear. Reconfirm exact rule IDs and numerical thresholds on the final committed build before recording.
+### 2:15–2:27 — Show the high-speed case without overclaiming
 
-### 2:46–2:52 — Close on value
-
-**Picture:** End with the parking path, focused advisory, neutral question, and attributed activity visible together.
+**Picture:** Show one clearly labelled, same-release **High-speed braking account** cutaway—not part of the roundabout call trace. Keep the path-derived 65–80 km/h wording, visible post-braking reduction, and telemetry question readable.
 
 **Narration:**
 
-> REPLAY turns disputed incident fragments into a reviewable record—agents organize complexity, while people keep authority over facts and the final report.
+> REPLAY can also surface a high-speed account without pretending it measured one. Sixty-five to eighty kilometres per hour is derived from authored timing, the path visibly slows, and the case asks what telemetry could support it.
+
+### 2:27–2:34 — Close on the contract
+
+**Picture:** Return to the landing scenario lab and end on the REPLAY mark with all four synthetic scenario cards visible.
+
+**Narration:**
+
+> Agent: read, validate, propose, draft. Reviewer: attest, decide, finalize.
 
 ## Recording evidence checklist
 
 ### WebMCP proof
 
-- The video visibly shows actual native Site Tools/WebMCP invocations, not only tool registration, the manual fallback, DevTools, or REPLAY's inspector.
-- The trace includes successful `get_workspace_state` and `validate_case_consistency` calls in both cases.
-- The trace includes `propose_scene_changes`, `add_observation`, and `build_report_preview`, or the narration/script is revised truthfully if a supported model chooses a different valid path.
-- The Site Tools “Recently used”/sources view or equivalent retains tool names, inputs, and results for the final evidence bundle.
-- The exact model, desktop client/build, timestamp, final live URL, and commit are recorded outside the video and in submission testing notes.
+- The video visibly shows actual native Site Tools/WebMCP invocations, not only registration, ordinary browser automation, the manual fallback, DevTools, or REPLAY's inspector.
+- The same deployed run includes successful structured-read, validation, proposal, attributed-inference, and report-preview calls.
+- The native **Recently used/Sources** view or equivalent retains tool names, inputs, and results for the evidence bundle.
+- The exact model, desktop client/build, timestamp, live URL, full commit, and release-manifest digest are recorded outside the video and in submission testing notes.
 
 ### Product and safety proof
 
-- Roundabout calibration, uncertainty, vehicle dimensions, dimension sources, and metric path summary are readable.
-- The proposal is visibly pending and does not alter geometry before a human decision.
-- The agent inference is visibly attributed and unconfirmed; it cannot be confirmed through the agent flow.
-- The human-reported statement is confirmed only by the presenter's visible UI action.
-- The report preview is agent-prepared, but all three acknowledgements, second confirmation, and final click are visibly human actions.
-- The parking result separates the reported stationary statement, timestamped movement, deterministic motion findings, and input-integrity questions.
-- No narration or UI claim describes the output as lie detection, cheating detection, fault assignment, forensic certification, legal advice, or proof of actual motion.
+- The pending proposal is visible before the human rejection and never changes base geometry.
+- Session-only calls and durable case changes are visibly separate.
+- The collision playback visibly slows/diverges after contact and remains labelled authored, illustrative, and non-causal.
+- The agent inference is visibly attributed, branch-scoped, and unconfirmed; no provenance source is invented for it.
+- The report preview is agent-prepared; no Site Tool operates acknowledgements, confirmation, finalization, or export.
+- The closing high-speed cutaway is visibly a separate synthetic case from the same release, not part of the roundabout trace.
+- No narration or UI claim describes the output as lie detection, fault assignment, forensic certification, legal advice, measured collision response, or proof of actual motion.
 - Every incident, claim, and image shown is explicitly synthetic demo material; no personal case data appears.
 
 ### Submission proof
 
-- Uploaded YouTube visibility is **Public**, not unlisted or private.
-- Uploaded duration is below **3:00**; target 2:50–2:55 leaves encoding/title-card margin.
+- YouTube visibility is **Public**, not unlisted or private.
+- Uploaded duration is below **3:00**; target 2:34 leaves room for encoding variation without needing a separate title card.
 - Audio is intelligible and UI/tool text is readable at 1080p playback.
-- The final video shows the same behavior, scenario labels, rules, commit, and URL submitted to Devpost.
-- No credentials, notifications, private tabs, unrelated browser history, unlicensed music, or unauthorized incident material appear.
+- The final video, Devpost URL, repository, commit, scenario labels, and captured trace all describe the same release.
 - Play the uploaded video from beginning to end while signed out and test the final live URL in a clean supported client before submission.
+
+## Optional extra evidence — outside the main video
+
+After the main take, capture the **Parking-area account contradiction** as a supplementary gallery still. Show the reported stationary statement beside timestamped movement and motion/integrity rule IDs. Keep the result framed as a record conflict with explicit assumptions—not dishonesty, intent, fault, or lie detection. Keep it out of the main video.
 
 ## Failure policy
 
-Do not record a manual fallback and describe it as WebMCP. If the supported model does not invoke the intended tools, inspect the full trace, reset the synthetic case, refine only the prompt or tool metadata truthfully, and rerun. If Site Tools are unavailable, document the exact model/client/build and escalate through the [Challenge FAQ support routes](https://webmcp.devpost.com/resources); do not manufacture a successful trace.
+Do not record a manual fallback and describe it as WebMCP. If the supported model does not invoke the intended tools, inspect the native trace, open a fresh synthetic run, refine only the prompt or tool metadata truthfully, and rerun. If Site Tools are unavailable, document the exact model/client/build and escalate through the [Challenge FAQ support routes](https://webmcp.devpost.com/resources); do not manufacture a successful trace.

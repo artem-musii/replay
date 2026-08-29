@@ -5,9 +5,12 @@ export type Awaitable<T> = T | Promise<T>;
 export type ReplayIssue = Readonly<Record<string, unknown>>;
 
 export class ReplayWebMCPContractError extends Error {
-  readonly code: "INVALID_INPUT" | "NOT_FOUND";
+  readonly code: "INVALID_INPUT" | "NOT_FOUND" | "OUTPUT_BUDGET_EXCEEDED" | "VERSION_CONFLICT";
 
-  constructor(code: "INVALID_INPUT" | "NOT_FOUND", message: string) {
+  constructor(
+    code: "INVALID_INPUT" | "NOT_FOUND" | "OUTPUT_BUDGET_EXCEEDED" | "VERSION_CONFLICT",
+    message: string,
+  ) {
     super(message);
     this.name = "ReplayWebMCPContractError";
     this.code = code;
@@ -107,6 +110,7 @@ export interface ReplayWebMCPAdapter {
   getWorkspaceState(
     sections: readonly WorkspaceSection[],
     context: ReplayInvocationContext,
+    options?: Readonly<{ branchId?: string }>,
   ): Awaitable<unknown>;
   getRecentActivity(
     input: Readonly<{ limit: number; author: ActivityAuthorFilter }>,
@@ -120,11 +124,16 @@ export interface ReplayWebMCPAdapter {
     input: Readonly<{ branchIds: readonly string[] }>,
     context: ReplayInvocationContext,
   ): Awaitable<unknown>;
+  revealHypothesisComparison?(
+    branchIds: readonly string[],
+    context: ReplayInvocationContext,
+  ): Awaitable<void>;
 
   focusWorkspaceItem(
     input: Readonly<{
       itemType: WorkspaceItemType;
       itemId: string;
+      branchId?: string;
       workspaceMode?: string;
     }>,
     context: ReplayInvocationContext,
@@ -294,7 +303,7 @@ export interface ModelContextLike {
   }): Promise<readonly ModelContextRegisteredTool[]>;
   executeTool?(
     tool: ModelContextRegisteredTool,
-    input?: Readonly<Record<string, unknown>>,
+    input?: Readonly<Record<string, unknown>> | string,
     options?: { signal?: AbortSignal },
   ): Promise<string>;
 }

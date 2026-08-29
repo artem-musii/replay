@@ -32,6 +32,7 @@ export interface DemoScenarioMetadata {
   summary: string;
   synthetic: true;
   adversarial: boolean;
+  highSpeed: boolean;
   validationFocus: readonly ("geometry" | "motion" | "provenance")[];
 }
 
@@ -44,16 +45,18 @@ export const DEMO_SCENARIO_METADATA: readonly DemoScenarioMetadata[] = Object.fr
       "The existing calibrated roundabout account with synthetic evidence, reported uncertainty, and dimension-aware contact geometry.",
     synthetic: true,
     adversarial: false,
+    highSpeed: false,
     validationFocus: ["geometry", "provenance"],
   },
   {
     id: "straight-road-rear-end",
-    title: "Straight-road braking account",
+    title: "High-speed braking account",
     sceneType: "straight-road",
     summary:
-      "A low-speed rear-end account with gradual braking, dimension-aware vehicle spacing, and reported damage locations.",
+      "A 65–80 km/h synthetic approach with explicit braking, low closing speed, calibrated spacing, and authored post-contact motion.",
     synthetic: true,
     adversarial: false,
+    highSpeed: true,
     validationFocus: ["geometry", "motion"],
   },
   {
@@ -64,6 +67,7 @@ export const DEMO_SCENARIO_METADATA: readonly DemoScenarioMetadata[] = Object.fr
       "Two reported approaches meet at a calibrated T-junction while priority and signal details remain unresolved.",
     synthetic: true,
     adversarial: false,
+    highSpeed: false,
     validationFocus: ["geometry", "motion", "provenance"],
   },
   {
@@ -74,6 +78,7 @@ export const DEMO_SCENARIO_METADATA: readonly DemoScenarioMetadata[] = Object.fr
       "A reported stationary account conflicts with synthetic timestamped movement and is surfaced for human review without inferring intent.",
     synthetic: true,
     adversarial: true,
+    highSpeed: false,
     validationFocus: ["motion", "provenance"],
   },
 ]);
@@ -382,7 +387,7 @@ function buildRearEndScenario(): ReplayCase {
   const now = "2026-06-14T07:15:00.000Z";
   const { replayCase, branch, actorA, actorB, branchId } = createScenarioBase({
     key,
-    title: "Straight-road braking account — synthetic demo",
+    title: "High-speed braking account — synthetic demo",
     now,
     incidentDate: "2026-06-14",
     approximateTime: "09:15",
@@ -399,21 +404,21 @@ function buildRearEndScenario(): ReplayCase {
     source: "measured",
     uncertaintyMeters: 0.25,
   };
-  replayCase.environment.postedSpeedLimitKph = 60;
+  replayCase.environment.postedSpeedLimitKph = 80;
 
   actorA.label = "Lead vehicle";
   actorA.dimensions = { width: 1.89, length: 4.72 };
   actorA.vehicleClass = "suv";
   actorA.dimensionsSource = "manufacturer";
   actorA.wheelbaseMeters = 2.79;
-  actorA.pose = { x: 64, y: 56, rotationDeg: 90 };
+  actorA.pose = { x: 97, y: 56, rotationDeg: 90 };
 
   actorB.label = "Following vehicle";
   actorB.dimensions = { width: 1.78, length: 4.31 };
   actorB.vehicleClass = "compact-car";
   actorB.dimensionsSource = "manufacturer";
   actorB.wheelbaseMeters = 2.61;
-  actorB.pose = { x: 59.3, y: 56, rotationDeg: 90 };
+  actorB.pose = { x: 92.2, y: 56, rotationDeg: 90 };
 
   const trajectoryA = trajectory(
     key,
@@ -421,11 +426,11 @@ function buildRearEndScenario(): ReplayCase {
     actorA.id,
     branchId,
     [
-      [0, 25, 56, 90],
-      [4_000, 43, 56, 90],
-      [8_000, 55, 56, 90],
-      [12_000, 61, 56, 90],
-      [16_000, 64, 56, 90],
+      [0, 15, 56, 90],
+      [1_500, 48, 56, 90],
+      [3_000, 75, 56, 90],
+      [4_200, 92, 56, 90],
+      [4_600, 97, 56, 90],
     ],
     now,
   );
@@ -435,16 +440,17 @@ function buildRearEndScenario(): ReplayCase {
     actorB.id,
     branchId,
     [
-      [0, 12, 56, 90],
-      [4_000, 32, 56, 90],
-      [8_000, 50.485, 56, 90],
-      [12_000, 56.3, 56, 90],
-      [16_000, 59.3, 56, 90],
+      [0, 5, 56, 90],
+      [1_500, 38.5, 56, 90],
+      [3_000, 70.485, 56, 90],
+      [4_200, 87.2, 56, 90],
+      [4_600, 92.2, 56, 90],
     ],
     now,
   );
 
   const brakingClaimId = objectId("claim", key, "braking-account");
+  const speedContextClaimId = objectId("claim", key, "speed-context");
   const contactClaimId = objectId("claim", key, "contact-account");
   const leadDamageClaimId = objectId("claim", key, "lead-damage");
   const followingDamageClaimId = objectId("claim", key, "following-damage");
@@ -455,13 +461,25 @@ function buildRearEndScenario(): ReplayCase {
     reportedClaim(
       key,
       "braking-account",
-      "Synthetic demo account: the lead vehicle was reported to reduce speed in the eastbound lane before contact.",
+      "Synthetic demo account: the lead vehicle was reported to brake from a higher-speed eastbound approach before contact.",
       "human-statement",
       now,
       {
         subjectId: actorA.id,
         linkedEventIds: [brakingEventId],
         linkedSceneObjectIds: [actorA.id, trajectoryA.id],
+      },
+    ),
+    reportedClaim(
+      key,
+      "speed-context",
+      "Synthetic demo timing model: the calibrated authored paths imply approximately 65 km/h for the lead vehicle and 77 km/h for the following vehicle immediately before contact. These reconstruction values are not measured speeds.",
+      "scene-observation",
+      now,
+      {
+        linkedEventIds: [impactEventId],
+        linkedSceneObjectIds: [trajectoryA.id, trajectoryB.id],
+        createdBy: "system",
       },
     ),
     reportedClaim(
@@ -481,7 +499,10 @@ function buildRearEndScenario(): ReplayCase {
       "Synthetic demo account: light rear-bumper marking was reported on the lead vehicle.",
       "human-statement",
       now,
-      { subjectId: actorA.id, linkedSceneObjectIds: [actorA.id] },
+      {
+        subjectId: actorA.id,
+        linkedSceneObjectIds: [actorA.id, objectId("damage", key, "lead-rear")],
+      },
     ),
     reportedClaim(
       key,
@@ -489,7 +510,10 @@ function buildRearEndScenario(): ReplayCase {
       "Synthetic demo account: light front-bumper marking was reported on the following vehicle.",
       "human-statement",
       now,
-      { subjectId: actorB.id, linkedSceneObjectIds: [actorB.id] },
+      {
+        subjectId: actorB.id,
+        linkedSceneObjectIds: [actorB.id, objectId("damage", key, "following-front")],
+      },
     ),
   ];
   actorA.damageMarkers = [
@@ -539,7 +563,7 @@ function buildRearEndScenario(): ReplayCase {
       key,
       branchId,
       "braking",
-      4_000,
+      1_500,
       "maneuver",
       "Reported braking begins",
       [actorA.id, actorB.id],
@@ -550,18 +574,21 @@ function buildRearEndScenario(): ReplayCase {
       key,
       branchId,
       "impact",
-      8_000,
+      3_000,
       "impact",
       "Approximate reported contact",
       [actorA.id, actorB.id],
       now,
-      { linkedClaimIds: [contactClaimId], location: { x: 52.64, y: 56 } },
+      {
+        linkedClaimIds: [contactClaimId, speedContextClaimId],
+        location: { x: 72.7425, y: 56 },
+      },
     ),
     timelineEvent(
       key,
       branchId,
       "stop-lead",
-      16_000,
+      4_600,
       "actor-stop",
       "Lead vehicle final position",
       [actorA.id],
@@ -571,7 +598,7 @@ function buildRearEndScenario(): ReplayCase {
       key,
       branchId,
       "stop-following",
-      16_000,
+      4_600,
       "actor-stop",
       "Following vehicle final position",
       [actorB.id],
@@ -583,9 +610,9 @@ function buildRearEndScenario(): ReplayCase {
       key,
       branchId,
       "brake-onset",
-      "What independent source, if any, narrows the braking onset and initial following distance?",
-      "The synthetic paths are physically modest, but their timing remains a reported reconstruction.",
-      [brakingClaimId, contactClaimId],
+      "What independent telemetry, video, or roadway evidence supports the reconstructed approach speeds, braking onset, and initial following distance?",
+      "The high-speed values come from calibrated authored path timing, not a speed sensor, collision simulation, or verified measurement.",
+      [brakingClaimId, contactClaimId, speedContextClaimId],
       [trajectoryA.id, trajectoryB.id, impactEventId],
       now,
     ),
@@ -598,7 +625,7 @@ function buildRearEndScenario(): ReplayCase {
     activity(
       key,
       "fixture-loaded",
-      "Loaded a deterministic synthetic rear-end account with calibrated dimensions and timing.",
+      "Loaded a deterministic synthetic high-speed rear-end account with calibrated dimensions and timing.",
       [replayCase.id, branchId],
       now,
     ),
@@ -660,9 +687,9 @@ function buildTJunctionScenario(): ReplayCase {
     branchId,
     [
       [0, 20, 42, 90],
-      [5_000, 35, 42, 90],
-      [10_000, 50.515, 42, 90],
-      [18_000, 50.515, 42, 90],
+      [2_000, 35, 42, 90],
+      [4_000, 50.515, 42, 90],
+      [4_500, 50.515, 42, 90],
     ],
     now,
   );
@@ -673,10 +700,10 @@ function buildTJunctionScenario(): ReplayCase {
     branchId,
     [
       [0, 54, 82, 0],
-      [5_000, 54, 65, 0],
-      [10_000, 54, 42, 0],
-      [14_000, 55.5, 34, 15],
-      [18_000, 56.5, 30, 19.65],
+      [2_000, 54, 65, 0],
+      [4_000, 54, 42, 0],
+      [5_000, 55.5, 34, 15],
+      [5_500, 56.5, 30, 19.65],
     ],
     now,
   );
@@ -686,6 +713,7 @@ function buildTJunctionScenario(): ReplayCase {
   const mainDamageClaimId = objectId("claim", key, "main-damage");
   const sideDamageClaimId = objectId("claim", key, "side-damage");
   const impactEventId = objectId("event", key, "impact");
+  const approachEventId = objectId("event", key, "approach");
 
   replayCase.claims = [
     reportedClaim(
@@ -695,6 +723,7 @@ function buildTJunctionScenario(): ReplayCase {
       "human-statement",
       now,
       {
+        linkedEventIds: [approachEventId],
         linkedSceneObjectIds: [actorA.id, actorB.id, trajectoryA.id, trajectoryB.id],
       },
     ),
@@ -715,7 +744,10 @@ function buildTJunctionScenario(): ReplayCase {
       "Synthetic demo account: front-area marking was reported on the main-road vehicle.",
       "human-statement",
       now,
-      { subjectId: actorA.id, linkedSceneObjectIds: [actorA.id] },
+      {
+        subjectId: actorA.id,
+        linkedSceneObjectIds: [actorA.id, objectId("damage", key, "main-front")],
+      },
     ),
     reportedClaim(
       key,
@@ -723,7 +755,10 @@ function buildTJunctionScenario(): ReplayCase {
       "Synthetic demo account: left-side marking was reported on the side-road vehicle.",
       "human-statement",
       now,
-      { subjectId: actorB.id, linkedSceneObjectIds: [actorB.id] },
+      {
+        subjectId: actorB.id,
+        linkedSceneObjectIds: [actorB.id, objectId("damage", key, "side-left")],
+      },
     ),
   ];
   actorA.damageMarkers = [
@@ -773,7 +808,7 @@ function buildTJunctionScenario(): ReplayCase {
       key,
       branchId,
       "approach",
-      5_000,
+      2_000,
       "maneuver",
       "Reported approaches continue",
       [actorA.id, actorB.id],
@@ -784,7 +819,7 @@ function buildTJunctionScenario(): ReplayCase {
       key,
       branchId,
       "impact",
-      10_000,
+      4_000,
       "impact",
       "Approximate reported crossing contact",
       [actorA.id, actorB.id],
@@ -795,7 +830,7 @@ function buildTJunctionScenario(): ReplayCase {
       key,
       branchId,
       "stop-main",
-      18_000,
+      4_500,
       "actor-stop",
       "Main-road vehicle final position",
       [actorA.id],
@@ -805,7 +840,7 @@ function buildTJunctionScenario(): ReplayCase {
       key,
       branchId,
       "stop-side",
-      18_000,
+      5_500,
       "actor-stop",
       "Side-road vehicle final position",
       [actorB.id],
@@ -885,7 +920,13 @@ function buildParkingContradictionScenario(): ReplayCase {
   actorB.vehicleClass = "suv";
   actorB.dimensionsSource = "manufacturer";
   actorB.wheelbaseMeters = 2.78;
-  actorB.pose = { x: 80, y: 54, rotationDeg: 0 };
+  actorB.pose = { x: 87.5, y: 53.5, rotationDeg: 90 };
+
+  // At 1 s the two eastbound vehicle footprints meet exactly at their
+  // front/rear boundaries. The parked vehicle then moves away slightly so
+  // the authored paths do not remain interpenetrated after the contact.
+  const parkedContactCenterX = 86.26428571428572;
+  const contactBoundaryX = 82.94285714285715;
 
   const trajectoryA = trajectory(
     key,
@@ -893,7 +934,7 @@ function buildParkingContradictionScenario(): ReplayCase {
     actorA.id,
     branchId,
     [
-      [0, 15, 50, 90],
+      [0, 75, 50, 90],
       [1_000, 80, 50, 90],
       [2_000, 81, 50, 90],
       [16_000, 81, 50, 90],
@@ -906,9 +947,10 @@ function buildParkingContradictionScenario(): ReplayCase {
     actorB.id,
     branchId,
     [
-      [0, 80, 54, 0],
-      [1_000, 80, 54, 0],
-      [16_000, 80, 54, 0],
+      [0, parkedContactCenterX, 53.5, 90],
+      [1_000, parkedContactCenterX, 53.5, 90],
+      [2_000, 87.5, 53.5, 90],
+      [16_000, 87.5, 53.5, 90],
     ],
     now,
   );
@@ -919,6 +961,7 @@ function buildParkingContradictionScenario(): ReplayCase {
   const aisleDamageClaimId = objectId("claim", key, "aisle-damage");
   const parkedDamageClaimId = objectId("claim", key, "parked-damage");
   const impactEventId = objectId("event", key, "impact");
+  const positionSampleEventId = objectId("event", key, "position-sample");
 
   replayCase.claims = [
     reportedClaim(
@@ -929,18 +972,20 @@ function buildParkingContradictionScenario(): ReplayCase {
       now,
       {
         subjectId: actorA.id,
+        linkedEventIds: [positionSampleEventId],
         linkedSceneObjectIds: [actorA.id, trajectoryA.id],
       },
     ),
     reportedClaim(
       key,
       "timing-record",
-      "Synthetic demo timing record: the aisle vehicle is represented at positions 45.5 metres apart one second apart.",
+      "Synthetic demo timing record: the aisle vehicle is represented at positions 3.5 metres apart one second apart, implying a low-speed 12.6 km/h parking-area leg.",
       "system-derived",
       now,
       {
         subjectId: actorA.id,
         sourceIds: [trajectoryA.id],
+        linkedEventIds: [positionSampleEventId],
         linkedSceneObjectIds: [actorA.id, trajectoryA.id],
         createdBy: "system",
       },
@@ -959,37 +1004,43 @@ function buildParkingContradictionScenario(): ReplayCase {
     reportedClaim(
       key,
       "aisle-damage",
-      "Synthetic demo account: right-side marking was reported on the aisle vehicle.",
+      "Synthetic demo account: front-area marking was reported on the aisle vehicle.",
       "human-statement",
       now,
-      { subjectId: actorA.id, linkedSceneObjectIds: [actorA.id] },
+      {
+        subjectId: actorA.id,
+        linkedSceneObjectIds: [actorA.id, objectId("damage", key, "aisle-front")],
+      },
     ),
     reportedClaim(
       key,
       "parked-damage",
-      "Synthetic demo account: front-area marking was reported on the parked vehicle.",
+      "Synthetic demo account: rear-area marking was reported on the parked vehicle.",
       "human-statement",
       now,
-      { subjectId: actorB.id, linkedSceneObjectIds: [actorB.id] },
+      {
+        subjectId: actorB.id,
+        linkedSceneObjectIds: [actorB.id, objectId("damage", key, "parked-rear")],
+      },
     ),
   ];
   actorA.damageMarkers = [
     damageMarker(
       key,
-      "aisle-right",
+      "aisle-front",
       actorA.id,
-      "right-side",
-      "Synthetic reported marking on the right side.",
+      "front",
+      "Synthetic reported marking near the front area.",
       aisleDamageClaimId,
     ),
   ];
   actorB.damageMarkers = [
     damageMarker(
       key,
-      "parked-front",
+      "parked-rear",
       actorB.id,
-      "front",
-      "Synthetic reported marking near the front area.",
+      "rear",
+      "Synthetic reported marking near the rear area.",
       parkedDamageClaimId,
     ),
   ];
@@ -1036,7 +1087,7 @@ function buildParkingContradictionScenario(): ReplayCase {
       "Approximate reported parking-area contact",
       [actorA.id, actorB.id],
       now,
-      { linkedClaimIds: [contactClaimId], location: { x: 80, y: 52 } },
+      { linkedClaimIds: [contactClaimId], location: { x: contactBoundaryX, y: 51.68 } },
     ),
     timelineEvent(
       key,

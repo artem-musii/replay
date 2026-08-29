@@ -1,4 +1,4 @@
-import { getActorPoseAtTime, normalizeDegrees } from "./interpolation";
+import { getActorPoseAtTime, getBranchTrajectory, normalizeDegrees } from "./interpolation";
 import type { ActorPose, Point, ReplayCase, SceneActor, Trajectory } from "./models";
 
 const GEOMETRY_EPSILON_M = 1e-9;
@@ -629,6 +629,140 @@ export interface BranchImpactFootprintAnalysis extends FootprintRelation {
   actorIds: readonly [string, string];
 }
 
+export interface ImpactAdjacentPathLeg {
+  startTimeMs: number;
+  endTimeMs: number;
+  durationSeconds: number;
+  /** Straight-line displacement between the two sampled timed poses. */
+  distanceM: number;
+  /** Chord-derived average over this leg; not instantaneous or dynamics-derived speed. */
+  speedMps: number;
+  /** Direction of travel in compass degrees; null when the sampled leg is stationary. */
+  courseDeg: number | null;
+}
+
+/**
+ * Describes the authored path immediately before and after an impact marker.
+ * Values are derived from timed poses and metric calibration only. They do not
+ * model an impulse, attribute a path change to contact, or infer collision dynamics.
+ */
+export interface ImpactAdjacentPathAnalysis {
+  eventId: string;
+  timeMs: number;
+  actorId: string;
+  trajectoryId: string | null;
+  /** True only when the author placed a trajectory keyframe at the event time. */
+  authoredImpactKeyframe: boolean;
+  incoming: ImpactAdjacentPathLeg | null;
+  outgoing: ImpactAdjacentPathLeg | null;
+  /** Outgoing minus incoming speed; null when either adjacent leg is unavailable. */
+  speedChangeMps: number | null;
+  /** Signed shortest change in travel course; null for a missing or stationary leg. */
+  courseChangeDeg: number | null;
+}
+
+function impactAdjacentPathLeg(
+  start: ActorPose,
+  startTimeMs: number,
+  end: ActorPose,
+  endTimeMs: number,
+  calibration: SceneMetricCalibration,
+): ImpactAdjacentPathLeg | null {
+  const durationSeconds = (endTimeMs - startTimeMs) / 1_000;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  const startMetric = normalizedScenePointToMeters(start, calibration);
+  const endMetric = normalizedScenePointToMeters(end, calibration);
+  const dx = endMetric.xM - startMetric.xM;
+  const dy = endMetric.yM - startMetric.yM;
+  const distanceM = Math.hypot(dx, dy);
+  return {
+    startTimeMs,
+    endTimeMs,
+    durationSeconds,
+    distanceM,
+    speedMps: distanceM / durationSeconds,
+    courseDeg: distanceM <= GEOMETRY_EPSILON_M ? null : compassHeadingDegrees(dx, dy),
+  };
+}
+
+/**
+ * Compares each linked actor's authored trajectory on either side of an impact.
+ * A marker inside one uninterrupted segment is still reported, but
+ * authoredImpactKeyframe remains false so the UI can distinguish interpolation
+ * from an explicitly authored transition. Markers outside the timed path return
+ * no adjacent legs rather than deriving motion from a clamped endpoint pose.
+ */
+export function analyzeImpactAdjacentPaths(
+  replayCase: ReplayCase,
+  eventId: string,
+  calibration: SceneMetricCalibration = createSceneMetricCalibration({
+    sceneBounds: replayCase.environment.bounds,
+    widthMeters: replayCase.environment.calibration.widthMeters,
+    heightMeters: replayCase.environment.calibration.heightMeters,
+  }),
+): ImpactAdjacentPathAnalysis[] {
+  const event = replayCase.timelineEvents.find((candidate) => candidate.id === eventId);
+  if (!event) throw new RangeError(`Unknown timeline event ${eventId}`);
+  if (event.type !== "impact") throw new RangeError(`Timeline event ${eventId} is not an impact`);
+  return [...new Set(event.linkedActorIds)].map((actorId) => {
+    const trajectory = getBranchTrajectory(replayCase, event.branchId, actorId);
+    if (!trajectory || trajectory.keyframes.length === 0) {
+      return {
+        eventId: event.id,
+        timeMs: event.timeMs,
+        actorId,
+        trajectoryId: null,
+        authoredImpactKeyframe: false,
+        incoming: null,
+        outgoing: null,
+        speedChangeMps: null,
+        courseChangeDeg: null,
+      };
+    }
+    const first = trajectory.keyframes[0];
+    const last = trajectory.keyframes.at(-1);
+    const withinTrajectoryCoverage =
+      first !== undefined &&
+      last !== undefined &&
+      event.timeMs >= first.timeMs &&
+      event.timeMs <= last.timeMs;
+    const impactPose = withinTrajectoryCoverage
+      ? getActorPoseAtTime(replayCase, actorId, event.timeMs, event.branchId)
+      : undefined;
+    const previous = trajectory.keyframes
+      .filter((keyframe) => keyframe.timeMs < event.timeMs)
+      .at(-1);
+    const next = trajectory.keyframes.find((keyframe) => keyframe.timeMs > event.timeMs);
+    const incoming =
+      previous && impactPose
+        ? impactAdjacentPathLeg(previous, previous.timeMs, impactPose, event.timeMs, calibration)
+        : null;
+    const outgoing =
+      next && impactPose
+        ? impactAdjacentPathLeg(impactPose, event.timeMs, next, next.timeMs, calibration)
+        : null;
+    return {
+      eventId: event.id,
+      timeMs: event.timeMs,
+      actorId,
+      trajectoryId: trajectory.id,
+      authoredImpactKeyframe: trajectory.keyframes.some(
+        (keyframe) => keyframe.timeMs === event.timeMs,
+      ),
+      incoming,
+      outgoing,
+      speedChangeMps: incoming && outgoing ? outgoing.speedMps - incoming.speedMps : null,
+      courseChangeDeg:
+        incoming?.courseDeg !== null &&
+        incoming?.courseDeg !== undefined &&
+        outgoing?.courseDeg !== null &&
+        outgoing?.courseDeg !== undefined
+          ? shortestSignedAngleDegrees(incoming.courseDeg, outgoing.courseDeg)
+          : null,
+    };
+  });
+}
+
 export interface BranchMotionAnalysis {
   branchId: string;
   calibration: SceneMetricCalibration;
@@ -636,6 +770,7 @@ export interface BranchMotionAnalysis {
   trajectories: TrajectoryMotionSummary[];
   advisories: MotionAdvisory[];
   impactFootprints: BranchImpactFootprintAnalysis[];
+  impactAdjacentPaths: ImpactAdjacentPathAnalysis[];
   totals: {
     trajectoryCount: number;
     segmentCount: number;
@@ -679,6 +814,7 @@ export function analyzeBranchMotion(
     .map((trajectory) => analyzeTrajectoryMotion(trajectory, { calibration, thresholds }));
   const advisories = trajectoryAnalyses.flatMap((analysis) => analysis.advisories);
   const impactFootprints: BranchImpactFootprintAnalysis[] = [];
+  const impactAdjacentPaths: ImpactAdjacentPathAnalysis[] = [];
   const impactEvents = replayCase.timelineEvents
     .filter(
       (event) =>
@@ -689,14 +825,16 @@ export function analyzeBranchMotion(
     .sort((left, right) => left.timeMs - right.timeMs || left.id.localeCompare(right.id));
 
   for (const event of impactEvents) {
-    for (let firstIndex = 0; firstIndex < event.linkedActorIds.length - 1; firstIndex += 1) {
+    impactAdjacentPaths.push(...analyzeImpactAdjacentPaths(replayCase, event.id, calibration));
+    const linkedActorIds = [...new Set(event.linkedActorIds)];
+    for (let firstIndex = 0; firstIndex < linkedActorIds.length - 1; firstIndex += 1) {
       for (
         let secondIndex = firstIndex + 1;
-        secondIndex < event.linkedActorIds.length;
+        secondIndex < linkedActorIds.length;
         secondIndex += 1
       ) {
-        const firstId = event.linkedActorIds[firstIndex];
-        const secondId = event.linkedActorIds[secondIndex];
+        const firstId = linkedActorIds[firstIndex];
+        const secondId = linkedActorIds[secondIndex];
         if (!firstId || !secondId) continue;
         const firstActor = replayCase.actors.find((actor) => actor.id === firstId);
         const secondActor = replayCase.actors.find((actor) => actor.id === secondId);
@@ -724,6 +862,7 @@ export function analyzeBranchMotion(
     trajectories: trajectoryAnalyses.map((analysis) => analysis.summary),
     advisories,
     impactFootprints,
+    impactAdjacentPaths,
     totals: {
       trajectoryCount: trajectoryAnalyses.length,
       segmentCount: trajectoryAnalyses.reduce(

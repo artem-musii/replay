@@ -32,7 +32,7 @@
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  font-size: 0.6rem;
+  font-size: 0.7rem;
 }
 .debug-panel > header h2 {
   font-family: Georgia, serif;
@@ -55,9 +55,16 @@
 .debug-support.is-fallback {
   background: var(--paper);
 }
+.debug-support.is-error {
+  color: var(--conflict);
+  background: oklch(0.96 0.025 30);
+}
 .debug-support > div {
   display: grid;
   gap: 1px;
+}
+.debug-support__copy {
+  min-width: 0;
 }
 .debug-support strong {
   font-size: 0.75rem;
@@ -65,6 +72,15 @@
 .debug-support span {
   font-size: 0.75rem;
   color: var(--muted);
+}
+.debug-support > .button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+.debug-support__retry-error {
+  color: var(--conflict) !important;
 }
 .debug-layout {
   min-height: 0;
@@ -161,6 +177,10 @@
   color: oklch(0.4 0.085 180);
   border-color: var(--confirmed);
 }
+.registration-badge.is-error {
+  color: var(--conflict);
+  border-color: color-mix(in oklch, var(--conflict) 65%, var(--rule));
+}
 .debug-detail > p {
   color: var(--muted);
   line-height: 1.55;
@@ -181,6 +201,21 @@
   border-radius: 999px;
   padding: 4px 7px;
   font-size: 0.75rem;
+  color: var(--muted);
+}
+.debug-registration-error {
+  display: grid;
+  gap: 2px;
+  margin: 12px 0;
+  padding: 9px;
+  border: 1px solid color-mix(in oklch, var(--conflict) 55%, var(--rule));
+  border-radius: 7px;
+  background: oklch(0.965 0.018 30);
+  color: var(--conflict);
+  font-size: 0.75rem;
+}
+.debug-registration-error span {
+  overflow-wrap: anywhere;
   color: var(--muted);
 }
 .debug-detail details {
@@ -239,11 +274,17 @@
   min-height: 34px;
   font-size: 0.75rem;
 }
+.debug-copy-error {
+  margin: 7px 0 0;
+  color: var(--conflict);
+  font-size: 0.75rem !important;
+}
 .debug-hint {
   font-size: 0.75rem !important;
 }
 .debug-result {
-  border-left: 3px solid var(--confirmed);
+  border: 1px solid color-mix(in oklch, var(--confirmed) 55%, var(--rule));
+  border-radius: 7px;
   background: var(--paper);
   margin-top: 12px;
   padding: 9px;
@@ -279,6 +320,14 @@
     width: 100vw;
     height: 100vh;
     border-radius: 0;
+  }
+  .debug-support {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .debug-support > .button {
+    width: calc(100% - 23px);
+    margin-left: 23px;
   }
   .debug-layout {
     grid-template-columns: 1fr;

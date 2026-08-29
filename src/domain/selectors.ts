@@ -123,6 +123,7 @@ export function getWorkspaceState(replayCase: ReplayCase, section: WorkspaceStat
       });
     case "report":
       return structuredClone({
+        completenessAttestations: replayCase.completenessAttestations,
         notes: replayCase.reportNotes,
         snapshots: replayCase.reportSnapshots,
       });

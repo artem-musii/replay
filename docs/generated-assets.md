@@ -1,28 +1,34 @@
 # Generated asset disclosure
 
-Last inspected locally and on the deployed application: **2026-08-28**.
+Last inspected locally and on the deployed application: **2026-08-29**.
 
-The current seed-v3 experience uses five original bitmap assets created during development with the Codex built-in image-generation mode. The built-in mode selected the available image model; it did not expose a model identifier in the returned artifact, so this repository does not claim a specific model snapshot. Three earlier evidence assets remain packaged so a saved seed-v1 demo can still resume until the person explicitly resets it. No API key is bundled, and the running application performs no image generation or external evidence upload.
+The deployed seed-v5 release and current seed-v6 working tree use five original bitmap compositions created during development with the Codex built-in image-generation mode; the current tree also ships two mechanically resized hero renditions for responsive delivery. The superseded seed-v3 release used the same five original paths. The built-in mode selected the available image model but did not expose a model identifier in the returned artifact, so this repository does not claim a specific model snapshot. Three earlier evidence assets remain packaged so a saved seed-v1 demo can still resume through its case-specific URL. No API key is bundled, and the running application performs no image generation or external evidence upload.
 
 The hero supports product communication. The other four images are fictional, synthetic demo evidence and are visibly badged **Synthetic demo** in the evidence inspector. They do not depict a real incident. The functional road, vehicles, paths, impact marker, damage markers, and branch overlays are authored as semantic SVG rather than generated pixels.
 
+## Submission rights boundary
+
+The submission source set documents the runtime image files, generation prompts, dimensions, checksums, and review record needed to identify every generated asset used by the current product. REPLAY's source code is MIT-licensed; use of generated assets remains subject to the applicable generation-service terms and is not broadened by the code license. No stock footage, music, or audio file is present in the working tree. The final release must track every listed runtime asset, and the demo video must not introduce copyrighted music, unlicensed footage, unrelated marks, or real incident material.
+
 ## Active release files
 
-The application/seed reference this set. All active files are public in Pages deployment `6139340101`; the all-43-file deployment audit returned them successfully and byte-matched them to artifact `9682041096`. A fresh live-browser audit also loaded all four current evidence images with 200 responses.
+The deployed seed-v5 release includes the original hero and four active evidence images from this set. They are public from commit `2855f0bc50da2916128b2278a46f0d0a8a4e2bbd` in Pages deployment `6143728209`; an independent 2026-08-29 post-deploy audit returned all 43 cache-busted live files / 4,248,606 bytes and byte-matched them to artifact `9691136611` with manifest SHA-256 `6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4`. The two responsive hero renditions are current seed-v6 source assets and are not claimed as part of that deployment. A separate live-browser audit against superseded commit `00688d8a` loaded the same four evidence-image paths with 200 responses; that browser result remains historical rather than evidence for the current deployment.
 
 | File                                                                                        | Purpose                               |  Dimensions |     WebP size | SHA-256                                                            |
 | ------------------------------------------------------------------------------------------- | ------------------------------------- | ----------: | ------------: | ------------------------------------------------------------------ |
 | [`replay-hero.webp`](../public/assets/generated/replay-hero.webp)                           | Landing-page editorial product visual |  1672 × 941 | 346,630 bytes | `5b73a486d6bd062d80994a80d140904f78d7a1e071f523dd9f47a9e8c5659fca` |
+| [`replay-hero-1200.webp`](../public/assets/generated/replay-hero-1200.webp)                 | Responsive hero rendition             |  1200 × 676 | 102,094 bytes | `0be858519d85e3ef006ad31f22a5a42e4953da808c07d813c48244f4f95b4b9d` |
+| [`replay-hero-640.webp`](../public/assets/generated/replay-hero-640.webp)                   | Small-screen hero rendition           |   640 × 361 |  30,844 bytes | `f8c443ff4f0241d8cbd11cb0c0db333d46d2f68d655e90fdc79454c315bd217c` |
 | [`demo-roundabout-wide-v2.webp`](../public/assets/generated/demo-roundabout-wide-v2.webp)   | Wide fictional incident overview      | 1448 × 1086 | 302,658 bytes | `3cfb45061b48ffc5e04bb8299c5e558c07d1e21df772045f9b60e3006a810295` |
 | [`demo-vehicle-a-damage-v2.webp`](../public/assets/generated/demo-vehicle-a-damage-v2.webp) | Vehicle A front-left damage detail    | 1448 × 1086 | 281,286 bytes | `f8e2a6110ac39c65133b7b25542472ef3ea8a5dd5c2eb0c331305defa3f551e6` |
 | [`demo-vehicle-b-damage-v2.webp`](../public/assets/generated/demo-vehicle-b-damage-v2.webp) | Vehicle B rear-right damage detail    | 1448 × 1086 | 211,696 bytes | `382f6f38420934d265529ef1b3588dc852580274cc07b7d4c514d056ad6c8326` |
 | [`demo-road-condition.webp`](../public/assets/generated/demo-road-condition.webp)           | Wet road-surface and marking detail   | 1448 × 1086 | 389,932 bytes | `e2179643bfd0bc5ebb74247abb839b8d3bb1a635ad8620846fd525c7ea3c8cc5` |
 
-The active optimized WebP set is approximately 1.5 MB. High-quality PNG generation outputs remain in the development host’s Codex generated-image artifact store, outside this repository, for reproducible re-encoding and close review. They are not copied into `public/` or `dist/`. Earlier evidence iterations remain in the repository for auditability and seed-v1 resume compatibility; they are not referenced by the current seed-v3 reset.
+The active optimized WebP set is 1,665,140 bytes on disk. Browsers fetch one hero rendition through `srcset`, not all three, choosing among the 640 px, 1200 px, and source files according to the rendered slot and device pixel ratio. The 640 px option is 30,844 bytes instead of the 346,630-byte source. The responsive files were derived locally from the reviewed source with `cwebp` quality 82, method 6, sharp YUV conversion, and width-preserving aspect-ratio resize. High-quality PNG generation outputs remain in the development host’s Codex generated-image artifact store, outside this repository, for reproducible re-encoding and close review. They are not copied into `public/` or `dist/`. Earlier evidence iterations remain in the repository for auditability and seed-v1 resume compatibility; fresh seed-v6 runs do not reference them.
 
 ## Legacy seed-v1 compatibility files
 
-These superseded generation iterations are still distributed because valid saved seed-v1 demo cases may reference their paths. They are not used by a fresh seed-v3 reset and must not be mistaken for additional incident evidence.
+These superseded generation iterations are still distributed because valid saved seed-v1 demo cases may reference their paths. They are not used by a fresh seed-v6 run and must not be mistaken for additional incident evidence.
 
 | File                                                                                  | Compatibility status         |  Dimensions |     WebP size | SHA-256                                                            |
 | ------------------------------------------------------------------------------------- | ---------------------------- | ----------: | ------------: | ------------------------------------------------------------------ |
@@ -93,6 +99,7 @@ The wide overview is intentionally contextual rather than a geometry measurement
 ## Integration and accessibility
 
 - The landing image has descriptive alternative text covering the roundabout, vehicles, trajectories, evidence frames, timeline, and provenance nodes.
+- The landing image uses width-described `srcset` candidates and an explicit `sizes` policy so narrow screens do not download the full 1672 px source.
 - Evidence-grid thumbnails use an empty `alt` because the adjacent visible filename is the accessible label for the selecting button. The selected evidence preview uses `alt="Preview of …"` with the asset name.
 - Every synthetic demo item carries `syntheticDemoAsset: true`, includes `synthetic-demo` metadata, and shows an in-product **Synthetic demo** badge.
 - Each deterministic seed version records its evidence assets’ exact `.webp` paths, MIME types, byte sizes, and SHA-256 values from the applicable table above.

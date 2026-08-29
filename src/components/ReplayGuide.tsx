@@ -20,10 +20,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   GUIDE_SECTIONS,
+  SITE_TOOL_DETERMINISTIC_PROOF,
+  SITE_TOOL_GENERAL_PROMPTS,
+  SITE_TOOL_QUICK_PROOF,
   SITE_TOOL_PROMPTS,
   guideSectionById,
   type GuideSectionId,
 } from "../onboarding/content";
+import type { DemoScenarioId } from "../domain/demoScenarios";
 import {
   markGuideSectionComplete,
   readReplayGuideProgress,
@@ -31,6 +35,7 @@ import {
 } from "../onboarding/progress";
 import "../styles/guide.css";
 import { BrandMark } from "./BrandMark";
+import { copyTextToClipboard } from "./clipboard";
 import { useDialogFocus } from "./useDialogFocus";
 
 export type { GuideSectionId } from "../onboarding/content";
@@ -38,11 +43,14 @@ export type { GuideSectionId } from "../onboarding/content";
 export interface ReplayGuideProps {
   context: "landing" | "workspace";
   webMcpSupported: boolean;
+  isDemo?: boolean;
+  demoScenarioId?: DemoScenarioId;
   registeredTools?: number;
   toolRegistrationStatus?: "registering" | "ready" | "error";
   initialSection?: GuideSectionId;
   onClose: () => void;
   onOpenGuidedDemo?: () => void;
+  onOpenProofDemo?: () => void;
   onStartWorkspaceTour?: () => void;
   onOpenTechnicalInspector?: () => void;
 }
@@ -57,37 +65,19 @@ const sectionIcons: Record<GuideSectionId, LucideIcon> = {
   report: FileText,
 };
 
-async function copyText(text: string): Promise<void> {
-  const previousFocus =
-    document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  try {
-    await navigator.clipboard.writeText(text);
-    return;
-  } catch {
-    // Fall back to a local selection when the Clipboard API is unavailable.
-  }
-
-  const input = document.createElement("textarea");
-  input.value = text;
-  input.setAttribute("readonly", "");
-  input.style.position = "fixed";
-  input.style.opacity = "0";
-  document.body.append(input);
-  input.select();
-  const copied = typeof document.execCommand === "function" && document.execCommand("copy");
-  input.remove();
-  previousFocus?.focus();
-  if (!copied) throw new Error("Clipboard access is unavailable.");
-}
+const OPENAI_SITE_TOOLS_GUIDANCE_URL = "https://learn.chatgpt.com/docs/webmcp";
 
 export function ReplayGuide({
   context,
   webMcpSupported,
+  isDemo = false,
+  demoScenarioId,
   registeredTools,
   toolRegistrationStatus,
   initialSection,
   onClose,
   onOpenGuidedDemo,
+  onOpenProofDemo,
   onStartWorkspaceTour,
   onOpenTechnicalInspector,
 }: ReplayGuideProps) {
@@ -131,17 +121,6 @@ export function ReplayGuide({
     [],
   );
 
-  useEffect(() => {
-    const previousDocumentOverflow = document.documentElement.style.overflow;
-    const previousBodyOverflow = document.body.style.overflow;
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.documentElement.style.overflow = previousDocumentOverflow;
-      document.body.style.overflow = previousBodyOverflow;
-    };
-  }, []);
-
   const activeSection = guideSectionById(activeSectionId);
   const activeIndex = GUIDE_SECTIONS.findIndex((section) => section.id === activeSectionId);
   const isComplete = completedSectionIds.includes(activeSectionId);
@@ -165,7 +144,7 @@ export function ReplayGuide({
   async function copyPrompt(id: string, prompt: string): Promise<void> {
     setCopyError(false);
     try {
-      await copyText(prompt);
+      await copyTextToClipboard(prompt);
       setCopiedPromptId(id);
       if (copyResetTimerRef.current !== undefined) {
         window.clearTimeout(copyResetTimerRef.current);
@@ -186,6 +165,15 @@ export function ReplayGuide({
         registeredTools > 0));
   const registrationFailed = webMcpSupported && toolRegistrationStatus === "error";
   const partialRegistration = registrationFailed && (registeredTools ?? 0) > 0;
+  const quickProofReady =
+    context === "workspace" &&
+    isDemo &&
+    (demoScenarioId === undefined || demoScenarioId === "roundabout-calibrated");
+  const siteToolPrompts = quickProofReady ? SITE_TOOL_PROMPTS : SITE_TOOL_GENERAL_PROMPTS;
+  const contextualNote =
+    activeSectionId === "quick-start" && context === "workspace" && !isDemo
+      ? "This local case is safe to explore. Changes stay in your browser, and structured exports provide a portable record without evidence image bytes."
+      : activeSection.note;
   const modeLabel = !webMcpSupported
     ? "Manual mode is active"
     : partialRegistration
@@ -295,7 +283,7 @@ export function ReplayGuide({
                     {partialRegistration
                       ? "Registered tools remain available. Use Case options to inspect the registration error. Manual controls remain available for every workflow."
                       : toolsReady
-                        ? "Ask the connected agent in its conversation. Mutations are validated, reflected in the case, and attributed in recent activity."
+                        ? "The page registered these tools. Confirm discovery in Available Site Tools and real calls in Recently used or Sources, then ask in the client conversation. Mutations are validated, reflected in the case, and attributed in activity."
                         : webMcpSupported && registrationFailed
                           ? "Continue in Manual mode and use Case options to inspect the registration error. Site Tools remain unavailable until registration succeeds."
                           : webMcpSupported
@@ -304,6 +292,140 @@ export function ReplayGuide({
                   </span>
                 </div>
               </div>
+            )}
+
+            {activeSectionId === "site-tools" && !toolsReady && (
+              <section
+                className="guide-site-tools-setup"
+                aria-labelledby="guide-site-tools-setup-title"
+              >
+                <h4 id="guide-site-tools-setup-title">Use a supported OpenAI setup</h4>
+                <p>
+                  OpenAI guidance checked August 29, 2026: in the latest ChatGPT desktop app, open
+                  REPLAY in the built-in browser and use ChatGPT Work or Codex with GPT-5.6 Sol or
+                  GPT-5.6 Terra. GPT-5.6 Luna currently has Site Tools disabled.
+                </p>
+                <p>
+                  Site Tools are not available in Enterprise or Edu workspaces, and access also
+                  depends on rollout. If no registered-tool count appears, continue in Manual mode.
+                </p>
+                <a
+                  href={OPENAI_SITE_TOOLS_GUIDANCE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Check current OpenAI Site Tools guidance (opens in a new tab)"
+                >
+                  Check current OpenAI Site Tools guidance
+                </a>
+              </section>
+            )}
+
+            {activeSectionId === "site-tools" && toolsReady && quickProofReady && (
+              <section className="guide-quick-proof" aria-labelledby="guide-quick-proof-title">
+                <div className="guide-quick-proof__heading">
+                  <div>
+                    <p>Fastest proof</p>
+                    <h4 id="guide-quick-proof-title">30 seconds from structured read to review</h4>
+                  </div>
+                  <button
+                    className="button button--primary"
+                    type="button"
+                    onClick={() =>
+                      void copyPrompt(SITE_TOOL_QUICK_PROOF.id, SITE_TOOL_QUICK_PROOF.prompt)
+                    }
+                    aria-label={`Copy prompt: ${SITE_TOOL_QUICK_PROOF.title}`}
+                  >
+                    {copiedPromptId === SITE_TOOL_QUICK_PROOF.id ? (
+                      <Check size={14} aria-hidden="true" />
+                    ) : (
+                      <Copy size={14} aria-hidden="true" />
+                    )}
+                    {copiedPromptId === SITE_TOOL_QUICK_PROOF.id
+                      ? "Copied"
+                      : "Copy practical prompt"}
+                  </button>
+                </div>
+                <details className="guide-quick-proof__prompt">
+                  <summary>Show deterministic fallback</summary>
+                  <p>{SITE_TOOL_DETERMINISTIC_PROOF.prompt}</p>
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    onClick={() =>
+                      void copyPrompt(
+                        SITE_TOOL_DETERMINISTIC_PROOF.id,
+                        SITE_TOOL_DETERMINISTIC_PROOF.prompt,
+                      )
+                    }
+                    aria-label={`Copy prompt: ${SITE_TOOL_DETERMINISTIC_PROOF.title}`}
+                  >
+                    {copiedPromptId === SITE_TOOL_DETERMINISTIC_PROOF.id ? (
+                      <Check size={14} aria-hidden="true" />
+                    ) : (
+                      <Copy size={14} aria-hidden="true" />
+                    )}
+                    {copiedPromptId === SITE_TOOL_DETERMINISTIC_PROOF.id
+                      ? "Copied"
+                      : "Copy deterministic prompt"}
+                  </button>
+                </details>
+                <ul aria-label="Expected proof outcomes">
+                  <li>
+                    <SearchCheck size={15} aria-hidden="true" /> The top unresolved question is
+                    focused before geometry is proposed.
+                  </li>
+                  <li>
+                    <GitFork size={15} aria-hidden="true" /> A pending proposal appears; base
+                    geometry stays unchanged.
+                  </li>
+                  <li>
+                    <ShieldCheck size={15} aria-hidden="true" /> No claim or human-only decision is
+                    taken.
+                  </li>
+                </ul>
+                <span className="guide-quick-proof__status" role="status" aria-live="polite">
+                  {copyError
+                    ? "Clipboard access is unavailable. Select the prompt text to copy it."
+                    : copiedPromptId === SITE_TOOL_QUICK_PROOF.id
+                      ? "Practical review prompt copied to the clipboard."
+                      : copiedPromptId === SITE_TOOL_DETERMINISTIC_PROOF.id
+                        ? "Deterministic fallback prompt copied to the clipboard."
+                        : ""}
+                </span>
+              </section>
+            )}
+
+            {activeSectionId === "site-tools" && toolsReady && !quickProofReady && (
+              <section
+                className="guide-quick-proof guide-quick-proof--fixture"
+                aria-labelledby="guide-proof-fixture-title"
+              >
+                <div className="guide-quick-proof__heading">
+                  <div>
+                    <p>Deterministic proof fixture</p>
+                    <h4 id="guide-proof-fixture-title">
+                      Open the Roundabout demo for the 30-second proof
+                    </h4>
+                  </div>
+                  {onOpenProofDemo && (
+                    <button
+                      className="button button--primary"
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenProofDemo();
+                      }}
+                    >
+                      Open proof case <ArrowRight size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+                <p className="guide-quick-proof__fixture-copy">
+                  The exact proposal prompt targets two known 8,000 ms keyframes in the calibrated
+                  Roundabout fixture. REPLAY does not offer that prompt in another case where those
+                  points may not exist. The safe prompts below inspect the case that is open now.
+                </p>
+              </section>
             )}
 
             <ol className="guide-topic-list">
@@ -318,10 +440,10 @@ export function ReplayGuide({
               ))}
             </ol>
 
-            {activeSection.note && (
+            {contextualNote && (
               <p className="guide-note">
                 <SearchCheck size={16} aria-hidden="true" />
-                <span>{activeSection.note}</span>
+                <span>{contextualNote}</span>
               </p>
             )}
 
@@ -332,7 +454,7 @@ export function ReplayGuide({
                   <h4 id="guide-prompts-title">Try a narrow, reviewable request</h4>
                 </div>
                 <ul>
-                  {SITE_TOOL_PROMPTS.map((item) => (
+                  {siteToolPrompts.map((item) => (
                     <li key={item.id}>
                       <div>
                         <strong>{item.title}</strong>
@@ -388,7 +510,7 @@ export function ReplayGuide({
                     Open guided demo <ArrowRight size={16} aria-hidden="true" />
                   </button>
                 )}
-                {context === "workspace" && onStartWorkspaceTour && (
+                {context === "workspace" && isDemo && onStartWorkspaceTour && (
                   <button
                     className="button button--primary"
                     type="button"
@@ -401,7 +523,11 @@ export function ReplayGuide({
                     Start 6-step workspace tour <ArrowRight size={16} aria-hidden="true" />
                   </button>
                 )}
-                <span>Optional, replayable, and safe to exit at any time.</span>
+                <span>
+                  {context === "workspace" && !isDemo
+                    ? "The playback tour uses the calibrated demo. This guide still applies to the open local case."
+                    : "Optional, replayable, and safe to exit at any time."}
+                </span>
               </div>
             )}
 

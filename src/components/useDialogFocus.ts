@@ -28,6 +28,27 @@ interface DialogFocusOptions {
   restoreFocus?: boolean;
 }
 
+let activeScrollLocks = 0;
+let restoredDocumentOverflow = "";
+let restoredBodyOverflow = "";
+
+function lockBackgroundScroll(): () => void {
+  if (activeScrollLocks === 0) {
+    restoredDocumentOverflow = document.documentElement.style.overflow;
+    restoredBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+  }
+  activeScrollLocks += 1;
+  return () => {
+    activeScrollLocks = Math.max(0, activeScrollLocks - 1);
+    if (activeScrollLocks === 0) {
+      document.documentElement.style.overflow = restoredDocumentOverflow;
+      document.body.style.overflow = restoredBodyOverflow;
+    }
+  };
+}
+
 /**
  * Gives a modal dialog deterministic keyboard behavior without hiding any of
  * its domain-specific controls behind a generic dialog abstraction.
@@ -53,6 +74,7 @@ export function useDialogFocus<T extends HTMLElement>({
 
     const invoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const initialTarget = initialFocusRef?.current ?? focusableElements(dialog)[0] ?? dialog;
+    const unlockBackgroundScroll = lockBackgroundScroll();
     initialTarget.focus();
 
     function handleKeyDown(event: KeyboardEvent): void {
@@ -88,6 +110,7 @@ export function useDialogFocus<T extends HTMLElement>({
     document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
+      unlockBackgroundScroll();
       if (restoreFocus && invoker?.isConnected) invoker.focus();
     };
   }, [active, initialFocusRef, restoreFocus]);

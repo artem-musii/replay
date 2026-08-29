@@ -1,7 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 
 export async function openLanding(page: Page): Promise<void> {
-  await page.goto("/");
+  // Relative navigation preserves a configured static-host base path while
+  // remaining identical for the root-hosted development build.
+  await page.goto("./");
   await expect(
     page.getByRole("heading", {
       name: "A shared black box for incidents that did not have one.",
@@ -12,7 +14,7 @@ export async function openLanding(page: Page): Promise<void> {
 
 export async function openDemo(page: Page): Promise<void> {
   await openLanding(page);
-  await page.getByRole("button", { name: "Open a clean demo" }).click();
+  await page.getByRole("button", { name: "Open Roundabout demo" }).click();
   await expect(page.locator("main.workspace")).toBeVisible();
   await expect(page.getByText("Roundabout incident — 17:42", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#case\/case-demo-roundabout-calibrated-run-/);
@@ -33,10 +35,21 @@ export async function waitForLocalSave(page: Page): Promise<void> {
   await expect(status).toContainText("Saved locally", { timeout: 10_000 });
 }
 
+export async function confirmStructuredCaseImport(page: Page): Promise<void> {
+  const dialog = page.getByRole("alertdialog", { name: "Review this structured transfer" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Fresh local review required");
+  await expect(dialog).toContainText("The transfer is unsigned.");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await dialog.getByRole("button", { name: "Open as new local case" }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 export function inspectorTab(page: Page, name: string) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return page
-    .getByRole("navigation", { name: "Case workspaces" })
-    .getByRole("button", { name, exact: true });
+    .getByRole("tablist", { name: "Case workspaces" })
+    .getByRole("tab", { name: new RegExp(`^${escapedName}(?:\\s|$)`) });
 }
 
 export async function openWebMCPInspector(page: Page) {
@@ -74,13 +87,27 @@ export async function installModelContextPolyfill(page: Page): Promise<void> {
     }
 
     const definitions = new Map<string, ToolDefinition>();
+    const registrationAudit = {
+      calls: [] as string[],
+      aborted: [] as string[],
+      executions: [] as Array<{
+        name: string;
+        input: Readonly<Record<string, unknown>>;
+      }>,
+    };
+    Object.defineProperty(window, "__replayWebMCPRegistrationAudit", {
+      value: registrationAudit,
+      configurable: true,
+    });
     const modelContext = {
       registerTool(tool: ToolDefinition, options: { signal?: AbortSignal } = {}): Promise<void> {
         if (options.signal?.aborted) throw new DOMException("Registration aborted", "AbortError");
+        registrationAudit.calls.push(tool.name);
         definitions.set(tool.name, tool);
         options.signal?.addEventListener(
           "abort",
           () => {
+            registrationAudit.aborted.push(tool.name);
             if (definitions.get(tool.name) === tool) definitions.delete(tool.name);
           },
           { once: true },
@@ -109,6 +136,7 @@ export async function installModelContextPolyfill(page: Page): Promise<void> {
         const fallback = new AbortController();
         const signal = options.signal ?? fallback.signal;
         if (signal.aborted) throw new DOMException("Execution aborted", "AbortError");
+        registrationAudit.executions.push({ name: tool.name, input });
         return JSON.stringify(await definition.execute(input, { signal }));
       },
     };

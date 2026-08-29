@@ -19,3 +19,28 @@ export function evidenceBoundText(text: string): string {
     ? "A source supplied a fault or liability allegation. It remains source-attributed and REPLAY does not adopt it as a conclusion."
     : text;
 }
+
+/**
+ * Truncates to a UTF-16 code-unit limit without leaving a dangling surrogate.
+ * Callers still validate untrusted text separately; this helper only makes
+ * length-bounded, already XML-safe strings remain XML-serializable.
+ */
+export function truncateXmlSafeText(value: string, maxCodeUnits: number): string {
+  if (!Number.isInteger(maxCodeUnits) || maxCodeUnits < 0) {
+    throw new RangeError("The XML-safe text limit must be a non-negative integer");
+  }
+  if (value.length <= maxCodeUnits) return value;
+  if (maxCodeUnits === 0) return "";
+  let end = maxCodeUnits;
+  const lastCodeUnit = value.charCodeAt(end - 1);
+  const nextCodeUnit = value.charCodeAt(end);
+  if (
+    lastCodeUnit >= 0xd800 &&
+    lastCodeUnit <= 0xdbff &&
+    nextCodeUnit >= 0xdc00 &&
+    nextCodeUnit <= 0xdfff
+  ) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}

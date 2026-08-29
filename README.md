@@ -1,16 +1,14 @@
 # REPLAY
 
-**A shared black box for incidents that did not have one.** REPLAY is a local-first visual workspace where a person and an AI agent reconstruct a minor two-vehicle road incident together while keeping evidence, memory, uncertainty, dispute, and inference visibly distinct.
+**A shared black box for incidents that did not have one.** After a minor no-injury collision, a driver and claims-intake reviewer need to turn photographs, damage, final positions, timing, and conflicting memories into a record they can inspect. REPLAY gives them one local-first visual case where evidence, memory, uncertainty, dispute, and inference remain visibly distinct—and a cited report that no Site Tool can finalize.
 
-![Generated REPLAY product visual showing a roundabout reconstruction, trajectories, evidence, timeline, and provenance](public/assets/generated/replay-hero.webp)
+[Live app](https://artem-musii.github.io/replay-sol/) · [Deterministic judge case](https://artem-musii.github.io/replay-sol/#demo) · [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+![REPLAY workspace with 18 Site Tools registered, a reversible two-vehicle proposal over the unchanged baseline, and separate session and case activity](docs/images/replay-webmcp-collaboration.webp)
+
+_Actual 1280 × 720 capture from the exact configured-base candidate in the Codex in-app browser. It shows the current Scene calibration UI, 1.25× playback, 12-point paths, 18 registered Site Tools, the live baseline beside a pending review-only proposal, and separate case/session activity. The proposal call was operator-directed; this is not a supported-model-choice or deployed-release claim._
 
 > REPLAY organizes and visualizes a factual account. Its calibrated geometry and motion checks are deterministic review aids, not a forensic reconstruction, collision-dynamics simulation, truth/lie detector, legal determination, or decision about fault or liability.
-
-## Workspace preview
-
-![REPLAY deterministic demo workspace showing the roundabout scene, fact inspector, synchronized timeline, and attributed activity feed](docs/images/replay-workspace.webp)
-
-_Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The product visual above is generated; this workspace image is a real application screenshot._
 
 ## Try it
 
@@ -19,21 +17,43 @@ _Actual 1440 × 900 Playwright capture of the deterministic demo workspace. The 
 | Live build              | [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)           |
 | Live deterministic demo | [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) |
 | Public repository       | [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)           |
+| Open-source license     | [MIT](LICENSE)                                                                                   |
 | Demo video              | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.            |
 
-To start without WebMCP, run the app locally and choose **Try the demo case**. Every core workspace feature remains available in an ordinary browser.
+**Fast judge prompt:** Open the deterministic demo in ChatGPT's built-in browser and ask: “Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.” The in-product Site Tools guide also provides an exact-coordinate deterministic fallback for repeatable evaluation.
 
-The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. In a local current-source build, valid saved seed-v1 through seed-v4 cases can resume; **Case options → Reset deterministic demo** replaces one with the seed-v4 fixture.
+To start without WebMCP, run the app locally and choose **Open Roundabout demo**. Every core workspace feature remains available in an ordinary browser.
 
-The public URL still serves the verified `00688d8a51fb783dbf147e08ece60470b8877544` release described under [Testing](#testing). The calibrated-scene, motion-envelope, integrity, and four-scenario additions described below are implemented in current source and deterministic tests; they still require a new deployment and supported-model Site Tools traces. The public video is also pending. The [WebMCP Challenge rules](https://webmcp.devpost.com/rules) require a working live URL, public source and instructions, an English submission description, and a public demonstration video under three minutes. The submission deadline is **September 3, 2026 at 1:00 PM PDT**; see the [official challenge page](https://openai.com/webmcp-challenge/).
+The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. In current source, `/#demo`, a landing-page scenario card, and **Case options → Start fresh demo copy** each create a new seed-v6 run without overwriting an earlier one, then replace the location with a stable `#case/<encoded-case-id>` route. The landing page lists every retained run under **Your local cases**, where a visible, cancel-first human control can permanently remove one local case and its stored evidence bytes. Site Tools cannot request that deletion. A saved run resumes only from its route in the same origin and browser profile; an unavailable route shows a recovery message instead of opening a different case. Valid legacy seed-v1 through seed-v6 records remain loadable.
+
+The public URL serves the verified seed-v5 release at [`2855f0bc50da2916128b2278a46f0d0a8a4e2bbd`](https://github.com/artem-musii/replay-sol/commit/2855f0bc50da2916128b2278a46f0d0a8a4e2bbd), including the calibrated scene, motion/integrity review, physically coherent authored contact geometry, and four-scenario library. Later seed-v6 working-tree fixes and their local evidence remain separately scoped until another clean release. Supported-model Site Tools traces and the public video are still pending. The [WebMCP Challenge rules](https://webmcp.devpost.com/rules) require a working live URL, public source/instructions/license, an English submission description, free judge access, and a public YouTube demonstration under three minutes with audio showing actual WebMCP use. The submission deadline is **September 3, 2026 at 1:00 PM PDT**; see the [official challenge page](https://openai.com/webmcp-challenge/).
+
+## The three-minute judge path
+
+A screenshot can show two vehicles, but it cannot reliably tell an agent which timed point belongs to which branch, whether a statement is photo-backed or disputed, whether a path is locked, or which case version is current. WebMCP exposes those exact live semantics and validated actions. Its writes pass through the same domain commands as visible UI actions, so every proposal is attributable and inspectable in the one case the person sees—never an agent-only shadow copy.
+
+**Agent: read, validate, propose, draft. Reviewer: attest, decide, finalize.**
+
+In one coherent demo, a judge can see the complete contract:
+
+1. **Inspect the record without overstating it.** The authored roundabout paths visibly slow and diverge after the reported contact, while the inspector labels the comparison as authored motion—not simulated collision physics or proof of causation.
+2. **Use native Site Tools on live structured state.** The agent reads the scene and facts, runs REPLAY's deterministic consistency checks, and focuses the result in the same workspace.
+3. **Keep proposal, inference, and fact separate.** A coordinated geometry proposal remains a reversible preview; an agent hypothesis stays attributed and unconfirmed; no Site Tool can adjust, accept, or reject that proposal or confirm an eligible statement. Those commands require the visible UI review origin.
+4. **Turn the record into a practical output.** The agent prepares a neutral, citation-bound report preview, but only a visible human review can create the immutable final snapshot.
+
+The exact recording sequence, pass cues, and native-tool proof requirements are in the [under-three-minute demo script](docs/demo-script.md).
+
+## Challenge-period provenance
+
+REPLAY was created during the Challenge submission window, not extended from a pre-existing product. The repository's first commit, `c95df75`, is dated **August 27, 2026**, after submissions opened on August 25. The public history then records the WebMCP command bridge, shared human-agent domain model, releases, onboarding, calibrated realism, and review safeguards. Preserve that dated history with the final submission so judges can distinguish eligible Challenge work directly.
 
 ## Learn REPLAY in the product
 
-The onboarding is optional and replayable. Open **How to use REPLAY** from the landing page for the complete topic guide, choose **Guided demo · about 4 minutes** for a six-step workspace tour, or use **Guide** in the workspace at any time. The guide covers scene editing, timed path points, lane snap, the timeline, provenance, evidence, hypotheses, files, reports, and human-only review boundaries.
+The onboarding is optional and replayable. Open **How to use REPLAY** from the landing page for the complete topic guide, choose **Take the 6-step guided tour** for a mutation-free workspace walkthrough, or use **Guide** in the workspace at any time. The guide covers scene editing, timed path points, lane snap, the timeline, provenance, evidence, hypotheses, files, reports, and human-only review boundaries.
 
-For Site Tools/WebMCP, select the **Site Tools** status in the workspace. WebMCP is the browser bridge, not an embedded chat box: keep REPLAY open in a compatible ChatGPT, Codex, or other client, then ask in that client’s conversation. A registered-tool count means the connection is ready; **Manual mode** means the full visible workflow remains available without an agent. The guide includes four copyable, narrow prompts and a link to the technical registration inspector.
+For Site Tools/WebMCP, select the **Site Tools** status in the workspace. WebMCP is the browser bridge, not an embedded chat box: keep REPLAY open in a compatible ChatGPT, Codex, or other client, then ask in that client’s conversation. A registered-tool count means the page registered its inventory; confirm client discovery in **Available site tools** and real calls in **Recently used/Sources**. **Manual mode** means the full visible workflow remains available without an agent. When tools are available, the guide leads with one copyable 30-second proof—structured read, validation, and a pending review-gated proposal—followed by four narrower prompts and the technical registration inspector.
 
-Paths are timed poses rather than a collision-dynamics simulation. Set the playhead, select a vehicle or path, and add a point at that time. Two-point paths interpolate linearly; paths with three or more timed poses use a deterministic cubic Hermite curve, while heading follows the shortest angle. The renderer and swept-road checks sample the same curve. Lane snap affects nearby pointer drags only, while keyboard nudges and exact numeric fields remain precise. Select a vehicle to use its visible rotation handle, ±15° controls, or exact compass heading.
+Paths are timed poses rather than a collision-dynamics simulation. Set the playhead, select a vehicle or path, and add a point at that time. Two-point paths interpolate linearly; paths with three or more timed poses use a deterministic cubic Hermite curve, while heading follows the shortest angle. The renderer and swept-road checks sample the same curve. Selecting an impact compares the authored incoming and outgoing segment speeds and courses; it never generates a response or treats the marker as the cause. If the event falls between authored points, the motion review asks whether an explicit impact-time point is needed. Lane snap affects nearby pointer drags only, while keyboard nudges and exact numeric fields remain precise. Select a vehicle to use its visible rotation handle, ±15° controls, or exact compass heading.
 
 ## The problem
 
@@ -46,11 +66,12 @@ REPLAY gives the case a shared, inspectable structure:
 - claims with explicit source and certainty labels;
 - local evidence with visible links into the case;
 - ranked open questions and alternative hypothesis branches;
+- explicit human completeness records for a legitimate no-evidence case, unassessed/unknown damage, and completed uncertainty review;
 - calibrated metric geometry and deterministic consistency advisories instead of model speculation;
 - attributable human, agent, and system activity; and
-- a citation-bound factual report that only a person can finalize.
+- a citation-bound factual report that no Site Tool can finalize; finalization requires the visible review flow.
 
-It is designed for drivers, claims-support teams, fleet managers, insurance intake staff, rental support teams, and neutral mediators handling minor no-injury incidents.
+It is designed first for a driver documenting a minor no-injury incident and the claims-intake reviewer turning that account into a reviewable record. Claims-support, fleet, rental-support, and neutral-mediation teams are adjacent users of the same workflow.
 
 ## Human and agent share one model
 
@@ -69,34 +90,36 @@ Human edits scene or facts              Agent calls a Site Tool
        scene, timeline, inspector, report, activity
 ```
 
-The ordinary UI can therefore show a newer in-memory case while a queued save is pending and pauses further mutations if that save fails. A WebMCP mutation does not become live until its staged case passes the version-checked save; a post-save cancellation or live conflict is compensated before the invocation settles when possible.
+The ordinary UI can therefore show a newer in-memory case while a queued save is pending and pauses further mutations if that save fails. Only a successful durable retry resumes editing; the optional structured-transfer download is explicitly incomplete and does not act as a save. A WebMCP mutation does not become live until its staged case passes the version-checked save; a post-save cancellation or live conflict is compensated before the invocation settles when possible.
 
 A useful collaboration cycle looks like this:
 
 1. The agent reads the live scene, claims, evidence, questions, and recent activity.
 2. It makes a narrow attributed change, or creates a coordinated scene proposal whose geometry remains preview-only.
-3. The person directly corrects, locks, confirms, disputes, or rejects that work. Only the visible UI can adjust, accept, or reject a scene proposal.
+3. The person directly corrects, locks, confirms, disputes, rejects, or records a reviewed completeness outcome. Only the visible UI can adjust, accept, or reject a scene proposal or create a completeness attestation.
 4. The agent rereads the newer activity and revalidates rather than overwriting it.
 5. Multiple unresolved explanations stay as comparable branches.
 6. The agent may prepare a cited report preview, but a visible human review and manual confirmation create the immutable snapshot.
 
 ## Product tour
 
-The seed-v4 **Roundabout incident — 17:42** case includes two vehicles with explicit dimension-source labels, calibrated metric scene bounds, four clearly labelled synthetic demo photographs, confirmed and reported observations, known damage, final positions, and open questions. Oriented vehicle footprints overlap at the reported contact instead of relying on centre-point distance, and the case never identifies a vehicle at fault.
+The seed-v6 **Roundabout incident — 17:42** case includes two vehicles with explicit dimension-source labels, calibrated metric scene bounds, four clearly labelled synthetic demo photographs, confirmed and reported observations, known damage, final positions, and open questions. Oriented vehicle footprints meet at the reported contact instead of relying on centre-point distance. The authored post-contact legs visibly slow and diverge, while the inspector keeps that geometry distinct from simulated collision dynamics or causation. The case never identifies a vehicle at fault.
 
-Current source also contains a deterministic four-scenario library: the calibrated roundabout; a low-speed straight-road rear-end braking account; a T-junction crossing with unresolved priority/signal details; and an adversarial parking-area account where a reported “stationary” statement conflicts with timestamped movement. The last case demonstrates contradiction detection through the same consistency command exposed to WebMCP. It does not label a person dishonest, prove deception, or infer why the account differs. The road-template layer covers five scene types overall: roundabout, intersection, T-junction, straight road, and parking area.
+Current source also contains a deterministic four-scenario library. The high-speed straight-road case derives a 65–80 km/h approach from authored path timing, labels it as unmeasured, and asks what telemetry or roadway evidence could support it. The parking-area case contrasts a reported “stationary” account with positions 3.5 metres apart one second apart—an authored 12.6 km/h leg. The same consistency command therefore distinguishes a missing-measurement question from a low-speed record conflict without treating either as truth, intent, or fault. The calibrated roundabout and road-speed T-junction complete the set, while the road-template layer covers roundabout, intersection, T-junction, straight road, and parking area.
 
 Each scene records width/height in metres, a calibration source, and stated uncertainty. Vehicles record metre-scale length/width, vehicle class, dimension source, and optional wheelbase. REPLAY uses those inputs for oriented contact and road-clearance checks, samples the full swept vehicle footprint between timed poses, and emits deterministic advisories for speed, acceleration, deceleration, yaw rate, heading/travel mismatch, turn radius, and lateral acceleration. Thresholds use the recorded road context and declared inputs; they are review envelopes, not measurements of what physically happened.
 
 In the workspace you can:
 
 - drag and rotate vehicles, edit trajectory points, scrub or play time, and compare branch overlays;
+- place or correct an impact for the exact selected vehicle pair in a three- or four-vehicle case without overwriting other pair contacts;
 - use keyboard controls for the scene and timeline;
 - add, classify, confirm, dispute, or lock observations;
 - upload JPEG, PNG, or WebP evidence locally, link it, and remove it with confirmation;
 - answer ranked questions and optionally turn an answer into a reported observation;
 - fork, annotate, activate, archive, restore, and compare hypotheses;
 - inspect deterministic consistency findings and attributed activity;
+- complete human-only readiness review when no evidence was supplied, an actor's damage is unknown/not assessed, or the uncertainty register has been reviewed;
 - review reversible agent proposals before coordinated position or trajectory changes are applied;
 - undo, redo, or safely revert an eligible agent action;
 - build and human-review a neutral report; and
@@ -104,7 +127,7 @@ In the workspace you can:
 
 ## WebMCP implementation
 
-REPLAY uses the current proposed imperative API, `document.modelContext.registerTool(...)`, behind runtime feature detection. Registration begins only while a workspace is open and is divided into lifecycle groups for base, scene, facts, hypothesis, and reviewed-report capabilities. Once a baseline exists, the hypothesis group includes `build_report_preview`; `add_report_note` joins only after a preview exists. Aborting a group unregisters it. Each invocation also receives its own cancellation signal.
+REPLAY feature-detects `document.modelContext`, then registers through its imperative `modelContext.registerTool(...)` method. Registration begins only while a workspace is open and is divided into lifecycle groups for base, scene, facts, hypothesis, and reviewed-report capabilities. Once a baseline exists, the hypothesis group includes `build_report_preview`; `add_report_note` joins only while the current transient preview exists. A successful note invalidates and closes that preview, so the tool leaves the next inventory until a fresh preview is built at the new case version. Aborting a group unregisters it. Each invocation also receives its own cancellation signal.
 
 The current implementation defines 19 narrow imperative tools:
 
@@ -116,13 +139,19 @@ The current implementation defines 19 narrow imperative tools:
 | Facts and evidence   | `add_observation`, `link_evidence`, `create_open_question`                                                        |
 | Hypotheses           | `fork_hypothesis`, `update_hypothesis_assumption`                                                                 |
 | Report preview       | `build_report_preview` once a baseline reconstruction exists                                                      |
-| Reviewed report      | `add_report_note` after a preview exists                                                                          |
+| Reviewed report      | `add_report_note` while the current transient preview exists; one successful note invalidates that preview        |
+
+`upsert_scene_actor` requires the full label/pose/dimension set when creating an actor. For an existing `actorId`, it accepts only the fields that should change and preserves omitted trusted specifications; an unknown ID fails instead of silently creating a different record. Existing-actor position/rotation edits, and any `actor-pose` proposal, must include `expectedPoseTarget.branchId` and `expectedPoseTarget.playheadTimeMs` copied from the latest scene read; a moved visible target fails with `VERSION_CONFLICT` instead of editing a different pose.
 
 `validate_case_consistency` exposes `all`, `scene`, `timeline`, `geometry`, `motion`, `damage`, `integrity`, `provenance`, `completeness`, and `report` scopes. `scene` combines geometry, motion, and damage. This lets an agent surface calibrated footprint-separation, impact-marker, swept-road, motion-envelope, unsigned-import, source-quality, and report-readiness issues through the same rules the UI uses, without converting an advisory into a forensic, intent, or truth claim.
 
-The visible final-review form implements the standards/Chrome declarative tool contract as `finalize_factual_report` and intentionally omits automatic submission. OpenAI's current ChatGPT/Codex Site Tools browser does not expose declarative HTML form tools as Site Tools. ChatGPT Work or Codex may still interact with a form through ordinary browser capabilities, but that interaction is not a WebMCP call and must not be treated as authorization to operate REPLAY's human confirmation controls. Agent/WebMCP-origin commands cannot confirm claims, accept/reject/adjust proposals, or finalize reports; those boundaries are enforced in the domain layer.
+The visible final-review form implements the standards/Chrome declarative tool contract as `finalize_factual_report` and intentionally omits automatic submission. OpenAI's current ChatGPT/Codex Site Tools browser does not expose declarative HTML form tools as Site Tools. ChatGPT Work or Codex may still interact with a form through ordinary browser capabilities, but that interaction is not a WebMCP call and must not be treated as authorization to operate REPLAY's human confirmation controls. Agent/WebMCP-origin commands cannot confirm claims, create or withdraw completeness attestations, accept/reject/adjust proposals, or finalize reports; those boundaries are enforced in the domain layer. Agents can report readiness gaps through consistency checks, but no Site Tool can attest that a human review occurred.
 
 A human confirmation attests to one exact claim revision. Changing its statement or provenance, changing evidence/event/scene links, adding evidence to it, or deleting linked/source evidence demotes it to `reported`, clears its confirmation timestamp/flag, and appends an explicit change record. A semantic no-op does not demote it, and only a fresh human UI action can confirm it again. Unsigned structured import likewise clears imported trust attestations and finalized snapshots and is surfaced by the `integrity` checks.
+
+The **Completeness review** provides equally explicit human/UI-only records for **no evidence supplied**, each actor's damage as **unknown** or **not assessed**, and **uncertainty review complete**. Each record is fingerprinted to the exact relevant evidence, damage, or question state; a later relevant change makes it stale without erasing its history. Reports label current records **Human attestation** and cite their canonical paths, while warning that they are review records—not evidence of absence or proof that an unknown is certain. Unsigned imports retain them only as untrusted history until a fresh local UI review.
+
+Canonical references are exact rather than advisory indexes: each trajectory/event/branch claim has one owning branch entry, each actor has at most one trajectory per branch, and marker/evidence, marker/claim, claim/evidence, event/claim, and event/evidence relationships are reciprocal and duplicate-free. New saves and structured imports reject ambiguity. The local IndexedDB read path alone repairs the narrow asymmetric-link and global-claim shapes produced by released builds, bumps the case version, and records a system migration activity; ambiguous duplicate trajectories remain quarantined for recovery instead of being guessed into shape.
 
 Every imperative result is marked as potentially untrusted output. Read calls, visible UI-only calls, and rejected calls may appear in a capped session invocation audit without mutating the durable case; successful domain mutations append canonical activity. WebMCP mutations are staged, compare-and-swap saved, and then committed to the live engine. Repeating a completed request with the same validated semantic intent returns `idempotent: true` at the original receipt's `caseVersion` without another save; reusing the ID for different intent is rejected. A cancellation before primary persistence begins appends neither audit layer, while a cancellation after a resolved save invokes compensation.
 
@@ -175,7 +204,7 @@ Vite prints the preview URL, normally `http://localhost:4173/`.
 
 ### WebMCP-enabled Chrome
 
-1. Use the current Chrome WebMCP availability path documented by Chrome. For local testing, enable `chrome://flags/#enable-webmcp-testing` when that flag is present, then restart Chrome.
+1. Use Chrome 149 or later, following the current Chrome WebMCP origin-trial guidance. For local testing, enable `chrome://flags/#enable-webmcp-testing`, then restart Chrome.
 2. Run `npm run dev` and open `http://localhost:5173/#demo` in the same Chrome profile.
 3. Open **Case options → WebMCP inspector**.
 4. Confirm `document.modelContext` is detected and the expected lifecycle tools are registered.
@@ -199,15 +228,26 @@ npm run format:check
 npm run lint
 npm run typecheck
 npm run test
+npx playwright install chromium firefox webkit
 npm run test:e2e
 npm run build
 ```
 
-The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, exact-revision claim attestations, unsigned import, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, calibrated geometry, motion envelopes, smooth timed interpolation, four demo scenarios, onboarding, timed path authoring and rotation, narrow/200%-text reflow, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
+The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, the cancel-first import trust-reset review, exact-revision claim and completeness attestations, source-enforced photo/document observations, human-only evidence unlinking without asset deletion, legitimate no-evidence finalization, unsigned-import trust reset, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, calibrated geometry, motion envelopes, smooth timed interpolation, four demo scenarios, stable local-case routing/listing, exact multi-vehicle impact-pair placement, onboarding, timed path authoring and rotation, narrow/200%-text reflow, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
 
-**Current deployed release:** application commit [`00688d8a51fb783dbf147e08ece60470b8877544`](https://github.com/artem-musii/replay-sol/commit/00688d8a51fb783dbf147e08ece60470b8877544) passed [GitHub Actions run `33161848637`](https://github.com/artem-musii/replay-sol/actions/runs/33161848637), including verify job `98817932649` and deploy job `98818739202`: **136/136 Vitest tests across 15 files** and **108 Playwright project runs: 103 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**, with 10 checked screenshot baselines. Pages deployment `6139340101` published artifact `9682041096` (3,009,246 bytes; SHA-256 `9fae713230ec290ca8255641b1d13c89d59b155041aa9a68403d3231caff645e`); all 43 public files byte-matched that artifact. A cache-busted public Lighthouse 13.4.1 audit scored **100/100/100/100** for performance, accessibility, best practices, and SEO, with FCP 503.479 ms, LCP/TTI 623.479 ms, Speed Index 745.184 ms, TBT 0 ms, and CLS 0 (report SHA-256 `7c903b69675faa5e70283876434cca6da501a56d8c44d058706c5c90262714e4`).
+**Current deployed release:** application commit [`2855f0bc50da2916128b2278a46f0d0a8a4e2bbd`](https://github.com/artem-musii/replay-sol/commit/2855f0bc50da2916128b2278a46f0d0a8a4e2bbd) passed [GitHub Actions run `33184281134`](https://github.com/artem-musii/replay-sol/actions/runs/33184281134), including verify job `98893121004` and deploy job `98894240126`: **196/196 Vitest tests across 20 files** and **114 Playwright project runs: 109 passed, 5 intentional mobile screenshot-owner skips, and 0 failed**. Pages deployment `6143728209` published artifact `9691136611` (3,032,328 compressed bytes; SHA-256 `27c2bf89662de9280ddca52f9d2cb922545a913a27f819b855110f184e924da9`). An independent 2026-08-29 post-deploy comparison downloaded that artifact and cache-busted all **43 public files / 4,248,606 bytes**; every byte matched, yielding manifest SHA-256 `6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4`. This release predates the repository's new automated `release-evidence.json` and `verify-deployment` gate, so that endpoint is not present on the current public build.
 
-A fresh live smoke of that deployed commit opened the optional guide, checked the WebMCP experience, loaded its deterministic seed-v3 case, and exercised vehicle rotation, trajectory-point addition, uncertainty editing, and retained-recovery onboarding access. It completed with zero console warnings/errors, failed requests, or off-origin requests. A separate Codex in-app-browser smoke surfaced all 18 baseline Site Tools and the visible `18 registered` state without invoking a tool. Those historical deployed checks do not cover the current-source seed-v4 realism/integrity additions and do not establish supported-model execution traces or broad native-client compatibility. The older `f980d28` results remain preserved as historical evidence. A current-source deployment, supported-model/native Site Tools execution, screen-reader/cross-browser/export review, a dedicated header-capable origin, and the public video remain external gates.
+**Superseded public-browser evidence:** commit `00688d8a51fb783dbf147e08ece60470b8877544` retains its cache-busted 100/100/100/100 Lighthouse report and the live seed-v3 guide, scene/path-editing, recovery, and 18-tool discovery smokes. Those checks remain historical evidence for that exact artifact; they are not attributed to `2855f0bc`, do not cover the later seed-v6 working tree, and do not establish supported-model execution or broad native-client compatibility. The older `f980d28` results are likewise preserved as historical evidence. Exact-current-deployment supported-model/native Site Tools execution, a final real-device/screen-reader spot check, a dedicated header-capable origin, and the public video remain external gates.
+
+**Current-source candidate:** the 2026-08-29 settled dirty local run passed **457/457 Vitest tests across 37 files** on Node 22.13.0 and all **230 Playwright project runs: 221 passed, 9 intentional mobile screenshot-owner skips, and 0 failed**, with 20 checked visual baselines. The browser split was 114/114 desktop Chromium, 105 passed plus 9 intentional skips in mobile Chrome, and 1/1 release smoke in both Firefox and WebKit. V8 coverage was **63.81% statements (6,765/10,601), 54.21% branches (4,479/8,261), 61.89% functions (1,624/2,624), and 65.88% lines (6,262/9,504)**; statement coverage reached 84.99% in the domain layer, including 99.46% in `demoScenarios.ts` and 95.47% in physics, plus 84.68% in integration and 89.78% in WebMCP. Format, zero-warning ESLint, strict TypeScript, both dependency audits with 0 vulnerabilities, dependency-tree resolution, default and `/replay-sol/` production builds, and `git diff --check` passed.
+
+The Node 22.13.0 root artifact contains **46 public payload files / 5,295,427 bytes**, plus the deployment-control `.nojekyll`, with manifest SHA-256 `0544048ef3d96a43683393dd5f3be4d2fdd8f169739334a18636ee1d6d833025`. The `/replay-sol/` artifact contains **46 public payload files / 5,295,823 bytes**, plus `.nojekyll`, with manifest SHA-256 `1b4063e0d1a78f691ed78729db5004c017f2f1ae20d7cc2677845e943d7ba9b5`. The configured-base artifact passed **12/12** focused runs against that exact already-built subpath artifact: the release/high-speed/impact matrix **8/8**, handler contract **2/2**, and submission story **2/2** on desktop and mobile. The handler run used the deterministic imperative `document.modelContext` polyfill, registered 18 lifecycle-eligible tools without churn, and returned all eight requested workspace sections—including explicit `selection: null`—in a complete **18,970-byte** response at case v1, below the **32,768-byte compact target** and 524,288-byte hard cap. The submission story exercised the 18→19→18 lifecycle, a two-path proposal with unchanged canonical geometry, visible human rejection, attributable/non-confirmable agent inference, human confirmation, human-only report finalization, and PDF export.
+
+An operator also opened this exact configured-base artifact in the Codex in-app browser and invoked four page-defined Site Tools through its native bridge: `get_case_summary`, `get_workspace_state` for scene/questions, all-scope `validate_case_consistency`, and `focus_workspace_item` for `question-lane-change`. All returned `ok: true` at case v1; validation returned the single `integrity.calibration-source` question, focus visibly opened that question, and the activity panel showed one durable seed change plus four session-only calls, each labelled **No case change · observed v1**. Browser runtime logs contained no warning or error. This is exact-artifact native bridge execution and visible UI/session-audit agreement—not a clean-commit, deployed, supported-model-choice, **Recently used/Sources**, mutation/lifecycle, or cross-client result.
+
+Lighthouse 13.4.1 with Chrome 151 completed three warning-free runs per profile against the exact configured-base artifact. The mobile runs scored **89/91/90 performance**, all with **100 accessibility / 100 best practices / 100 SEO**, for median performance **90** and medians of FCP **2.032 s**, LCP **3.308 s**, TBT **17 ms**, CLS **0.00004**, Speed Index **2.032 s**, and TTI **3.308 s**; every desktop run scored **100/100/100/100**, with medians of FCP **0.445 s**, LCP **0.686 s**, TBT **0 ms**, CLS **0.0149**, Speed Index **0.529 s**, and TTI **0.686 s**. Browser and rendered-export review verified the authored impact response, one-click playback resume after the impact pause, desktop/768 px/390 px/320 px presentation without page overflow, arbitrary imported scene bounds, portable SVG/PNG color, and a clean four-page PDF with a readable citation and reviewer handoff key.
+
+The clean-tree artifact verifier currently fails by design because this candidate is still an uncommitted working tree; freezing it as one commit and rerunning the verifier in CI remains a release gate. The current public release remains `2855f0bc`, so exact-candidate deployment and byte verification, an uncoached supported-model trace on that deployment with **Recently used/Sources**, and the public video remain pending. The operator-directed exact-artifact trace above did not inspect a main-world `document.modelContext` constructor and is not presented as that narrower proof.
 
 See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, Site Tools steps, and how to record results without conflating deterministic tests with probabilistic evals.
 
@@ -218,7 +258,7 @@ See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual check
 - User statements, filenames, notes, and evidence metadata are treated as untrusted case data, not executable instructions.
 - “Confirmed” means explicitly confirmed by a person in REPLAY; it does not mean independently verified.
 - Consistency checks use declared calibration, vehicle dimensions, timed poses, road context, and explicit deterministic thresholds to organize contradictions and missing information. They are not a forensic reconstruction, collision-dynamics simulation, truth/lie assessment, legal advice, or a fault decision.
-- JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence bytes, and unsigned import deliberately clears or demotes local trust attestations and report snapshots.
+- JSON is a structured case transfer, not a full-fidelity backup: it excludes evidence bytes, and unsigned import deliberately clears or demotes local trust attestations and report snapshots. Imported completeness records cannot satisfy readiness until a person reviews and records them again in the local UI.
 - Local browser storage is not application-level encrypted. GitHub Pages also shares the `artem-musii.github.io` storage origin with other projects. Do not use the prototype for highly sensitive production records without a dedicated origin, appropriate security review, and retention policy.
 
 Read [security and privacy notes](docs/security-and-privacy-notes.md) for the threat model and residual risks.
@@ -246,4 +286,4 @@ GitHub Pages does not apply the repository’s `_headers` file, so response-only
 
 ## License
 
-Source code in this repository is available under the [MIT License](LICENSE). Generated asset use remains subject to the applicable generation service terms; do not present the synthetic demo images as real incident evidence.
+Source code in this repository is available under the [MIT License](LICENSE). Every source file and runtime asset required to build and run REPLAY is checked in. Generated asset use remains subject to the applicable generation service terms; do not present the synthetic demo images as real incident evidence.

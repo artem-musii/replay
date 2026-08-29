@@ -14,4 +14,8 @@ export * from "./report";
 export * from "./importExport";
 export * from "./selectors";
 export * from "./languageSafety";
+export * from "./claimProvenance";
+export * from "./proposalProvenance";
+export * from "./proposalReview";
+export * from "./completeness";
 export { rankOpenQuestions } from "./reducer";

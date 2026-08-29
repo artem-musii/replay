@@ -64,22 +64,27 @@ test.describe("short viewport onboarding", () => {
     }
   });
 
-  test("keeps every workspace tour step and its controls onscreen at 200% text", async ({
+  test("keeps fixed tour controls onscreen and try actions reachable at 200% text", async ({
     page,
   }) => {
     for (const viewport of SHORT_VIEWPORTS) {
       await page.setViewportSize(viewport);
       await openLanding(page);
       await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
-      await page.getByRole("button", { name: /Guided demo/ }).click();
+      await page.getByRole("button", { name: "Take the 6-step guided tour" }).click();
 
       const tour = page.locator(".workspace-tour");
       for (let step = 1; step <= 6; step += 1) {
         await expect(tour.getByText(`Step ${String(step)} of 6`)).toBeVisible();
         await expectInsideViewport(page, tour);
-        const controls = tour.getByRole("button");
-        for (let index = 0; index < (await controls.count()); index += 1) {
-          await expectInsideViewport(page, controls.nth(index));
+        const fixedControls = tour.locator(":scope > header button, :scope > footer button");
+        for (let index = 0; index < (await fixedControls.count()); index += 1) {
+          await expectInsideViewport(page, fixedControls.nth(index));
+        }
+        const tryAction = tour.locator(".workspace-tour__try");
+        if ((await tryAction.count()) > 0) {
+          await tryAction.scrollIntoViewIfNeeded();
+          await expectInsideViewport(page, tryAction);
         }
         if (step < 6) await tour.getByRole("button", { name: "Next" }).click();
       }

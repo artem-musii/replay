@@ -7,7 +7,7 @@ Last threat-model review: 2026-08-28. This document records implemented controls
 REPLAY protects four things:
 
 1. **Confidentiality:** manual-mode case data stays in origin-local storage until explicit export. In Site Tools mode, only the selected structured result—not uploaded image bytes—is disclosed to the connected client/model service under its separate privacy boundary.
-2. **Integrity:** agent or imported content cannot silently become a confirmed fact, rewrite locked geometry, erase evidence, or finalize a report.
+2. **Integrity:** agent or imported content cannot silently become a confirmed fact or current human completeness attestation, rewrite locked geometry, erase evidence, or finalize a report.
 3. **Provenance:** every substantive claim, evidence link, hypothesis, and mutation remains attributable and reviewable.
 4. **Availability/recovery:** malformed local data, a cancelled tool, failed export, or unsupported WebMCP browser does not destroy the open case or blank the application.
 
@@ -41,7 +41,7 @@ This architecture reduces network disclosure but does not make local data secret
 - clearing site data removes local cases even if the browser granted REPLAY's best-effort persistent-storage request;
 - IndexedDB is not encrypted by REPLAY; device/browser protections remain relevant.
 
-The UI discloses local storage/shared-origin risk, shows save status, confirms demo reset and evidence deletion, retains malformed records for explicit recovery, and exposes no bulk-destructive WebMCP tool. Structured JSON is a case transfer, not a backup: it excludes evidence blobs, contains the source case ID, and deliberately clears/demotes trust attestations on unsigned import. The UI assigns the imported copy a fresh local root case ID before saving it. A complete evidence backup and general per-case storage manager are not implemented and must not be implied by release copy.
+The UI discloses local storage/shared-origin risk, shows save status, confirms demo reset and evidence deletion, retains malformed records for explicit recovery, and exposes no bulk-destructive WebMCP tool. **Your local cases** includes a cancel-first, human-only control that removes one selected case, its locally stored evidence bytes, and its queued purge records from the current and legacy vaults; it does not affect exported files or already shared information. Structured JSON is a case transfer, not a backup: it excludes evidence blobs, contains the source case ID, and deliberately clears/demotes trust attestations on unsigned import. The UI assigns the imported copy a fresh local root case ID before saving it. Downloading this transfer after a save failure does not clear the editing pause; only a successful durable retry does. A complete evidence backup and bulk storage manager are not implemented and must not be implied by release copy.
 
 ## WebMCP security model
 
@@ -71,6 +71,7 @@ Browser call review and annotation hints are defense in depth. Every handler mus
 - lock, branch, and immutable-snapshot rules;
 - agent prohibition on confirmed facts and finalization;
 - agent prohibition on evidence deletion and proposal adjustment/acceptance/rejection;
+- agent prohibition on creating or withdrawing human completeness attestations;
 - output minimization.
 
 A write tool never gains extra authority because a prompt says the user approved it.
@@ -79,7 +80,7 @@ A write tool never gains extra authority because a prompt says the user approved
 
 Registration and execution signals have different jobs. Registration abort unregisters a tool. The `execute(input, { signal })` signal cancels that invocation and is checked before adapter work, isolated staging, primary persistence, and staged commit.
 
-The ordinary human UI calls `ReplayEngine` directly: validated state commits in memory, React is notified, and a compare-and-swap Dexie save is queued afterward. A failed UI save can therefore leave live memory newer than storage; the workspace pauses further mutations and offers retry or recovery export.
+The ordinary human UI calls `ReplayEngine` directly: validated state commits in memory, React is notified, and a compare-and-swap Dexie save is queued afterward. A failed UI save can therefore leave live memory newer than storage; the workspace pauses further mutations until retry succeeds and separately offers an explicitly incomplete structured transfer that does not clear the pause.
 
 Imperative WebMCP mutations take the opposite order around the same domain command. The adapter reduces against an isolated copy of the case, history, and request receipts, compare-and-swap saves the staged case against the live baseline, then adopts/notifies only if the baseline still matches. A rejected primary save leaves live state untouched. If cancellation or a live conflict follows a resolved save, the adapter compare-and-swap restores the pre-mutation live case; failed compensation returns/audits `PERSISTENCE_FAILED`. The engine and IndexedDB remain separate physical operations, Web Locks remain best effort, and browser paint is not coupled transactionally to the tool promise.
 
@@ -101,7 +102,7 @@ Controls:
 - Tool outputs are compact and omit raw evidence bytes, whole-case dumps, hidden DOM, and unrelated local data.
 - React text rendering/DOM properties are used; never inject untrusted strings with `dangerouslySetInnerHTML`, `innerHTML`, or executable SVG/HTML.
 - IDs are resolved by exact type. User-controlled strings cannot become paths, selectors, property names, URLs, or code.
-- No tool exists for entire-case deletion, external sharing/sending, third-party upload, liability determination, permission changes, or automatic report finalization.
+- No tool exists for entire-case deletion, external sharing/sending, third-party upload, liability determination, permission changes, human completeness attestation, or automatic report finalization.
 - Agent-origin requests for `confirmed` or `humanConfirmed` are rejected at the command boundary even if the schema/client allowed the value through.
 
 `untrustedContentHint` improves client handling; it does not sanitize or neutralize the content by itself.
@@ -119,7 +120,7 @@ Controls:
 
 ### Evidence images
 
-The current model and upload UI allowlist `image/jpeg`, `image/png`, and `image/webp` up to 20 MiB. The upload path decodes with `createImageBitmap`, rejects unreadable data, and caps each dimension at 12,000 pixels and total decoded area at 50 megapixels. SVG, HTML, PDF, scripts, and arbitrary binary uploads are outside the evidence-image contract.
+The current model and upload UI allowlist `image/jpeg`, `image/png`, and `image/webp` up to 20 MiB. The upload path checks container dimensions before calling `createImageBitmap`, rejects unreadable data, and caps each dimension at 12,000 pixels and total decoded area at 16 megapixels. This keeps a decoded RGBA surface near 64 MB before browser overhead while accepting common 12 MP and 16 MP phone images. SVG, HTML, PDF, scripts, and arbitrary binary uploads are outside the evidence-image contract.
 
 Implemented handling includes generated opaque blob keys, SHA-256 checksums, local object URLs, normalized numeric annotations, local blob deletion, and no runtime model upload. Remaining release checks include:
 
@@ -151,6 +152,7 @@ The hero and four active demo evidence images were generated during development 
 The following actions require the ordinary human interface:
 
 - confirming a claim;
+- recording or withdrawing a no-evidence, actor-damage, or uncertainty-review completeness attestation;
 - adjusting, accepting, or rejecting an agent scene proposal;
 - unlocking protected content where policy permits;
 - acknowledging unresolved questions and limitations;
@@ -158,7 +160,9 @@ The following actions require the ordinary human interface:
 - downloading any PDF, JSON, SVG, or PNG export;
 - deleting evidence or resetting the deterministic demo.
 
-The visible declarative form is named `finalize_factual_report` and intentionally omits `toolautosubmit`. In a compatible declarative client, its implemented `toolactivated` handler marks the review prepared and opens it; `toolcancel` clears that state. OpenAI's built-in Site Tools browser currently does not expose declarative form tools, although ChatGPT Work or Codex may still interact with forms through ordinary browser capabilities. Those interactions are not WebMCP calls and must not operate the three human acknowledgements or second confirmation. Only the human UI dispatches `report.finalize`, and the reducer rejects agent/WebMCP finalization. The report states that it is informational and not forensic or legal advice.
+The visible declarative form is named `finalize_factual_report` and intentionally omits `toolautosubmit`. In a compatible declarative client, its implemented `toolactivated` handler marks the review prepared and opens it; `toolcancel` clears that state. OpenAI's built-in Site Tools browser currently does not expose declarative form tools, although ChatGPT Work or Codex may still interact with forms through ordinary browser capabilities. Those interactions are not WebMCP calls and must not operate the four human acknowledgements—including review of every labelled unconfirmed or hypothesis statement—or the second confirmation. Only the human UI dispatches `report.finalize`, and the reducer rejects agent/WebMCP finalization. The report states that it is informational and not forensic or legal advice.
+
+Completeness records are canonical UI-origin attestations bound by SHA-256 fingerprints to the exact relevant evidence index/tombstones, actor damage state, or question register. Relevant changes make a record stale, and unsigned import clears its local human trust. Reports label only current records **Human attestation** and explicitly state that a completeness review is not evidence of absence or proof that unknown information is certain. Agent/WebMCP checks may expose the missing requirement, but the domain layer rejects agent attestation and prevents agent undo/revert from restoring human authority.
 
 ## Production headers
 
@@ -175,10 +179,12 @@ X-Frame-Options: DENY
 A current header-capable-host contract, matching `public/_headers`, is:
 
 ```http
-Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests
+Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'
 ```
 
 `'unsafe-inline'` above is limited to styles and should be removed if the verified production UI does not need it. Do not add `'unsafe-eval'`, wildcard script/connect sources, or arbitrary external image origins. If hosting, PDF, worker, or development behavior needs a change, document the narrow production exception and retest. CSP `frame-ancestors 'none'` is the primary frame restriction; `X-Frame-Options: DENY` is legacy defense in depth.
+
+`upgrade-insecure-requests` is intentionally absent. Relative assets inherit HTTPS in production and the scheme-bound `'self'` source rejects absolute HTTP dependencies. Safari/WebKit also applies that directive to HTTP loopback previews, upgrading their same-origin scripts and styles to an unavailable HTTPS endpoint and leaving the documented local production preview blank.
 
 The current 2026-08-28 GitHub Pages response was checked and does not apply the repository’s `_headers` file. The document injects restrictive CSP and no-referrer meta policies, but those cannot provide `Permissions-Policy`, origin isolation, `frame-ancestors`, or the other response-only defenses. The current app also refuses to render its workspace or register tools while framed, but that runtime defense does not replace response headers. Use a dedicated origin on a host that honors `_headers` when the complete contract is required; local Vite headers are not production proof.
 
@@ -192,7 +198,7 @@ There is no analytics by default. If diagnostics are ever added, they require a 
 
 The historical `f980d28` snapshot recorded passing strict typecheck/build, **53/53 Vitest tests**, and **32/32 Playwright project runs in 17.1 seconds** (16 desktop and 16 mobile). It remains preserved but predates schema v2, proposals, persistence recovery/CAS, and the current 19-tool inventory.
 
-Application commit `00688d8a51fb783dbf147e08ece60470b8877544` passed strict typecheck/build, **136/136 Vitest tests across 15 files**, and **103 passing plus 5 intentionally skipped Playwright runs, with 0 failures**, in CI before deployment. The 108 browser runs include onboarding/manual-WebMCP guidance, path-point creation and drag behavior, vehicle rotation, overlap routing, impact-placement priority, and secondary-pointer isolation. Public verification byte-matched all 43 artifact files and observed no off-origin or failed requests and no console warnings/errors while exercising the guide, WebMCP explanation, seed-v3 146°→161° rotation, sixth trajectory point, and uncertainty copy. Runtime corrupt-blob rejection remains implemented source behavior rather than a directly exercised database test.
+Application commit `00688d8a51fb783dbf147e08ece60470b8877544` passed strict typecheck/build, **136/136 Vitest tests across 15 files**, and **103 passing plus 5 intentionally skipped Playwright runs, with 0 failures**, in CI before deployment. The 108 browser runs include onboarding/manual-WebMCP guidance, path-point creation and drag behavior, vehicle rotation, overlap routing, impact-placement priority, and secondary-pointer isolation. Public verification byte-matched all 43 artifact files and observed no off-origin or failed requests and no console warnings/errors while exercising the guide, WebMCP explanation, seed-v3 146°→161° rotation, sixth trajectory point, and uncertainty copy. That historical release did not directly exercise corrupt-blob rejection; current source now has focused database and upload-validation coverage for checksum, metadata, signature, decode, and size failures.
 
 The following remain manual or external gates:
 

@@ -1,6 +1,7 @@
 import { GitCompareArrows, Pause, Play, Plus, SkipBack, SkipForward, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CSSProperties,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
@@ -15,6 +16,7 @@ import {
 } from "../domain/interpolation";
 import type { SceneActor, TimelineEvent, Trajectory } from "../domain/models";
 import "../styles/timeline.css";
+import { PLAYBACK_SPEED_OPTIONS } from "./playback";
 import { useDialogFocus } from "./useDialogFocus";
 
 export interface TimelineComparison {
@@ -47,11 +49,13 @@ export interface TimelineProps {
   onMoveEvent?: (eventId: string, timeMs: number) => void;
   onMoveKeyframe?: (trajectoryId: string, keyframeId: string, timeMs: number) => void;
   onAddEvent?: (input: {
+    branchId: string;
+    timeMs: number;
     title: string;
     eventType: "actor-start" | "maneuver" | "observation" | "evidence" | "actor-stop";
     certainty: "reported" | "likely" | "uncertain" | "disputed" | "unknown";
     linkedActorIds: string[];
-  }) => void;
+  }) => boolean;
 }
 
 type DragTarget =
@@ -65,7 +69,56 @@ interface DragState {
   previewTimeMs?: number;
 }
 
-const SPEED_OPTIONS = [0.5, 1, 2] as const;
+const TIMELINE_MARKER_TARGET_PX = 24;
+const TIMELINE_EVENT_TOUCH_TARGET_PX = 44;
+// Event labels extend 128 px to the right of their marker. Keep enough centre
+// distance for that label, its 6 px lead-in, and the next 44 px touch target.
+const TIMELINE_EVENT_LABEL_ROW_DISTANCE_PX = 160;
+const MINIMUM_TIMELINE_USABLE_WIDTH_PX = 596;
+const COMPACT_EVENT_LABELS_MEDIA_QUERY =
+  "(max-width: 640px), (pointer: coarse), (any-pointer: coarse)";
+
+type TimelineStyle = CSSProperties &
+  Partial<Record<`--timeline-${string}`, string | number | undefined>>;
+
+interface MarkerRowLayout {
+  rowById: ReadonlyMap<string, number>;
+  rowCount: number;
+}
+
+/**
+ * Put temporally close controls on separate rows so every pointer target keeps
+ * its full clickable area. The threshold is based on the timeline's narrowest
+ * desktop track (620px less its 12px insets), so a wider rendered track can
+ * only add spacing. Horizontal positions always remain the authored times.
+ */
+function markerRowLayout<T>(
+  markers: readonly T[],
+  idFor: (marker: T) => string,
+  timeFor: (marker: T) => number,
+  range: TimelineProps["timeRangeMs"],
+  minimumCenterDistancePx: number,
+  usableWidthPx: number,
+): MarkerRowLayout {
+  const rowById = new Map<string, number>();
+  const lastPercentByRow: number[] = [];
+  const minimumPercentDistance = (minimumCenterDistancePx / usableWidthPx) * 100;
+  const sorted = [...markers].sort(
+    (left, right) => timeFor(left) - timeFor(right) || idFor(left).localeCompare(idFor(right)),
+  );
+
+  for (const marker of sorted) {
+    const percent = timeToPercent(timeFor(marker), range);
+    const availableRow = lastPercentByRow.findIndex(
+      (lastPercent) => percent - lastPercent >= minimumPercentDistance,
+    );
+    const row = availableRow < 0 ? lastPercentByRow.length : availableRow;
+    lastPercentByRow[row] = percent;
+    rowById.set(idFor(marker), row);
+  }
+
+  return { rowById, rowCount: Math.max(1, lastPercentByRow.length) };
+}
 
 function clampTime(timeMs: number, range: TimelineProps["timeRangeMs"]): number {
   return clampTimeToRange(timeMs, range);
@@ -160,10 +213,24 @@ export function Timeline({
   onMoveKeyframe,
   onAddEvent,
 }: TimelineProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<DragState | undefined>(undefined);
+  const pointerSelectedTargetRef = useRef<DragTarget | undefined>(undefined);
+  const [timelineUsableWidthPx, setTimelineUsableWidthPx] = useState(
+    MINIMUM_TIMELINE_USABLE_WIDTH_PX,
+  );
+  const [compactEventLabels, setCompactEventLabels] = useState(
+    () =>
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(COMPACT_EVENT_LABELS_MEDIA_QUERY).matches,
+  );
   const [dragState, setDragState] = useState<DragState>();
   const [eventEditorOpen, setEventEditorOpen] = useState(false);
+  const [eventEditorContext, setEventEditorContext] = useState<{
+    branchId: string;
+    timeMs: number;
+  }>();
   const [eventTitle, setEventTitle] = useState("");
   const [eventType, setEventType] = useState<
     "actor-start" | "maneuver" | "observation" | "evidence" | "actor-stop"
@@ -176,7 +243,7 @@ export function Timeline({
   const eventDialogRef = useDialogFocus<HTMLElement>({
     active: eventEditorOpen,
     initialFocusRef: eventTitleRef,
-    onEscape: () => setEventEditorOpen(false),
+    onEscape: closeEventEditor,
   });
   const visibleBranchIds = useMemo(
     () => new Set([activeBranchId, ...(comparison?.branchIds ?? [])]),
@@ -195,6 +262,39 @@ export function Timeline({
         (trajectory) => visibleBranchIds.has(trajectory.branchId) && trajectory.visible,
       ),
     [trajectories, visibleBranchIds],
+  );
+  const eventMarkerMinimumCenterDistancePx =
+    compactEventLabels || (comparison?.branchIds.length ?? 0) > 0
+      ? TIMELINE_EVENT_TOUCH_TARGET_PX
+      : TIMELINE_EVENT_LABEL_ROW_DISTANCE_PX;
+  const eventMarkerRows = useMemo(
+    () =>
+      markerRowLayout(
+        visibleEvents,
+        (event) => event.id,
+        (event) => event.timeMs,
+        timeRangeMs,
+        eventMarkerMinimumCenterDistancePx,
+        timelineUsableWidthPx,
+      ),
+    [eventMarkerMinimumCenterDistancePx, timeRangeMs, timelineUsableWidthPx, visibleEvents],
+  );
+  const keyframeMarkerRows = useMemo(
+    () =>
+      new Map(
+        visibleTrajectories.map((trajectory) => [
+          trajectory.id,
+          markerRowLayout(
+            trajectory.keyframes,
+            (keyframe) => keyframe.id,
+            (keyframe) => keyframe.timeMs,
+            timeRangeMs,
+            TIMELINE_MARKER_TARGET_PX + 1,
+            timelineUsableWidthPx,
+          ),
+        ]),
+      ),
+    [timeRangeMs, timelineUsableWidthPx, visibleTrajectories],
   );
   const ticks = useMemo(() => {
     const count = 5;
@@ -281,12 +381,21 @@ export function Timeline({
       moveDragTarget(activeDrag.target, activeDrag.previewTimeMs);
     }
     clearDrag();
+    window.setTimeout(() => {
+      if (
+        pointerSelectedTargetRef.current &&
+        isSameDragTarget(pointerSelectedTargetRef.current, activeDrag.target)
+      ) {
+        pointerSelectedTargetRef.current = undefined;
+      }
+    }, 0);
   }
 
   function handleTrackPointerCancel(event: ReactPointerEvent<HTMLDivElement>): void {
     const activeDrag = dragStateRef.current;
     if (activeDrag?.pointerId !== event.pointerId) return;
     onTimeChange(activeDrag.initialPlayheadMs);
+    pointerSelectedTargetRef.current = undefined;
     clearDrag();
   }
 
@@ -338,17 +447,97 @@ export function Timeline({
     : undefined;
   const timelineStepMs =
     timeRangeMs.end - timeRangeMs.start < REPLAY_TIME_STEP_MS ? 1 : REPLAY_TIME_STEP_MS;
+  const timelineScrollStyle: TimelineStyle = {
+    "--timeline-event-desktop-height": `${String(6 + eventMarkerRows.rowCount * TIMELINE_MARKER_TARGET_PX)}px`,
+    "--timeline-event-touch-height": `${String(6 + eventMarkerRows.rowCount * TIMELINE_EVENT_TOUCH_TARGET_PX)}px`,
+  };
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(COMPACT_EVENT_LABELS_MEDIA_QUERY);
+    const update = (event: MediaQueryListEvent) => setCompactEventLabels(event.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track || typeof ResizeObserver === "undefined") return;
+    const updateWidth = () => {
+      const usableWidth = Math.max(
+        MINIMUM_TIMELINE_USABLE_WIDTH_PX,
+        track.getBoundingClientRect().width - 24,
+      );
+      setTimelineUsableWidthPx((current) =>
+        Math.abs(current - usableWidth) < 0.5 ? current : usableWidth,
+      );
+    };
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track || scroller.scrollWidth <= scroller.clientWidth) return;
+
+    const trackInset = 12;
+    const playheadX =
+      track.offsetLeft +
+      trackInset +
+      Math.max(1, track.clientWidth - trackInset * 2) * (cursorPercent / 100);
+    const stickyLabelAllowance = Math.min(120, scroller.clientWidth * 0.3);
+    const visibleStart = scroller.scrollLeft + stickyLabelAllowance;
+    const visibleEnd = scroller.scrollLeft + scroller.clientWidth - 28;
+    if (playheadX >= visibleStart && playheadX <= visibleEnd) return;
+
+    const nextLeft = Math.max(
+      0,
+      Math.min(
+        scroller.scrollWidth - scroller.clientWidth,
+        playheadX - scroller.clientWidth * 0.58,
+      ),
+    );
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (typeof scroller.scrollTo === "function") {
+      scroller.scrollTo({
+        left: nextLeft,
+        behavior: isPlaying || reduceMotion ? "auto" : "smooth",
+      });
+    } else {
+      scroller.scrollLeft = nextLeft;
+    }
+  }, [cursorPercent, isPlaying, selectedId, selectedKeyframeId]);
 
   function submitEvent(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!onAddEvent || !eventTitle.trim()) return;
-    onAddEvent({
+    if (!onAddEvent || !eventTitle.trim() || !eventEditorContext) return;
+    const added = onAddEvent({
+      branchId: eventEditorContext.branchId,
+      timeMs: eventEditorContext.timeMs,
       title: eventTitle.trim(),
       eventType,
       certainty: eventCertainty,
       linkedActorIds: eventActorId === "all" ? actors.map((actor) => actor.id) : [eventActorId],
     });
+    if (!added) return;
+    resetEventDraft();
+    setEventEditorContext(undefined);
+    setEventEditorOpen(false);
+  }
+
+  function resetEventDraft(): void {
     setEventTitle("");
+    setEventType("observation");
+    setEventCertainty("reported");
+    setEventActorId("all");
+  }
+
+  function closeEventEditor(): void {
+    resetEventDraft();
+    setEventEditorContext(undefined);
     setEventEditorOpen(false);
   }
 
@@ -361,7 +550,7 @@ export function Timeline({
       onKeyDown={handleTimelineKeyboard}
     >
       <header className="timeline__controls">
-        <div className="timeline__transport" aria-label="Playback controls">
+        <div className="timeline__transport" role="group" aria-label="Playback controls">
           <button
             className="timeline-icon-button"
             type="button"
@@ -417,7 +606,7 @@ export function Timeline({
               onChange={(event) => onPlaybackSpeedChange(Number(event.target.value))}
               aria-label="Playback speed"
             >
-              {SPEED_OPTIONS.map((speed) => (
+              {PLAYBACK_SPEED_OPTIONS.map((speed) => (
                 <option key={speed} value={speed}>
                   {speed}×
                 </option>
@@ -428,7 +617,15 @@ export function Timeline({
             <button
               className="timeline-icon-button"
               type="button"
-              onClick={() => setEventEditorOpen(true)}
+              onClick={() => {
+                onPlayingChange(false);
+                resetEventDraft();
+                setEventEditorContext({
+                  branchId: activeBranchId,
+                  timeMs: clampTime(currentTimeMs, timeRangeMs),
+                });
+                setEventEditorOpen(true);
+              }}
               aria-label="Add timeline event"
               title="Add event at the current time"
             >
@@ -458,7 +655,13 @@ export function Timeline({
         </div>
       )}
 
-      <div className="timeline__scroll" aria-label="Timeline tracks">
+      <div
+        ref={scrollRef}
+        className="timeline__scroll"
+        role="region"
+        aria-label="Timeline tracks"
+        style={timelineScrollStyle}
+      >
         <div className="timeline__track-label timeline__track-label--events">Events</div>
         <div
           className="timeline__tracks"
@@ -483,29 +686,41 @@ export function Timeline({
           </div>
 
           <div className="timeline__event-lane">
-            {visibleEvents.map((timelineEvent, index) => {
+            {visibleEvents.map((timelineEvent) => {
               const target: DragTarget = { kind: "event", eventId: timelineEvent.id };
               const editable = Boolean(onMoveEvent) && !timelineEvent.locked;
               const displayTimeMs = previewTimeFor(target, timelineEvent.timeMs);
+              const markerRow = eventMarkerRows.rowById.get(timelineEvent.id) ?? 0;
+              const markerStyle: TimelineStyle = {
+                left: `${String(timeToPercent(displayTimeMs, timeRangeMs))}%`,
+                "--timeline-marker-row-offset": `${String(markerRow * TIMELINE_MARKER_TARGET_PX)}px`,
+                "--timeline-marker-touch-row-offset": `${String(markerRow * TIMELINE_EVENT_TOUCH_TARGET_PX)}px`,
+              };
               return (
                 <button
                   className={`timeline-event timeline-event--${timelineEvent.type} certainty--${timelineEvent.certainty}${selectedId === timelineEvent.id ? " is-selected" : ""}${timelineEvent.branchId !== activeBranchId ? " is-comparison" : ""}${editable ? " is-editable" : ""}`}
                   key={timelineEvent.id}
                   type="button"
-                  style={{
-                    left: `${String(timeToPercent(displayTimeMs, timeRangeMs))}%`,
-                    top: `${String(6 + (index % 3) * 18)}px`,
-                  }}
+                  style={markerStyle}
+                  data-timeline-row={markerRow}
                   title={`${timelineEvent.title}, ${formatTime(displayTimeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
                   aria-label={`${timelineEvent.title} at ${formatTime(displayTimeMs, true)}. ${timelineEvent.certainty}.`}
                   aria-pressed={selectedId === timelineEvent.id}
                   onClick={() => {
-                    onSelectEvent?.(timelineEvent.id);
+                    if (
+                      pointerSelectedTargetRef.current &&
+                      isSameDragTarget(pointerSelectedTargetRef.current, target)
+                    ) {
+                      pointerSelectedTargetRef.current = undefined;
+                    } else {
+                      onSelectEvent?.(timelineEvent.id);
+                    }
                     onTimeChange(timelineEvent.timeMs);
                   }}
                   onPointerDown={(event) => {
                     if (!editable) return;
                     event.preventDefault();
+                    pointerSelectedTargetRef.current = target;
                     onSelectEvent?.(timelineEvent.id);
                     event.currentTarget.setPointerCapture(event.pointerId);
                     startDrag(target, event.pointerId);
@@ -522,56 +737,79 @@ export function Timeline({
             })}
           </div>
 
-          {visibleTrajectories.map((trajectory) => (
-            <div
-              className={`timeline__keyframe-lane${trajectory.branchId !== activeBranchId ? " is-comparison" : ""}`}
-              key={trajectory.id}
-              aria-label={`${actorName(actors, trajectory.actorId)} path keyframes`}
-            >
-              <span className="timeline__track-line" aria-hidden="true" />
-              {trajectory.keyframes.map((keyframe) => {
-                const target: DragTarget = {
-                  kind: "keyframe",
-                  trajectoryId: trajectory.id,
-                  keyframeId: keyframe.id,
-                };
-                const editable =
-                  Boolean(onMoveKeyframe) &&
-                  !trajectory.locked &&
-                  !actors.find((actor) => actor.id === trajectory.actorId)?.locked;
-                const displayTimeMs = previewTimeFor(target, keyframe.timeMs);
-                return (
-                  <button
-                    className={`timeline-keyframe${selectedKeyframeId === keyframe.id ? " is-selected" : ""}${editable ? " is-editable" : ""}`}
-                    key={keyframe.id}
-                    type="button"
-                    style={{
-                      left: `${String(timeToPercent(displayTimeMs, timeRangeMs))}%`,
-                    }}
-                    title={`${actorName(actors, trajectory.actorId)} keyframe at ${formatTime(displayTimeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
-                    aria-label={`${actorName(actors, trajectory.actorId)} path keyframe at ${formatTime(displayTimeMs, true)}`}
-                    aria-pressed={selectedKeyframeId === keyframe.id}
-                    onClick={() => {
-                      onSelectKeyframe?.(trajectory.id, keyframe.id);
-                      onTimeChange(keyframe.timeMs);
-                    }}
-                    onPointerDown={(event) => {
-                      if (!editable) return;
-                      event.preventDefault();
-                      onSelectKeyframe?.(trajectory.id, keyframe.id);
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      startDrag(target, event.pointerId);
-                    }}
-                    onKeyDown={(event) => {
-                      if (editable) handleHandleKeyDown(event, target, keyframe.timeMs);
-                    }}
-                  >
-                    <span aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+          {visibleTrajectories.map((trajectory) => {
+            const markerRows = keyframeMarkerRows.get(trajectory.id) ?? {
+              rowById: new Map<string, number>(),
+              rowCount: 1,
+            };
+            const laneStyle: TimelineStyle = {
+              "--timeline-keyframe-dense-height": `${String(markerRows.rowCount * TIMELINE_MARKER_TARGET_PX)}px`,
+            };
+            return (
+              <div
+                className={`timeline__keyframe-lane${trajectory.branchId !== activeBranchId ? " is-comparison" : ""}`}
+                key={trajectory.id}
+                role="group"
+                aria-label={`${actorName(actors, trajectory.actorId)} path keyframes`}
+                style={laneStyle}
+              >
+                <span className="timeline__track-line" aria-hidden="true" />
+                {trajectory.keyframes.map((keyframe) => {
+                  const target: DragTarget = {
+                    kind: "keyframe",
+                    trajectoryId: trajectory.id,
+                    keyframeId: keyframe.id,
+                  };
+                  const editable =
+                    Boolean(onMoveKeyframe) &&
+                    !trajectory.locked &&
+                    !actors.find((actor) => actor.id === trajectory.actorId)?.locked;
+                  const displayTimeMs = previewTimeFor(target, keyframe.timeMs);
+                  const markerRow = markerRows.rowById.get(keyframe.id) ?? 0;
+                  const markerStyle: TimelineStyle = {
+                    left: `${String(timeToPercent(displayTimeMs, timeRangeMs))}%`,
+                    "--timeline-marker-row-offset": `${String(markerRow * TIMELINE_MARKER_TARGET_PX)}px`,
+                  };
+                  return (
+                    <button
+                      className={`timeline-keyframe${selectedKeyframeId === keyframe.id ? " is-selected" : ""}${editable ? " is-editable" : ""}`}
+                      key={keyframe.id}
+                      type="button"
+                      style={markerStyle}
+                      data-timeline-row={markerRow}
+                      title={`${actorName(actors, trajectory.actorId)} keyframe at ${formatTime(displayTimeMs, true)}${editable ? ". Drag or use arrow keys to adjust." : ""}`}
+                      aria-label={`${actorName(actors, trajectory.actorId)} path keyframe at ${formatTime(displayTimeMs, true)}`}
+                      aria-pressed={selectedKeyframeId === keyframe.id}
+                      onClick={() => {
+                        if (
+                          pointerSelectedTargetRef.current &&
+                          isSameDragTarget(pointerSelectedTargetRef.current, target)
+                        ) {
+                          pointerSelectedTargetRef.current = undefined;
+                        } else {
+                          onSelectKeyframe?.(trajectory.id, keyframe.id);
+                        }
+                        onTimeChange(keyframe.timeMs);
+                      }}
+                      onPointerDown={(event) => {
+                        if (!editable) return;
+                        event.preventDefault();
+                        pointerSelectedTargetRef.current = target;
+                        onSelectKeyframe?.(trajectory.id, keyframe.id);
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        startDrag(target, event.pointerId);
+                      }}
+                      onKeyDown={(event) => {
+                        if (editable) handleHandleKeyDown(event, target, keyframe.timeMs);
+                      }}
+                    >
+                      <span aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
 
           <div
             className="timeline__cursor"
@@ -601,6 +839,14 @@ export function Timeline({
             <div
               key={trajectory.id}
               className={trajectory.branchId !== activeBranchId ? "is-comparison" : ""}
+              style={
+                {
+                  "--timeline-keyframe-dense-height": `${String(
+                    (keyframeMarkerRows.get(trajectory.id)?.rowCount ?? 1) *
+                      TIMELINE_MARKER_TARGET_PX,
+                  )}px`,
+                } as TimelineStyle
+              }
             >
               <span
                 className={`actor-swatch actor-swatch--${trajectory.actorId.endsWith("b") ? "silver" : "blue"}`}
@@ -616,7 +862,7 @@ export function Timeline({
           className="dialog-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setEventEditorOpen(false);
+            if (event.target === event.currentTarget) closeEventEditor();
           }}
         >
           <section
@@ -629,13 +875,13 @@ export function Timeline({
           >
             <header>
               <div>
-                <p>At {formatTime(currentTimeMs, true)}</p>
+                <p>At {formatTime(eventEditorContext?.timeMs ?? currentTimeMs, true)}</p>
                 <h2 id="timeline-event-title">Add timeline event</h2>
               </div>
               <button
                 className="icon-button"
                 type="button"
-                onClick={() => setEventEditorOpen(false)}
+                onClick={closeEventEditor}
                 aria-label="Close event editor"
               >
                 <X size={18} />
@@ -697,15 +943,11 @@ export function Timeline({
                 </select>
               </label>
               <footer>
-                <button
-                  type="button"
-                  className="button button--quiet"
-                  onClick={() => setEventEditorOpen(false)}
-                >
+                <button type="button" className="button button--quiet" onClick={closeEventEditor}>
                   Cancel
                 </button>
                 <button className="button button--primary">
-                  Add at {formatTime(currentTimeMs, true)}
+                  Add at {formatTime(eventEditorContext?.timeMs ?? currentTimeMs, true)}
                 </button>
               </footer>
             </form>

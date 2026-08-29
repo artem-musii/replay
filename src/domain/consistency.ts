@@ -1,5 +1,11 @@
 import { getActorPoseAtTime, interpolateTrajectory, pointInPolygon } from "./interpolation";
 import { containsLiabilityConclusion } from "./languageSafety";
+import { findCurrentCompletenessAttestation } from "./completeness";
+import {
+  agentObservationSourceRequirement,
+  compatibleAgentObservationSourceIds,
+  isExternallyAttributedClaimSourceType,
+} from "./claimProvenance";
 import type {
   ActorPose,
   ConsistencyIssue,
@@ -7,11 +13,13 @@ import type {
   DamageRegion,
   Point,
   ReplayCase,
+  ReportPreview,
   SceneActor,
   TimelineEvent,
   Trajectory,
 } from "./models";
 import {
+  analyzeImpactAdjacentPaths,
   analyzeTrajectoryMotion,
   analyzeVehicleFootprintRelation,
   createOrientedVehicleFootprint,
@@ -126,6 +134,20 @@ function timelineIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
           "This branch contains more than one impact marker. Confirm whether these represent separate contacts.",
           [branchId, ...impacts.map((event) => event.id)],
           ["Keep the reviewed impact event", "Rename genuine separate contacts clearly"],
+        ),
+      );
+    }
+    for (const impact of impacts) {
+      if (new Set(impact.linkedActorIds).size >= 2) continue;
+      issues.push(
+        issue(
+          "timeline.impact-actors-incomplete",
+          "timeline",
+          "question",
+          "Impact does not identify both vehicles",
+          `“${impact.title}” links fewer than two distinct vehicles. REPLAY needs both vehicle links before it can compare footprint contact or authored motion around this marker. This is missing structure, not evidence that contact did or did not occur.`,
+          [branchId, impact.id, ...impact.linkedActorIds],
+          ["Link both involved vehicles", "Keep the event unresolved until they are identified"],
         ),
       );
     }
@@ -856,7 +878,7 @@ function geometryIssues(replayCase: ReplayCase, branchIds: string[]): Consistenc
     issues.push(...unmarkedFootprintOverlapIssues(replayCase, branchId, calibration));
     const impacts = branchEvents(replayCase, branchId).filter((event) => event.type === "impact");
     for (const impact of impacts) {
-      const linkedActors = impact.linkedActorIds
+      const linkedActors = [...new Set(impact.linkedActorIds)]
         .map((actorId) => replayCase.actors.find((actor) => actor.id === actorId))
         .filter((actor): actor is ReplayCase["actors"][number] => Boolean(actor));
       if (linkedActors.length >= 2) {
@@ -1022,6 +1044,65 @@ function motionIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyI
           ],
         ),
       );
+    }
+  }
+
+  for (const branchId of branchIds) {
+    for (const impact of branchEvents(replayCase, branchId).filter(
+      (event) => event.type === "impact",
+    )) {
+      for (const transition of analyzeImpactAdjacentPaths(replayCase, impact.id, calibration)) {
+        const actor = actorsById.get(transition.actorId);
+        if (!transition.trajectoryId) {
+          issues.push(
+            issue(
+              "motion.impact-path-missing",
+              "motion",
+              "question",
+              "Linked vehicle has no authored path at impact",
+              `${actor?.label ?? transition.actorId} has no authored trajectory on this branch, so REPLAY cannot compare motion before and after the marker. Add timed positions only when source-supported; a missing path does not imply stationary motion or a collision response.`,
+              [branchId, impact.id, transition.actorId],
+              [
+                "Add a source-supported trajectory for the linked vehicle",
+                "Keep pre-impact and post-impact motion explicitly unresolved",
+              ],
+            ),
+          );
+          continue;
+        }
+        if (!transition.incoming || !transition.outgoing) {
+          issues.push(
+            issue(
+              "motion.impact-path-coverage",
+              "motion",
+              "question",
+              "Authored path does not cover both sides of impact",
+              `${actor?.label ?? transition.actorId}'s path has no timed leg on both sides of ${(impact.timeMs / 1_000).toFixed(3)} s. Extend the path only if the available account supports positions before and after the marker. REPLAY does not infer the missing motion or a collision response.`,
+              [branchId, impact.id, transition.actorId, transition.trajectoryId],
+              [
+                "Add source-supported timed positions on the missing side",
+                "Keep the unavailable motion explicitly unresolved",
+              ],
+            ),
+          );
+          continue;
+        }
+        if (transition.authoredImpactKeyframe) continue;
+        issues.push(
+          issue(
+            "motion.impact-between-keyframes",
+            "motion",
+            "question",
+            "Impact time is between authored path points",
+            `${actor?.label ?? transition.actorId}'s pose at ${(impact.timeMs / 1_000).toFixed(3)} s is interpolated inside one path segment. Add a timed pose at the impact marker if the incoming and outgoing path legs need to be reviewed or authored independently. This does not assume that contact must change motion and is not a collision-dynamics conclusion.`,
+            [branchId, impact.id, transition.actorId, transition.trajectoryId],
+            [
+              "Add a source-supported path point at the impact time",
+              "Keep the continuous interpolated segment if that matches the available account",
+            ],
+          ),
+        );
+      }
     }
   }
   return issues;
@@ -1255,17 +1336,25 @@ function angularDifference(a: number, b: number): number {
 function damageIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = [];
   const calibration = metricCalibrationForCase(replayCase);
-  const allDamage = replayCase.actors.flatMap((actor) => actor.damageMarkers);
-  if (allDamage.length === 0) {
+  const actorsWithoutDamageRecord = replayCase.actors.filter(
+    (actor) =>
+      actor.damageMarkers.length === 0 &&
+      !findCurrentCompletenessAttestation(replayCase, {
+        kind: "actor-damage",
+        actorId: actor.id,
+        outcome: "unknown",
+      }),
+  );
+  if (actorsWithoutDamageRecord.length > 0) {
     issues.push(
       issue(
         "damage.none-recorded",
         "damage",
         "question",
-        "No vehicle damage is recorded",
-        "Neither vehicle has a marked damage location.",
-        replayCase.actors.map((actor) => actor.id),
-        ["Mark known damage", "Record that damage location is unknown"],
+        "Vehicle damage review is incomplete",
+        `${actorsWithoutDamageRecord.map((actor) => actor.label).join(", ")} ${actorsWithoutDamageRecord.length === 1 ? "has" : "have"} neither a damage marker nor a current human completeness record.`,
+        actorsWithoutDamageRecord.map((actor) => actor.id),
+        ["Mark known damage", "Record damage as unknown or not assessed for each vehicle"],
       ),
     );
   }
@@ -1274,11 +1363,18 @@ function damageIssues(replayCase: ReplayCase, branchIds: string[]): ConsistencyI
     for (const impact of branchEvents(replayCase, branchId).filter(
       (event) => event.type === "impact",
     )) {
-      const actors = impact.linkedActorIds
+      const actors = [...new Set(impact.linkedActorIds)]
         .map((actorId) => replayCase.actors.find((actor) => actor.id === actorId))
         .filter((actor): actor is ReplayCase["actors"][number] => Boolean(actor));
       for (const actor of actors) {
-        if (actor.damageMarkers.length === 0) {
+        if (
+          actor.damageMarkers.length === 0 &&
+          !findCurrentCompletenessAttestation(replayCase, {
+            kind: "actor-damage",
+            actorId: actor.id,
+            outcome: "unknown",
+          })
+        ) {
           issues.push(
             issue(
               "damage.impact-without-marker",
@@ -1359,8 +1455,47 @@ function provenanceIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   const evidenceById = new Map(replayCase.evidence.map((asset) => [asset.id, asset]));
   const eventIds = new Set(replayCase.timelineEvents.map((event) => event.id));
   const actorIds = new Set(replayCase.actors.map((actor) => actor.id));
+  const damageIds = new Set(
+    replayCase.actors.flatMap((actor) => actor.damageMarkers.map((marker) => marker.id)),
+  );
 
   for (const claim of replayCase.claims) {
+    if (
+      claim.createdBy === "agent" &&
+      isExternallyAttributedClaimSourceType(claim.sourceType) &&
+      compatibleAgentObservationSourceIds(replayCase, claim.sourceType, claim.sourceIds).length ===
+        0
+    ) {
+      issues.push(
+        issue(
+          "provenance.agent-external-source-missing",
+          "provenance",
+          "error",
+          "Agent observation overstates its provenance",
+          `This agent-authored observation is classified as ${claim.sourceType} but does not cite ${agentObservationSourceRequirement(claim.sourceType)}.`,
+          [claim.id, ...claim.sourceIds],
+          ["Link a compatible canonical source", "Reclassify the observation as agent inference"],
+        ),
+      );
+    }
+    if (
+      claim.createdBy === "human" &&
+      (claim.sourceType === "photo" || claim.sourceType === "document") &&
+      compatibleAgentObservationSourceIds(replayCase, claim.sourceType, claim.sourceIds).length ===
+        0
+    ) {
+      issues.push(
+        issue(
+          "provenance.human-external-source-missing",
+          "provenance",
+          "error",
+          "Observation is missing its cited source",
+          `This human-authored observation is classified as ${claim.sourceType} but does not cite ${agentObservationSourceRequirement(claim.sourceType)}.`,
+          [claim.id, ...claim.sourceIds],
+          ["Attach a compatible source", "Change the observation source classification"],
+        ),
+      );
+    }
     if (claim.status === "confirmed" && containsLiabilityConclusion(claim.statement)) {
       issues.push(
         issue(
@@ -1475,7 +1610,8 @@ function provenanceIssues(replayCase: ReplayCase): ConsistencyIssue[] {
     for (const sceneId of claim.linkedSceneObjectIds) {
       if (
         !actorIds.has(sceneId) &&
-        !replayCase.trajectories.some((trajectory) => trajectory.id === sceneId)
+        !replayCase.trajectories.some((trajectory) => trajectory.id === sceneId) &&
+        !damageIds.has(sceneId)
       ) {
         issues.push(
           issue(
@@ -1568,16 +1704,25 @@ function completenessIssues(replayCase: ReplayCase): ConsistencyIssue[] {
       ),
     );
   }
-  if (!replayCase.actors.some((actor) => actor.damageMarkers.length > 0)) {
+  const actorsWithoutDamageReview = replayCase.actors.filter(
+    (actor) =>
+      actor.damageMarkers.length === 0 &&
+      !findCurrentCompletenessAttestation(replayCase, {
+        kind: "actor-damage",
+        actorId: actor.id,
+        outcome: "unknown",
+      }),
+  );
+  if (actorsWithoutDamageReview.length > 0) {
     issues.push(
       issue(
         "completeness.damage",
         "completeness",
         "warning",
-        "Known damage has not been recorded",
-        "Record damage locations or explicitly record that they are unknown.",
-        replayCase.actors.map((actor) => actor.id),
-        ["Add damage markers", "Add an unknown-damage observation"],
+        "Damage completeness is not recorded",
+        "Each vehicle needs a damage marker or an explicit human record that damage is unknown or was not assessed.",
+        actorsWithoutDamageReview.map((actor) => actor.id),
+        ["Add damage markers", "Complete the human damage review for each listed vehicle"],
       ),
     );
   }
@@ -1597,7 +1742,10 @@ function completenessIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   if (
     !replayCase.questions.some(
       (question) => question.status === "open" || question.status === "deferred",
-    )
+    ) &&
+    !findCurrentCompletenessAttestation(replayCase, {
+      kind: "uncertainty-review-completed",
+    })
   ) {
     issues.push(
       issue(
@@ -1611,7 +1759,10 @@ function completenessIssues(replayCase: ReplayCase): ConsistencyIssue[] {
       ),
     );
   }
-  if (!replayCase.evidence.some((asset) => !asset.deleted)) {
+  if (
+    !replayCase.evidence.some((asset) => !asset.deleted) &&
+    !findCurrentCompletenessAttestation(replayCase, { kind: "no-evidence-supplied" })
+  ) {
     issues.push(
       issue(
         "completeness.evidence-index",
@@ -1629,105 +1780,154 @@ function completenessIssues(replayCase: ReplayCase): ConsistencyIssue[] {
   return issues;
 }
 
-function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
+function reportPreviewIssues(
+  replayCase: ReplayCase,
+  preview: ReportPreview,
+  ownerId: string,
+  validateLiveSources: boolean,
+): ConsistencyIssue[] {
   const issues: ConsistencyIssue[] = [];
   const claims = new Map(replayCase.claims.map((claim) => [claim.id, claim]));
   const evidence = new Map(replayCase.evidence.map((asset) => [asset.id, asset]));
   const workspacePaths = validWorkspaceCitationPaths(replayCase);
-  const previews = replayCase.reportSnapshots.map((snapshot) => ({
-    ownerId: snapshot.id,
-    preview: snapshot.preview,
-  }));
-  for (const { ownerId, preview } of previews) {
-    for (const section of preview.sections) {
-      for (const statement of section.statements) {
-        const hasClaimOrEvidenceCitation =
-          statement.citations.claimIds.length > 0 || statement.citations.evidenceIds.length > 0;
-        if (containsLiabilityConclusion(statement.text)) {
+  const includedClaimIds = new Set(preview.includedClaimIds);
+  const includedEvidenceIds = new Set(preview.includedEvidenceIds);
+  for (const section of preview.sections) {
+    for (const statement of section.statements) {
+      const hasClaimOrEvidenceCitation =
+        statement.citations.claimIds.length > 0 || statement.citations.evidenceIds.length > 0;
+      const permitsInspectableWorkspaceProvenance = statement.certainty !== "confirmed";
+      if (containsLiabilityConclusion(statement.text)) {
+        issues.push(
+          issue(
+            "report.liability-language",
+            "report",
+            "error",
+            "Report contains a fault or liability conclusion",
+            "A factual report may preserve source attribution but cannot determine fault or legal liability.",
+            [ownerId, statement.id],
+            ["Rewrite the statement as a neutral, evidence-bound observation"],
+          ),
+        );
+      }
+      if (
+        statement.certainty === "attested" &&
+        (hasClaimOrEvidenceCitation ||
+          statement.citations.workspacePaths.length === 0 ||
+          statement.citations.workspacePaths.some(
+            (path) => !path.startsWith("completenessAttestations."),
+          ))
+      ) {
+        issues.push(
+          issue(
+            "report.invalid-attestation-citation",
+            "report",
+            "error",
+            "Human attestation statement cites the wrong source type",
+            "A human attestation statement must cite only a current, inspectable completeness record.",
+            [ownerId, statement.id],
+            [
+              "Cite the matching completeness record",
+              "Move the statement to the correct certainty section",
+            ],
+          ),
+        );
+      }
+      if (
+        (!permitsInspectableWorkspaceProvenance && !hasClaimOrEvidenceCitation) ||
+        (permitsInspectableWorkspaceProvenance &&
+          !hasClaimOrEvidenceCitation &&
+          statement.citations.workspacePaths.length === 0)
+      ) {
+        issues.push(
+          issue(
+            "report.statement-without-citation",
+            "report",
+            "error",
+            "Report statement lacks provenance",
+            "Every substantive report statement must cite a claim, evidence item, or eligible inspectable workspace record.",
+            [ownerId, statement.id],
+            ["Add source citations", "Remove the unsupported statement"],
+          ),
+        );
+      }
+      for (const workspacePath of statement.citations.workspacePaths) {
+        if (validateLiveSources && !workspacePaths.has(workspacePath)) {
           issues.push(
             issue(
-              "report.liability-language",
+              "report.invalid-workspace-citation",
               "report",
               "error",
-              "Report contains a fault or liability conclusion",
-              "A factual report may preserve source attribution but cannot determine fault or legal liability.",
+              "Report workspace citation is unavailable",
+              "A structured report source no longer resolves to an inspectable case object.",
               [ownerId, statement.id],
-              ["Rewrite the statement as a neutral, evidence-bound observation"],
+              ["Restore the referenced case object", "Remove the unsupported statement"],
             ),
           );
         }
+      }
+      for (const claimId of statement.citations.claimIds) {
+        const claim = claims.get(claimId);
         if (
-          (statement.certainty !== "system" && !hasClaimOrEvidenceCitation) ||
-          (statement.certainty === "system" &&
-            !hasClaimOrEvidenceCitation &&
-            statement.citations.workspacePaths.length === 0)
+          (validateLiveSources &&
+            (!claim ||
+              (statement.certainty === "confirmed" &&
+                (claim.status !== "confirmed" || !claim.humanConfirmed)))) ||
+          (!validateLiveSources && !includedClaimIds.has(claimId))
         ) {
           issues.push(
             issue(
-              "report.statement-without-citation",
+              "report.invalid-claim-citation",
               "report",
               "error",
-              "Report statement lacks provenance",
-              "Every substantive report statement must cite a claim or evidence item.",
-              [ownerId, statement.id],
-              ["Add source citations", "Remove the unsupported statement"],
+              "Report claim citation is not allowed",
+              validateLiveSources
+                ? "The cited claim is missing or is not eligible for this report section."
+                : "The historical statement citation is absent from its immutable preview index.",
+              [ownerId, statement.id, claimId],
+              ["Cite an eligible claim", "Move the statement to the correct certainty section"],
             ),
           );
         }
-        for (const workspacePath of statement.citations.workspacePaths) {
-          if (!workspacePaths.has(workspacePath)) {
-            issues.push(
-              issue(
-                "report.invalid-workspace-citation",
-                "report",
-                "error",
-                "Report workspace citation is unavailable",
-                "A structured report source no longer resolves to an inspectable case object.",
-                [ownerId, statement.id],
-                ["Restore the referenced case object", "Remove the unsupported statement"],
-              ),
-            );
-          }
-        }
-        for (const claimId of statement.citations.claimIds) {
-          const claim = claims.get(claimId);
-          if (
-            !claim ||
-            (statement.certainty === "confirmed" &&
-              (claim.status !== "confirmed" || !claim.humanConfirmed))
-          ) {
-            issues.push(
-              issue(
-                "report.invalid-claim-citation",
-                "report",
-                "error",
-                "Report claim citation is not allowed",
-                "The cited claim is missing or is not eligible for this report section.",
-                [ownerId, statement.id, claimId],
-                ["Cite an eligible claim", "Move the statement to the correct certainty section"],
-              ),
-            );
-          }
-        }
-        for (const evidenceId of statement.citations.evidenceIds) {
-          const asset = evidence.get(evidenceId);
-          if (!asset || asset.deleted) {
-            issues.push(
-              issue(
-                "report.invalid-evidence-citation",
-                "report",
-                "error",
-                "Report evidence citation is unavailable",
-                "The statement cites missing or deleted evidence.",
-                [ownerId, statement.id, evidenceId],
-                ["Restore or replace the evidence citation"],
-              ),
-            );
-          }
+      }
+      for (const evidenceId of statement.citations.evidenceIds) {
+        const asset = evidence.get(evidenceId);
+        if (
+          (validateLiveSources && (!asset || asset.deleted)) ||
+          (!validateLiveSources && !includedEvidenceIds.has(evidenceId))
+        ) {
+          issues.push(
+            issue(
+              "report.invalid-evidence-citation",
+              "report",
+              "error",
+              "Report evidence citation is unavailable",
+              validateLiveSources
+                ? "The statement cites missing or deleted evidence."
+                : "The historical statement citation is absent from its immutable preview index.",
+              [ownerId, statement.id, evidenceId],
+              ["Restore or replace the evidence citation"],
+            ),
+          );
         }
       }
     }
   }
+  return issues;
+}
+
+/** Validates a transient candidate against the sources that are live right now. */
+export function validateCurrentReportPreview(
+  replayCase: ReplayCase,
+  preview: ReportPreview,
+): ConsistencyIssue[] {
+  return reportPreviewIssues(replayCase, preview, "report-preview", true);
+}
+
+function reportIssues(replayCase: ReplayCase): ConsistencyIssue[] {
+  const issues = replayCase.reportSnapshots.flatMap((snapshot) =>
+    reportPreviewIssues(replayCase, snapshot.preview, snapshot.id, false),
+  );
 
   for (const note of replayCase.reportNotes) {
     if (containsLiabilityConclusion(note.text)) {

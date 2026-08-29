@@ -2,6 +2,16 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { installModelContextPolyfill, openDemo, openLanding } from "./helpers";
 
+async function expectInsideViewport(page: Page, locator: Locator): Promise<void> {
+  const viewport = page.viewportSize();
+  const box = await locator.boundingBox();
+  if (!viewport || !box) throw new Error("Responsive control geometry is unavailable.");
+  expect(box.x).toBeGreaterThanOrEqual(-1);
+  expect(box.y).toBeGreaterThanOrEqual(-1);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+}
+
 async function openVehicleAPath(page: Page): Promise<Locator> {
   const vehicle = page.getByRole("button", { name: /^Vehicle A, position/ });
   await vehicle.focus();
@@ -80,10 +90,10 @@ test.describe("onboarding and path authoring", () => {
       guide.getByRole("heading", { name: "Work manually or invite an agent into the same case" }),
     ).toBeVisible();
     await expect(guide.getByText(/WebMCP is the browser bridge behind Site Tools/)).toBeVisible();
-    await expect(guide.getByRole("button", { name: /^Copy prompt:/ })).toHaveCount(4);
+    await expect(guide.getByRole("button", { name: /^Copy prompt:/ })).toHaveCount(3);
     await guide.getByRole("button", { name: "Close REPLAY guide" }).click();
 
-    await page.getByRole("button", { name: /Guided demo/ }).click();
+    await page.getByRole("button", { name: "Take the 6-step guided tour" }).click();
     await expect(page.locator("main.workspace")).toBeVisible();
     const tour = page.locator(".workspace-tour");
     await expect(tour.getByText("Step 1 of 6")).toBeVisible();
@@ -106,6 +116,47 @@ test.describe("onboarding and path authoring", () => {
     await expect(guide.getByRole("button", { name: "Start 6-step workspace tour" })).toBeVisible();
   });
 
+  test("turns the guided demo into a mutation-free impact, report, and Site Tools tryout", async ({
+    page,
+  }) => {
+    await installModelContextPolyfill(page);
+    await openLanding(page);
+    await page.getByRole("button", { name: "Take the 6-step guided tour" }).click();
+    const tour = page.locator(".workspace-tour");
+    const version = page.locator(".workspace-case-title small");
+
+    await tour.getByRole("button", { name: "Jump to approximate contact" }).click();
+    await expect(page.getByRole("status", { name: "Current timeline position" })).toContainText(
+      "0:10.0",
+    );
+    await expect(version).toHaveText("v1");
+
+    await tour.getByRole("button", { name: "Next" }).click();
+    await tour.getByRole("button", { name: "Play authored impact response" }).click();
+    await expect(page.getByRole("button", { name: "Pause reconstruction" })).toBeVisible();
+    await expect(version).toHaveText("v1");
+
+    await tour.getByRole("button", { name: "Next" }).click();
+    await tour.getByRole("button", { name: "Build report preview" }).click();
+    await expect(page.getByRole("tabpanel", { name: "Report" })).toContainText(
+      "Draft — not finalized",
+    );
+    await expect(version).toHaveText("v1");
+
+    await tour.getByRole("button", { name: "Next" }).click();
+    await tour.getByRole("button", { name: "Next" }).click();
+    await tour.getByRole("button", { name: "Open Site Tools proof" }).click();
+    await expect(tour).toHaveCount(0);
+    const guide = page.getByRole("dialog", { name: "Learn REPLAY" });
+    await expect(
+      guide.getByRole("heading", { name: "30 seconds from structured read to review" }),
+    ).toBeVisible();
+    await expect(
+      guide.getByRole("button", { name: "Copy prompt: Review the unresolved lane question" }),
+    ).toBeVisible();
+    await expect(version).toHaveText("v1");
+  });
+
   test("explains a live WebMCP connection where the user expects to find it", async ({ page }) => {
     await installModelContextPolyfill(page);
     await openDemo(page);
@@ -115,7 +166,15 @@ test.describe("onboarding and path authoring", () => {
 
     const guide = page.getByRole("dialog", { name: "Learn REPLAY" });
     await expect(guide.getByText(/\d+ Site Tools registered/)).toBeVisible();
-    await expect(guide.getByText(/Ask the connected agent in its conversation/)).toBeVisible();
+    await expect(
+      guide.getByText(/Confirm discovery in Available Site Tools and real calls/),
+    ).toBeVisible();
+    await expect(
+      guide.getByRole("heading", { name: "30 seconds from structured read to review" }),
+    ).toBeVisible();
+    await expect(
+      guide.getByRole("button", { name: "Copy prompt: Review the unresolved lane question" }),
+    ).toBeVisible();
     await expect(
       guide.getByText(/Ask in that client’s conversation, not on the REPLAY page/),
     ).toBeVisible();
@@ -244,6 +303,33 @@ test.describe("onboarding and path authoring", () => {
     }
   });
 
+  test("keeps the primary demo action and Site Tools discoverable on compact screens", async ({
+    page,
+  }) => {
+    await installModelContextPolyfill(page);
+
+    for (const viewport of [
+      { width: 320, height: 568 },
+      { width: 375, height: 667 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await openLanding(page);
+      await expectInsideViewport(page, page.getByRole("button", { name: "Open Roundabout demo" }));
+    }
+
+    await page.setViewportSize({ width: 768, height: 900 });
+    await openDemo(page);
+    const status = page.locator("button.webmcp-status");
+    const compactLabel = status.locator(".webmcp-status__compact");
+    await expect(compactLabel).toBeVisible();
+    await expect(compactLabel).toHaveText("Tools");
+    await expect(page.getByRole("note")).toContainText("Compact view prioritizes review.");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(compactLabel).toBeVisible();
+    await expectInsideViewport(page, status);
+  });
+
   test("keeps retained-recovery controls clear of landing help", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 900 });
     await openLanding(page);
@@ -298,9 +384,9 @@ test.describe("onboarding and path authoring", () => {
     await openLanding(page);
     await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
 
-    const guidedDemo = page.getByRole("button", { name: /Guided demo/ });
+    const guidedDemo = page.getByRole("button", { name: "Take the 6-step guided tour" });
     const guidedBox = await guidedDemo.boundingBox();
-    if (!guidedBox) throw new Error("Guided demo control is unavailable.");
+    if (!guidedBox) throw new Error("Guided tour control is unavailable.");
     expect(guidedBox.x).toBeGreaterThanOrEqual(0);
     expect(guidedBox.x + guidedBox.width).toBeLessThanOrEqual(320);
     expect(guidedBox.height).toBeGreaterThanOrEqual(44);

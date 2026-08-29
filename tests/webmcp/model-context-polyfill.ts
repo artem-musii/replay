@@ -66,7 +66,7 @@ export class ModelContextPolyfill implements ModelContextLike {
 
   async executeTool(
     registeredTool: ModelContextRegisteredTool,
-    input: Readonly<Record<string, unknown>> = {},
+    input: Readonly<Record<string, unknown>> | string = {},
     options: { signal?: AbortSignal } = {},
   ): Promise<string> {
     const definition = this.definitions.get(registeredTool.name);
@@ -76,9 +76,11 @@ export class ModelContextPolyfill implements ModelContextLike {
     const fallback = new AbortController();
     const signal = options.signal ?? fallback.signal;
     if (signal.aborted) throw abortReason(signal);
-    this.executionCalls.push({ name: registeredTool.name, input });
+    const parsedInput =
+      typeof input === "string" ? (JSON.parse(input) as Readonly<Record<string, unknown>>) : input;
+    this.executionCalls.push({ name: registeredTool.name, input: parsedInput });
 
-    const execution = definition.execute(input, { signal } satisfies WebMCPExecuteOptions);
+    const execution = definition.execute(parsedInput, { signal } satisfies WebMCPExecuteOptions);
     const cancellation = new Promise<never>((_, reject) => {
       signal.addEventListener("abort", () => reject(abortReason(signal)), { once: true });
     });

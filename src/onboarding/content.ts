@@ -55,7 +55,7 @@ export const GUIDE_SECTIONS: readonly GuideSection[] = [
         body: "The save indicator confirms browser storage. Manual mode sends no case data to an agent. Use exports when you need a portable record.",
       },
     ],
-    note: "The deterministic demo is safe to explore. Changes stay in your browser, and Case options can reset the demo.",
+    note: "The deterministic demo is safe to explore. Changes stay in your browser, and Case options can start a fresh copy without overwriting this run.",
   },
   {
     id: "scene",
@@ -86,7 +86,7 @@ export const GUIDE_SECTIONS: readonly GuideSection[] = [
         body: "Mark an approximate impact at the playhead, record neutral damage descriptions on a selected vehicle, and lock reviewed geometry that should not be overwritten.",
       },
     ],
-    note: "Scene coordinates use a 0 to 100 workspace. Exact numeric controls remain available when dragging is inconvenient.",
+    note: "Scene coordinates follow the open case's configured bounds. Exact numeric controls remain available when dragging is inconvenient.",
   },
   {
     id: "timeline",
@@ -188,7 +188,7 @@ export const GUIDE_SECTIONS: readonly GuideSection[] = [
       },
       {
         title: "Connect through the client conversation",
-        body: "Open REPLAY inside a Site Tools-compatible ChatGPT, Codex, or other client and keep the case open. The header says how many tools are registered when the connection is available. Ask in that client’s conversation, not on the REPLAY page. In an ordinary browser the header says Manual mode.",
+        body: "Open REPLAY inside a Site Tools-compatible ChatGPT, Codex, or other client and keep the case open. The page registers a tool count; confirm discovery in Available Site Tools and real calls in Recently used or Sources. Ask in that client’s conversation, not on the REPLAY page. In an ordinary browser the header says Manual mode.",
       },
       {
         title: "Review visible agent work",
@@ -196,7 +196,7 @@ export const GUIDE_SECTIONS: readonly GuideSection[] = [
       },
       {
         title: "Know the human boundary",
-        body: "An agent cannot confirm an observation, accept or reject a proposal, delete evidence, or finalize a report. Those actions require visible human controls.",
+        body: "No Site Tool can confirm or decide an observation, accept or reject a proposal, delete evidence or a whole local case, or finalize a report. Those operations require the visible review flow.",
       },
       {
         title: "Understand the data boundary",
@@ -243,30 +243,65 @@ export interface SiteToolPrompt {
   prompt: string;
 }
 
+export const SITE_TOOL_QUICK_PROOF: SiteToolPrompt = {
+  id: "quick-proof",
+  title: "Review the unresolved lane question",
+  prompt:
+    "Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.",
+};
+
+export const SITE_TOOL_DETERMINISTIC_PROOF: SiteToolPrompt = {
+  id: "deterministic-proof",
+  title: "Run the deterministic proof fixture",
+  prompt:
+    "Use this page's Site Tools. Read only the current scene and questions; run full consistency validation and focus the blocking question. Then create one pending coordinated proposal by patching only each current path's existing 8,000 ms keyframe: Vehicle A y +0.008; Vehicle B y −0.008. Reuse both keyframe IDs and preserve every other value. Do not apply, confirm, answer, add claims, or infer fault. Report the before/after versions and the one canonical mutation.",
+};
+
 export const SITE_TOOL_PROMPTS: readonly SiteToolPrompt[] = [
   {
     id: "inspect",
     title: "Inspect the case",
     prompt:
-      "Inspect this case and separate what is confirmed, reported, unknown, and inconsistent.",
+      "Use this page's Site Tools to read the scene, claims, and timeline. Run the full consistency check, focus the approximate impact, and separate confirmed, reported, unknown, and advisory information. Do not change the case or infer fault.",
   },
   {
     id: "propose",
-    title: "Propose coordinated paths",
+    title: "Propose the smallest review",
     prompt:
-      "Propose coordinated paths for both vehicles from the current information, but do not apply them or decide fault.",
+      "Use this page's Site Tools to read the current scene, open questions, claims, and evidence relationships, then run the full consistency check. Focus the highest-priority blocker and create one review-only coordinated proposal with the smallest conservative interior path adjustments that address it. Reuse the existing timed paths; preserve endpoints, point IDs, times, unrelated geometry, and the baseline. Explain the assumptions and what remains unchanged. Do not apply anything, confirm or answer claims, or infer fault.",
   },
   {
     id: "alternatives",
     title: "Preserve two possibilities",
     prompt:
-      "Review recent activity, revalidate the case, and preserve two hypotheses for the unresolved lane movement.",
+      "Use this page's Site Tools to review recent activity and the unresolved lane-position question, then revalidate the case. Fork two clearly named hypotheses from the baseline: one where Vehicle A changed lane and one where Vehicle B changed lane. Preserve each explanation as an explicit assumption, not a fact; do not alter the baseline or resolve the question.",
   },
   {
     id: "report",
     title: "Prepare a neutral report",
     prompt:
-      "Prepare a neutral report using only confirmed information and keep every unresolved detail visible.",
+      "Use this page's Site Tools to build a neutral, cited report preview for the current baseline. Keep confirmed observations in the factual section, reported or uncertain material separate, agent hypotheses in their appendix, and every open question visible. Do not confirm claims, change the case, or finalize the report.",
+  },
+];
+
+export const SITE_TOOL_GENERAL_PROMPTS: readonly SiteToolPrompt[] = [
+  {
+    id: "inspect-current",
+    title: "Inspect this case",
+    prompt:
+      "Use this page's Site Tools to read the case summary, scene, facts, questions, and timeline. Run full consistency validation, then focus the highest-priority unresolved question or validation issue if one exists. Distinguish confirmed, reported, unknown, advisory, and agent-inference content. Do not change the case or infer fault.",
+  },
+  {
+    id: "review-readiness",
+    title: "Review reconstruction readiness",
+    prompt:
+      "Use this page's Site Tools to inspect the current scene, timeline, evidence relationships, and open questions. Validate geometry, motion, provenance, completeness, and report readiness. Focus the most actionable unresolved item if one exists, then summarize what a human should review next. Do not add, confirm, answer, or finalize anything.",
+  },
+  {
+    id: "report-current",
+    title: "Prepare a neutral report",
+    prompt:
+      "Use this page's Site Tools to build a neutral, cited report preview for the current baseline. Keep confirmed observations in the factual section, reported or uncertain material separate, agent hypotheses in their appendix, and every open question visible. Do not confirm claims, change the case, or finalize the report.",
   },
 ];
 

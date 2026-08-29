@@ -3,5 +3,11 @@ dist
 coverage
 playwright-report
 test-results
+playwright-release-report
+test-results-release
+.playwright-mcp
 public/assets/generated/source
 package-lock.json
+.env
+.env.*
+!.env.example

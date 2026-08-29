@@ -1,4 +1,5 @@
 import { createReplayWebMCPTools, groupReplayWebMCPTools, throwIfAborted } from "./tools";
+import { detectWebMCPSupport, resolveGlobalModelContext, type WebMCPSupportState } from "./support";
 import {
   TOOL_GROUPS,
   type ModelContextLike,
@@ -19,12 +20,6 @@ export interface ReplayWebMCPRegistryOptions {
   modelContext?: ModelContextLike | null;
   /** Aborting this signal tears down every registration owned by the registry. */
   signal?: AbortSignal;
-}
-
-export interface WebMCPSupportState {
-  available: boolean;
-  canSimulate: boolean;
-  reason?: string;
 }
 
 interface ActiveGroup {
@@ -63,37 +58,6 @@ function releaseToolName(modelContext: ModelContextLike, name: string, owner: sy
   if (owners.get(name) === owner) {
     owners.delete(name);
   }
-}
-
-function resolveGlobalModelContext(): ModelContextLike | undefined {
-  const candidateDocument = (globalThis as { document?: { modelContext?: unknown } }).document;
-  const candidate = candidateDocument?.modelContext;
-  if (
-    typeof candidate === "object" &&
-    candidate !== null &&
-    "registerTool" in candidate &&
-    typeof candidate.registerTool === "function"
-  ) {
-    return candidate as ModelContextLike;
-  }
-  return undefined;
-}
-
-export function detectWebMCPSupport(modelContext?: ModelContextLike | null): WebMCPSupportState {
-  const resolved =
-    modelContext === undefined ? resolveGlobalModelContext() : (modelContext ?? undefined);
-  if (resolved === undefined) {
-    return {
-      available: false,
-      canSimulate: false,
-      reason: "document.modelContext is unavailable; manual REPLAY features remain usable.",
-    };
-  }
-  return {
-    available: true,
-    canSimulate:
-      typeof resolved.getTools === "function" && typeof resolved.executeTool === "function",
-  };
 }
 
 function lifecycleMode(lifecycle: ReplayWebMCPLifecycle): string {
@@ -217,6 +181,14 @@ function parseExecuteToolResult(result: string): unknown {
   }
 }
 
+function isNativeInputArgumentsParseError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { name?: unknown; message?: unknown };
+  return (
+    candidate.name === "UnknownError" && candidate.message === "Failed to parse input arguments"
+  );
+}
+
 export class ReplayWebMCPRegistry {
   readonly support: WebMCPSupportState;
 
@@ -335,6 +307,18 @@ export class ReplayWebMCPRegistry {
     await this.reconciliation;
   }
 
+  async retryFailedRegistrations(): Promise<WebMCPDebugState> {
+    if (!this.started || this.disposed || !this.support.available) {
+      return this.getDebugState();
+    }
+    this.reconciliation = this.reconciliation.then(
+      () => this.performFailedRegistrationRetry(),
+      () => this.performFailedRegistrationRetry(),
+    );
+    await this.reconciliation;
+    return this.getDebugState();
+  }
+
   stop(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -410,7 +394,18 @@ export class ReplayWebMCPRegistry {
         message: `${name} is not registered in the current lifecycle state.`,
       };
     }
-    const result = await modelContext.executeTool(registered, input, { signal });
+    let result: string;
+    try {
+      result = await modelContext.executeTool(registered, input, { signal });
+    } catch (error) {
+      // Chrome's current native bridge expects serialized JSON here, while the
+      // draft/polyfill surface accepts the argument object. This exact error is
+      // raised before the registered tool is dispatched, so the guarded retry
+      // cannot duplicate a canonical mutation.
+      if (!isNativeInputArgumentsParseError(error)) throw error;
+      throwIfAborted(signal);
+      result = await modelContext.executeTool(registered, JSON.stringify(input), { signal });
+    }
     return parseExecuteToolResult(result);
   }
 
@@ -434,6 +429,22 @@ export class ReplayWebMCPRegistry {
       }
     }
     this.emitDebugState();
+  }
+
+  private async performFailedRegistrationRetry(): Promise<void> {
+    if (this.disposed || this.modelContext === undefined) return;
+    const desired = eligibleGroups(this.adapter.getLifecycle());
+    let retryNeeded = false;
+    for (const group of TOOL_GROUPS) {
+      if (desired.has(group) && this.failedGroups.delete(group)) {
+        retryNeeded = true;
+      }
+    }
+    if (retryNeeded) {
+      await this.performReconciliation();
+    } else {
+      this.emitDebugState();
+    }
   }
 
   private async registerGroup(group: WebMCPToolGroup): Promise<void> {

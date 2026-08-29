@@ -128,6 +128,11 @@ function hermitePosition(
   const next = trajectory.keyframes[upperIndex + 1];
   const duration = upper.timeMs - lower.timeMs;
   if (duration <= 0) return { x: lower.x, y: lower.y };
+  // Equal endpoints author an exact hold. Borrowing a tangent from the next
+  // leg would otherwise draw a backward loop before returning to this pose.
+  if (lower.x === upper.x && lower.y === upper.y) {
+    return { x: lower.x, y: lower.y };
+  }
 
   const lowerSpan = previous ? upper.timeMs - previous.timeMs : duration;
   const upperSpan = next ? next.timeMs - lower.timeMs : duration;

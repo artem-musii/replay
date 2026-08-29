@@ -1,13 +1,16 @@
 import { validateConsistency } from "./consistency";
+import { truncateXmlSafeText } from "./languageSafety";
 import type { ReplayCase } from "./models";
 import { REPLAY_SCHEMA_VERSION } from "./models";
-import { validWorkspaceCitationPaths } from "./report";
+import { createReportPreviewReviewBinding, reportPreviewHasValidReviewBinding } from "./report";
 import { parseReplayCase } from "./schema";
 
 export interface CaseReferenceIssue {
   path: string;
   message: string;
 }
+
+const MAX_REFERENCE_ISSUES = 1_000;
 
 export class ReplayImportError extends Error {
   readonly code = "INVALID_IMPORT" as const;
@@ -20,6 +23,18 @@ export class ReplayImportError extends Error {
   }
 }
 
+function addReferenceIssue(issues: CaseReferenceIssue[], issue: CaseReferenceIssue): void {
+  if (issues.length < MAX_REFERENCE_ISSUES) issues.push(issue);
+}
+
+function indexById<T extends { id: string }>(values: readonly T[]): Map<string, T> {
+  const indexed = new Map<string, T>();
+  for (const value of values) {
+    if (!indexed.has(value.id)) indexed.set(value.id, value);
+  }
+  return indexed;
+}
+
 function checkUniqueIds(
   values: { id: string }[],
   path: string,
@@ -28,7 +43,10 @@ function checkUniqueIds(
   const ids = new Set<string>();
   values.forEach((value, index) => {
     if (ids.has(value.id))
-      issues.push({ path: `${path}.${index}.id`, message: `Duplicate ID ${value.id}` });
+      addReferenceIssue(issues, {
+        path: `${path}.${index}.id`,
+        message: `Duplicate ID ${value.id}`,
+      });
     ids.add(value.id);
   });
   return ids;
@@ -42,8 +60,77 @@ function requireReferences(
 ): void {
   references.forEach((reference, index) => {
     if (!known.has(reference)) {
-      issues.push({ path: `${path}.${index}`, message: `Missing referenced object ${reference}` });
+      addReferenceIssue(issues, {
+        path: `${path}.${index}`,
+        message: `Missing referenced object ${reference}`,
+      });
     }
+  });
+}
+
+function requireSameReferenceSet(
+  actual: string[],
+  expected: Set<string>,
+  path: string,
+  issues: CaseReferenceIssue[],
+): void {
+  requireReferences(actual, expected, path, issues);
+  const actualSet = new Set(actual);
+  for (const reference of expected) {
+    if (!actualSet.has(reference)) {
+      addReferenceIssue(issues, {
+        path,
+        message: `Historical snapshot index is missing ${reference}`,
+      });
+    }
+  }
+}
+
+function checkUniqueReferenceIds(
+  references: string[],
+  path: string,
+  label: string,
+  issues: CaseReferenceIssue[],
+): void {
+  const firstIndexById = new Map<string, number>();
+  references.forEach((reference, index) => {
+    const firstIndex = firstIndexById.get(reference);
+    if (firstIndex !== undefined) {
+      addReferenceIssue(issues, {
+        path: `${path}.${index}`,
+        message: `Duplicate ${label} ${reference}; first indexed at ${path}.${firstIndex}`,
+      });
+      return;
+    }
+    firstIndexById.set(reference, index);
+  });
+}
+
+function recordBranchIndexMembership(
+  memberships: Map<string, Map<string, number>>,
+  objectId: string,
+  branchId: string,
+): void {
+  const branchCounts = memberships.get(objectId) ?? new Map<string, number>();
+  branchCounts.set(branchId, (branchCounts.get(branchId) ?? 0) + 1);
+  memberships.set(objectId, branchCounts);
+}
+
+function requireOwningBranchIndex(
+  objectId: string,
+  ownerBranchId: string,
+  objectLabel: string,
+  collectionName: "trajectoryIds" | "eventIds" | "claimIds",
+  branchIndexById: Map<string, number>,
+  memberships: Map<string, Map<string, number>>,
+  issues: CaseReferenceIssue[],
+): void {
+  const ownerIndex = branchIndexById.get(ownerBranchId);
+  if (ownerIndex === undefined) return;
+  if ((memberships.get(objectId)?.get(ownerBranchId) ?? 0) > 0) return;
+  addReferenceIssue(issues, {
+    path: `branches.${ownerIndex}.${collectionName}`,
+    message: `${objectLabel} ${objectId} is missing from owning branch ${ownerBranchId}.${collectionName}`,
   });
 }
 
@@ -60,17 +147,38 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
   const activityIds = checkUniqueIds(replayCase.activity, "activity", issues);
   const snapshotIds = checkUniqueIds(replayCase.reportSnapshots, "reportSnapshots", issues);
   const noteIds = checkUniqueIds(replayCase.reportNotes, "reportNotes", issues);
+  const completenessAttestationIds = checkUniqueIds(
+    replayCase.completenessAttestations,
+    "completenessAttestations",
+    issues,
+  );
   void questionIds;
   void proposalIds;
   void activityIds;
   void snapshotIds;
   void noteIds;
+  void completenessAttestationIds;
+
+  const trajectoryById = indexById(replayCase.trajectories);
+  const eventById = indexById(replayCase.timelineEvents);
+  const branchById = indexById(replayCase.branches);
+  const branchIndexById = new Map<string, number>();
+  replayCase.branches.forEach((branch, index) => {
+    if (!branchIndexById.has(branch.id)) branchIndexById.set(branch.id, index);
+  });
+  const claimById = indexById(replayCase.claims);
+  const evidenceById = indexById(replayCase.evidence);
+  const activityById = indexById(replayCase.activity);
+  const activityIndexById = new Map<string, number>();
+  replayCase.activity.forEach((activity, index) => {
+    if (!activityIndexById.has(activity.id)) activityIndexById.set(activity.id, index);
+  });
 
   const globalIds = new Map<string, string>();
   const registerGlobalId = (objectId: string, path: string) => {
     const previousPath = globalIds.get(objectId);
     if (previousPath) {
-      issues.push({
+      addReferenceIssue(issues, {
         path,
         message: `Object ID ${objectId} is already used at ${previousPath}`,
       });
@@ -132,21 +240,46 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
   replayCase.reportSnapshots.forEach((snapshot, index) =>
     registerGlobalId(snapshot.id, `reportSnapshots.${index}.id`),
   );
+  replayCase.completenessAttestations.forEach((attestation, index) =>
+    registerGlobalId(attestation.id, `completenessAttestations.${index}.id`),
+  );
 
   const damageIds = new Set(
     replayCase.actors.flatMap((actor) => actor.damageMarkers.map((marker) => marker.id)),
   );
+  const damageById = indexById(replayCase.actors.flatMap((actor) => actor.damageMarkers));
   const assumptionIds = new Set(
     replayCase.branches.flatMap((branch) => branch.assumptions.map((assumption) => assumption.id)),
   );
+  const assumptionById = indexById(replayCase.branches.flatMap((branch) => branch.assumptions));
   const sceneIds = new Set([...actorIds, ...trajectoryIds, ...damageIds]);
-  const activeBranch = replayCase.branches.find(
-    (branch) => branch.id === replayCase.activeBranchId,
+  const questionSceneIds = new Set([...sceneIds, ...eventIds]);
+  const globalKnownIds = new Set(globalIds.keys());
+  const evidenceLinkedBranchIdsById = new Map(
+    replayCase.evidence.map((asset) => [asset.id, new Set(asset.linkedBranchIds)]),
   );
+  const assumptionEvidenceIdsById = new Map(
+    replayCase.branches.flatMap((branch) =>
+      branch.assumptions.map(
+        (assumption) =>
+          [
+            assumption.id,
+            new Set([...assumption.supportingEvidenceIds, ...assumption.conflictingEvidenceIds]),
+          ] as const,
+      ),
+    ),
+  );
+  const activeBranch = branchById.get(replayCase.activeBranchId);
   if (!activeBranch) {
-    issues.push({ path: "activeBranchId", message: "Active branch does not exist" });
+    addReferenceIssue(issues, {
+      path: "activeBranchId",
+      message: "Active branch does not exist",
+    });
   } else if (activeBranch.status === "archived") {
-    issues.push({ path: "activeBranchId", message: "Active branch cannot be archived" });
+    addReferenceIssue(issues, {
+      path: "activeBranchId",
+      message: "Active branch cannot be archived",
+    });
   }
 
   replayCase.actors.forEach((actor, actorIndex) => {
@@ -154,23 +287,78 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     actor.damageMarkers.forEach((marker, markerIndex) => {
       const path = `actors.${actorIndex}.damageMarkers.${markerIndex}`;
       if (markerIds.has(marker.id))
-        issues.push({ path: `${path}.id`, message: `Duplicate damage marker ID ${marker.id}` });
+        addReferenceIssue(issues, {
+          path: `${path}.id`,
+          message: `Duplicate damage marker ID ${marker.id}`,
+        });
       markerIds.add(marker.id);
       if (marker.actorId !== actor.id)
-        issues.push({
+        addReferenceIssue(issues, {
           path: `${path}.actorId`,
           message: "Damage marker actor does not match its owner",
         });
       requireReferences(marker.linkedClaimIds, claimIds, `${path}.linkedClaimIds`, issues);
       requireReferences(marker.linkedEvidenceIds, evidenceIds, `${path}.linkedEvidenceIds`, issues);
+      checkUniqueReferenceIds(
+        marker.linkedClaimIds,
+        `${path}.linkedClaimIds`,
+        "linked claim ID",
+        issues,
+      );
+      checkUniqueReferenceIds(
+        marker.linkedEvidenceIds,
+        `${path}.linkedEvidenceIds`,
+        "linked evidence ID",
+        issues,
+      );
+      marker.linkedClaimIds.forEach((claimId, claimIndex) => {
+        const claim = claimById.get(claimId);
+        if (claim && !claim.linkedSceneObjectIds.includes(marker.id)) {
+          addReferenceIssue(issues, {
+            path: `${path}.linkedClaimIds.${claimIndex}`,
+            message: `Claim ${claimId} is missing its reverse scene link to damage marker ${marker.id}`,
+          });
+        }
+      });
+      marker.linkedEvidenceIds.forEach((evidenceId, evidenceIndex) => {
+        const asset = evidenceById.get(evidenceId);
+        if (asset && !asset.linkedSceneObjectIds.includes(marker.id)) {
+          addReferenceIssue(issues, {
+            path: `${path}.linkedEvidenceIds.${evidenceIndex}`,
+            message: `Evidence ${evidenceId} is missing its reverse scene link to damage marker ${marker.id}`,
+          });
+        }
+      });
     });
   });
 
+  replayCase.completenessAttestations.forEach((attestation, index) => {
+    if (attestation.kind !== "actor-damage") return;
+    requireReferences(
+      [attestation.actorId],
+      actorIds,
+      `completenessAttestations.${index}.actorId`,
+      issues,
+    );
+  });
+
+  const trajectoryOwnersByActor = new Map<string, Map<string, string>>();
   replayCase.trajectories.forEach((trajectory, index) => {
     const path = `trajectories.${index}`;
     requireReferences([trajectory.actorId], actorIds, `${path}.actorId`, issues);
     requireReferences([trajectory.branchId], branchIds, `${path}.branchId`, issues);
     checkUniqueIds(trajectory.keyframes, `${path}.keyframes`, issues);
+    const byBranch = trajectoryOwnersByActor.get(trajectory.actorId) ?? new Map<string, string>();
+    const existingTrajectoryId = byBranch.get(trajectory.branchId);
+    if (existingTrajectoryId) {
+      addReferenceIssue(issues, {
+        path,
+        message: `Actor ${trajectory.actorId} has more than one trajectory in branch ${trajectory.branchId}: ${existingTrajectoryId} and ${trajectory.id}`,
+      });
+    } else {
+      byBranch.set(trajectory.branchId, trajectory.id);
+      trajectoryOwnersByActor.set(trajectory.actorId, byBranch);
+    }
   });
 
   replayCase.timelineEvents.forEach((event, index) => {
@@ -179,61 +367,168 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     requireReferences(event.linkedActorIds, actorIds, `${path}.linkedActorIds`, issues);
     requireReferences(event.linkedClaimIds, claimIds, `${path}.linkedClaimIds`, issues);
     requireReferences(event.linkedEvidenceIds, evidenceIds, `${path}.linkedEvidenceIds`, issues);
+    checkUniqueReferenceIds(
+      event.linkedClaimIds,
+      `${path}.linkedClaimIds`,
+      "linked claim ID",
+      issues,
+    );
+    checkUniqueReferenceIds(
+      event.linkedEvidenceIds,
+      `${path}.linkedEvidenceIds`,
+      "linked evidence ID",
+      issues,
+    );
+    event.linkedClaimIds.forEach((claimId, claimIndex) => {
+      const claim = claimById.get(claimId);
+      if (claim && !claim.linkedEventIds.includes(event.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedClaimIds.${claimIndex}`,
+          message: `Claim ${claimId} is missing its reverse link to event ${event.id}`,
+        });
+      }
+    });
+    event.linkedEvidenceIds.forEach((evidenceId, evidenceIndex) => {
+      const asset = evidenceById.get(evidenceId);
+      if (asset && !asset.linkedEventIds.includes(event.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedEvidenceIds.${evidenceIndex}`,
+          message: `Evidence ${evidenceId} is missing its reverse link to timeline event ${event.id}`,
+        });
+      }
+    });
   });
 
   replayCase.claims.forEach((claim, index) => {
     const path = `claims.${index}`;
     if (claim.branchId) requireReferences([claim.branchId], branchIds, `${path}.branchId`, issues);
+    if (claim.branchId && claim.sharedAcrossBranches) {
+      addReferenceIssue(issues, {
+        path: `${path}.sharedAcrossBranches`,
+        message: `Claim ${claim.id} cannot be both branch-scoped and shared across branches`,
+      });
+    }
+    if (!claim.branchId && !claim.sharedAcrossBranches) {
+      addReferenceIssue(issues, {
+        path: `${path}.branchId`,
+        message: `Non-shared claim ${claim.id} requires an owning branchId`,
+      });
+    }
     requireReferences(claim.linkedEvidenceIds, evidenceIds, `${path}.linkedEvidenceIds`, issues);
     requireReferences(claim.linkedEventIds, eventIds, `${path}.linkedEventIds`, issues);
     requireReferences(claim.linkedSceneObjectIds, sceneIds, `${path}.linkedSceneObjectIds`, issues);
-    requireReferences(claim.sourceIds, new Set(globalIds.keys()), `${path}.sourceIds`, issues);
+    requireReferences(claim.sourceIds, globalKnownIds, `${path}.sourceIds`, issues);
+    checkUniqueReferenceIds(
+      claim.linkedEvidenceIds,
+      `${path}.linkedEvidenceIds`,
+      "linked evidence ID",
+      issues,
+    );
+    checkUniqueReferenceIds(
+      claim.linkedEventIds,
+      `${path}.linkedEventIds`,
+      "linked event ID",
+      issues,
+    );
+    checkUniqueReferenceIds(
+      claim.linkedSceneObjectIds,
+      `${path}.linkedSceneObjectIds`,
+      "linked scene object ID",
+      issues,
+    );
+    claim.linkedEvidenceIds.forEach((evidenceId, evidenceIndex) => {
+      const asset = evidenceById.get(evidenceId);
+      if (asset && !asset.linkedClaimIds.includes(claim.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedEvidenceIds.${evidenceIndex}`,
+          message: `Evidence ${evidenceId} is missing its reverse link to claim ${claim.id}`,
+        });
+      }
+    });
+    claim.linkedEventIds.forEach((eventId, eventIndex) => {
+      const event = eventById.get(eventId);
+      if (event && !event.linkedClaimIds.includes(claim.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedEventIds.${eventIndex}`,
+          message: `Event ${eventId} is missing its reverse link to claim ${claim.id}`,
+        });
+      }
+    });
+    claim.linkedSceneObjectIds.forEach((sceneObjectId, sceneIndex) => {
+      const marker = damageById.get(sceneObjectId);
+      if (marker && !marker.linkedClaimIds.includes(claim.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedSceneObjectIds.${sceneIndex}`,
+          message: `Damage marker ${marker.id} is missing its reverse link to claim ${claim.id}`,
+        });
+      }
+    });
   });
 
+  const trajectoryBranchMemberships = new Map<string, Map<string, number>>();
+  const eventBranchMemberships = new Map<string, Map<string, number>>();
+  const branchClaimMemberships = new Map<string, Map<string, number>>();
+  const sharedClaimMemberships = new Map<string, Map<string, number>>();
   replayCase.branches.forEach((branch, index) => {
     const path = `branches.${index}`;
     if (branch.parentBranchId) {
       requireReferences([branch.parentBranchId], branchIds, `${path}.parentBranchId`, issues);
       if (branch.parentBranchId === branch.id)
-        issues.push({ path: `${path}.parentBranchId`, message: "Branch cannot parent itself" });
+        addReferenceIssue(issues, {
+          path: `${path}.parentBranchId`,
+          message: "Branch cannot parent itself",
+        });
     }
     requireReferences(branch.sharedClaimIds, claimIds, `${path}.sharedClaimIds`, issues);
     requireReferences(branch.trajectoryIds, trajectoryIds, `${path}.trajectoryIds`, issues);
     requireReferences(branch.eventIds, eventIds, `${path}.eventIds`, issues);
     requireReferences(branch.claimIds, claimIds, `${path}.claimIds`, issues);
+    checkUniqueReferenceIds(
+      branch.sharedClaimIds,
+      `${path}.sharedClaimIds`,
+      "shared claim ID",
+      issues,
+    );
+    checkUniqueReferenceIds(branch.trajectoryIds, `${path}.trajectoryIds`, "trajectory ID", issues);
+    checkUniqueReferenceIds(branch.eventIds, `${path}.eventIds`, "timeline event ID", issues);
+    checkUniqueReferenceIds(branch.claimIds, `${path}.claimIds`, "branch claim ID", issues);
     branch.trajectoryIds.forEach((trajectoryId, childIndex) => {
-      const trajectory = replayCase.trajectories.find((candidate) => candidate.id === trajectoryId);
+      recordBranchIndexMembership(trajectoryBranchMemberships, trajectoryId, branch.id);
+      const trajectory = trajectoryById.get(trajectoryId);
       if (trajectory && trajectory.branchId !== branch.id) {
-        issues.push({
+        addReferenceIssue(issues, {
           path: `${path}.trajectoryIds.${childIndex}`,
           message: "Trajectory belongs to a different branch",
         });
       }
     });
     branch.eventIds.forEach((eventId, childIndex) => {
-      const event = replayCase.timelineEvents.find((candidate) => candidate.id === eventId);
+      recordBranchIndexMembership(eventBranchMemberships, eventId, branch.id);
+      const event = eventById.get(eventId);
       if (event && event.branchId !== branch.id) {
-        issues.push({
+        addReferenceIssue(issues, {
           path: `${path}.eventIds.${childIndex}`,
           message: "Timeline event belongs to a different branch",
         });
       }
     });
     branch.claimIds.forEach((claimId, childIndex) => {
-      const claim = replayCase.claims.find((candidate) => candidate.id === claimId);
-      if (claim && claim.branchId !== branch.id) {
-        issues.push({
+      recordBranchIndexMembership(branchClaimMemberships, claimId, branch.id);
+      const claim = claimById.get(claimId);
+      if (claim && (claim.branchId !== branch.id || claim.sharedAcrossBranches)) {
+        addReferenceIssue(issues, {
           path: `${path}.claimIds.${childIndex}`,
-          message: "Claim belongs to a different branch",
+          message: "Claim is not a non-shared claim owned by this branch",
         });
       }
     });
     branch.sharedClaimIds.forEach((claimId, childIndex) => {
-      const claim = replayCase.claims.find((candidate) => candidate.id === claimId);
-      if (claim && !claim.sharedAcrossBranches) {
-        issues.push({
+      recordBranchIndexMembership(sharedClaimMemberships, claimId, branch.id);
+      const claim = claimById.get(claimId);
+      if (claim && (!claim.sharedAcrossBranches || claim.branchId !== undefined)) {
+        addReferenceIssue(issues, {
           path: `${path}.sharedClaimIds.${childIndex}`,
-          message: "Shared claim is not marked sharedAcrossBranches",
+          message: "Claim is not a global shared-across-branches claim",
         });
       }
     });
@@ -257,9 +552,9 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
         ...assumption.supportingEvidenceIds,
         ...assumption.conflictingEvidenceIds,
       ])) {
-        const asset = replayCase.evidence.find((candidate) => candidate.id === evidenceId);
-        if (asset && !asset.linkedBranchIds.includes(branch.id)) {
-          issues.push({
+        const asset = evidenceById.get(evidenceId);
+        if (asset && !evidenceLinkedBranchIdsById.get(asset.id)?.has(branch.id)) {
+          addReferenceIssue(issues, {
             path: assumptionPath,
             message: `Evidence ${evidenceId} is missing its reverse link to branch ${branch.id}`,
           });
@@ -268,20 +563,66 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     });
   });
 
+  replayCase.trajectories.forEach((trajectory) => {
+    requireOwningBranchIndex(
+      trajectory.id,
+      trajectory.branchId,
+      "Trajectory",
+      "trajectoryIds",
+      branchIndexById,
+      trajectoryBranchMemberships,
+      issues,
+    );
+  });
+  replayCase.timelineEvents.forEach((event) => {
+    requireOwningBranchIndex(
+      event.id,
+      event.branchId,
+      "Timeline event",
+      "eventIds",
+      branchIndexById,
+      eventBranchMemberships,
+      issues,
+    );
+  });
+  replayCase.claims.forEach((claim) => {
+    if (claim.branchId && !claim.sharedAcrossBranches) {
+      requireOwningBranchIndex(
+        claim.id,
+        claim.branchId,
+        "Branch claim",
+        "claimIds",
+        branchIndexById,
+        branchClaimMemberships,
+        issues,
+      );
+      return;
+    }
+    if (!claim.branchId && claim.sharedAcrossBranches) {
+      replayCase.branches.forEach((branch, branchIndex) => {
+        if ((sharedClaimMemberships.get(claim.id)?.get(branch.id) ?? 0) > 0) return;
+        addReferenceIssue(issues, {
+          path: `branches.${branchIndex}.sharedClaimIds`,
+          message: `Shared claim ${claim.id} is missing from branch ${branch.id}.sharedClaimIds`,
+        });
+      });
+    }
+  });
+
   // Detect parent cycles independently of branch ordering.
   for (const branch of replayCase.branches) {
     const visited = new Set<string>([branch.id]);
     let parentId = branch.parentBranchId;
     while (parentId) {
       if (visited.has(parentId)) {
-        issues.push({
+        addReferenceIssue(issues, {
           path: `branches.${branch.id}.parentBranchId`,
           message: "Branch parent relationship contains a cycle",
         });
         break;
       }
       visited.add(parentId);
-      parentId = replayCase.branches.find((candidate) => candidate.id === parentId)?.parentBranchId;
+      parentId = branchById.get(parentId)?.parentBranchId;
     }
   }
 
@@ -291,6 +632,51 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     requireReferences(asset.linkedEventIds, eventIds, `${path}.linkedEventIds`, issues);
     requireReferences(asset.linkedSceneObjectIds, sceneIds, `${path}.linkedSceneObjectIds`, issues);
     requireReferences(asset.linkedBranchIds, branchIds, `${path}.linkedBranchIds`, issues);
+    checkUniqueReferenceIds(
+      asset.linkedClaimIds,
+      `${path}.linkedClaimIds`,
+      "linked claim ID",
+      issues,
+    );
+    checkUniqueReferenceIds(
+      asset.linkedEventIds,
+      `${path}.linkedEventIds`,
+      "linked event ID",
+      issues,
+    );
+    checkUniqueReferenceIds(
+      asset.linkedSceneObjectIds,
+      `${path}.linkedSceneObjectIds`,
+      "linked scene object ID",
+      issues,
+    );
+    asset.linkedClaimIds.forEach((claimId, claimIndex) => {
+      const claim = claimById.get(claimId);
+      if (claim && !claim.linkedEvidenceIds.includes(asset.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedClaimIds.${claimIndex}`,
+          message: `Claim ${claimId} is missing its reverse link to evidence ${asset.id}`,
+        });
+      }
+    });
+    asset.linkedEventIds.forEach((eventId, eventIndex) => {
+      const event = eventById.get(eventId);
+      if (event && !event.linkedEvidenceIds.includes(asset.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedEventIds.${eventIndex}`,
+          message: `Timeline event ${eventId} is missing its reverse link to evidence ${asset.id}`,
+        });
+      }
+    });
+    asset.linkedSceneObjectIds.forEach((sceneObjectId, sceneIndex) => {
+      const marker = damageById.get(sceneObjectId);
+      if (marker && !marker.linkedEvidenceIds.includes(asset.id)) {
+        addReferenceIssue(issues, {
+          path: `${path}.linkedSceneObjectIds.${sceneIndex}`,
+          message: `Damage marker ${marker.id} is missing its reverse link to evidence ${asset.id}`,
+        });
+      }
+    });
     checkUniqueIds(asset.annotations, `${path}.annotations`, issues);
     const annotationIds = new Set(asset.annotations.map((annotation) => annotation.id));
     const annotationLinkKeys = new Set<string>();
@@ -313,15 +699,9 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
                     : assumptionIds;
       requireReferences([link.targetId], targetIds, `${linkPath}.targetId`, issues);
       if (link.targetType === "assumption") {
-        const assumption = replayCase.branches
-          .flatMap((branch) => branch.assumptions)
-          .find((candidate) => candidate.id === link.targetId);
-        if (
-          assumption &&
-          !assumption.supportingEvidenceIds.includes(asset.id) &&
-          !assumption.conflictingEvidenceIds.includes(asset.id)
-        ) {
-          issues.push({
+        const assumption = assumptionById.get(link.targetId);
+        if (assumption && !assumptionEvidenceIdsById.get(assumption.id)?.has(asset.id)) {
+          addReferenceIssue(issues, {
             path: linkPath,
             message: `Assumption ${link.targetId} is missing its reverse link to evidence ${asset.id}`,
           });
@@ -329,7 +709,7 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
       }
       const key = `${link.annotationId}:${link.targetType}:${link.targetId}`;
       if (annotationLinkKeys.has(key)) {
-        issues.push({ path: linkPath, message: "Duplicate annotation link" });
+        addReferenceIssue(issues, { path: linkPath, message: "Duplicate annotation link" });
       }
       annotationLinkKeys.add(key);
     });
@@ -340,7 +720,7 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     requireReferences(question.relatedClaimIds, claimIds, `${path}.relatedClaimIds`, issues);
     requireReferences(
       question.relatedSceneObjectIds,
-      new Set([...sceneIds, ...eventIds]),
+      questionSceneIds,
       `${path}.relatedSceneObjectIds`,
       issues,
     );
@@ -354,11 +734,32 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
       revision.changes.forEach((change, changeIndex) => {
         const changePath = `${revisionPath}.changes.${changeIndex}`;
         requireReferences([change.actorId], actorIds, `${changePath}.actorId`, issues);
-        if (change.kind !== "trajectory-set") return;
+        if (change.kind === "actor-pose") {
+          if (change.branchId) {
+            requireReferences([change.branchId], branchIds, `${changePath}.branchId`, issues);
+          }
+          if (change.baseTrajectory) {
+            requireReferences(
+              [change.baseTrajectory.trajectoryId],
+              trajectoryIds,
+              `${changePath}.baseTrajectory.trajectoryId`,
+              issues,
+            );
+            const target = trajectoryById.get(change.baseTrajectory.trajectoryId);
+            if (
+              target &&
+              (target.actorId !== change.actorId || target.branchId !== change.branchId)
+            ) {
+              addReferenceIssue(issues, {
+                path: `${changePath}.baseTrajectory.trajectoryId`,
+                message: "Proposal pose trajectory baseline belongs to a different actor or branch",
+              });
+            }
+          }
+          return;
+        }
         requireReferences([change.branchId], branchIds, `${changePath}.branchId`, issues);
-        const target = replayCase.trajectories.find(
-          (trajectory) => trajectory.id === change.trajectoryId,
-        );
+        const target = trajectoryById.get(change.trajectoryId);
         if (!change.createsTrajectory || proposal.status === "accepted") {
           requireReferences(
             [change.trajectoryId],
@@ -368,7 +769,7 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
           );
         }
         if (target && (target.actorId !== change.actorId || target.branchId !== change.branchId)) {
-          issues.push({
+          addReferenceIssue(issues, {
             path: `${changePath}.trajectoryId`,
             message: "Proposal trajectory target belongs to a different actor or branch",
           });
@@ -381,26 +782,29 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     if (!activity.overridesActivityId) return;
     const path = `activity.${index}.overridesActivityId`;
     requireReferences([activity.overridesActivityId], activityIds, path, issues);
-    const overriddenIndex = replayCase.activity.findIndex(
-      (candidate) => candidate.id === activity.overridesActivityId,
-    );
-    const overriddenActivity = replayCase.activity[overriddenIndex];
+    const overriddenIndex = activityIndexById.get(activity.overridesActivityId) ?? -1;
+    const overriddenActivity = activityById.get(activity.overridesActivityId);
     if (overriddenIndex >= index) {
-      issues.push({ path, message: "Human override must reference an earlier activity" });
+      addReferenceIssue(issues, {
+        path,
+        message: "Human override must reference an earlier activity",
+      });
     }
     if (
       overriddenActivity &&
       (overriddenActivity.author !== "agent" || overriddenActivity.origin !== "webmcp")
     ) {
-      issues.push({ path, message: "Human override must reference an agent WebMCP activity" });
+      addReferenceIssue(issues, {
+        path,
+        message: "Human override must reference an agent WebMCP activity",
+      });
     }
+    const overriddenAffectedIds = new Set(overriddenActivity?.affectedIds ?? []);
     if (
       overriddenActivity &&
-      !overriddenActivity.affectedIds.some((affectedId) =>
-        activity.affectedIds.includes(affectedId),
-      )
+      !activity.affectedIds.some((affectedId) => overriddenAffectedIds.has(affectedId))
     ) {
-      issues.push({
+      addReferenceIssue(issues, {
         path,
         message: "Human override must share an affected object with its target",
       });
@@ -412,44 +816,124 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
     requireReferences(note.evidenceIds, evidenceIds, `reportNotes.${index}.evidenceIds`, issues);
   });
 
+  let previousBoundSnapshot: ReplayCase["reportSnapshots"][number] | undefined;
   replayCase.reportSnapshots.forEach((snapshot, snapshotIndex) => {
     const path = `reportSnapshots.${snapshotIndex}`;
-    requireReferences(snapshot.confirmedClaimIds, claimIds, `${path}.confirmedClaimIds`, issues);
+    if (snapshot.preview.reviewBinding) {
+      if (!reportPreviewHasValidReviewBinding(snapshot.preview)) {
+        addReferenceIssue(issues, {
+          path: `${path}.preview.reviewBinding.fingerprint`,
+          message:
+            "Bound historical report preview fingerprint does not match its content and scope",
+        });
+      }
+      if (snapshot.preview.caseId !== replayCase.id) {
+        addReferenceIssue(issues, {
+          path: `${path}.preview.caseId`,
+          message: "Bound historical report preview belongs to a different case",
+        });
+      }
+      if (snapshot.caseVersion !== snapshot.preview.caseVersion + 1) {
+        addReferenceIssue(issues, {
+          path: `${path}.caseVersion`,
+          message: "Bound snapshot version must immediately follow its reviewed case version",
+        });
+      }
+      if (snapshot.caseVersion > replayCase.caseVersion) {
+        addReferenceIssue(issues, {
+          path: `${path}.caseVersion`,
+          message: "Bound snapshot version cannot be newer than the current case",
+        });
+      }
+      if (Date.parse(snapshot.createdAt) < Date.parse(snapshot.preview.generatedAt)) {
+        addReferenceIssue(issues, {
+          path: `${path}.createdAt`,
+          message: "Bound snapshot cannot predate the preview that a human reviewed",
+        });
+      }
+      if (Date.parse(snapshot.createdAt) > Date.parse(replayCase.updatedAt)) {
+        addReferenceIssue(issues, {
+          path: `${path}.createdAt`,
+          message: "Bound snapshot cannot postdate the current case",
+        });
+      }
+      if (previousBoundSnapshot) {
+        if (snapshot.caseVersion <= previousBoundSnapshot.caseVersion) {
+          addReferenceIssue(issues, {
+            path: `${path}.caseVersion`,
+            message: "Bound snapshots must remain in increasing case-version order",
+          });
+        }
+        if (Date.parse(snapshot.createdAt) < Date.parse(previousBoundSnapshot.createdAt)) {
+          addReferenceIssue(issues, {
+            path: `${path}.createdAt`,
+            message: "Bound snapshots must remain in chronological order",
+          });
+        }
+      }
+      previousBoundSnapshot = snapshot;
+    }
+    const historicalClaimIds = new Set(snapshot.preview.includedClaimIds);
+    const historicalEvidenceIds = new Set(snapshot.preview.includedEvidenceIds);
+    const historicalQuestionIds = new Set(snapshot.preview.unresolvedQuestionIds);
     requireReferences(
+      snapshot.confirmedClaimIds,
+      historicalClaimIds,
+      `${path}.confirmedClaimIds`,
+      issues,
+    );
+    requireSameReferenceSet(
       snapshot.includedEvidenceIds,
-      evidenceIds,
+      historicalEvidenceIds,
       `${path}.includedEvidenceIds`,
       issues,
     );
-    requireReferences(
+    requireSameReferenceSet(
       snapshot.unresolvedQuestionIds,
-      questionIds,
+      historicalQuestionIds,
       `${path}.unresolvedQuestionIds`,
       issues,
     );
-    requireReferences(snapshot.branchIds, branchIds, `${path}.branchIds`, issues);
+    if (snapshot.preview.reviewBinding) {
+      requireSameReferenceSet(
+        snapshot.branchIds,
+        new Set(snapshot.preview.reviewBinding.branchIds),
+        `${path}.branchIds`,
+        issues,
+      );
+    }
+    const citedClaimIds = new Set<string>();
+    const citedEvidenceIds = new Set<string>();
     snapshot.preview.sections.forEach((section, sectionIndex) => {
       section.statements.forEach((statement, statementIndex) => {
+        statement.citations.claimIds.forEach((id) => citedClaimIds.add(id));
+        statement.citations.evidenceIds.forEach((id) => citedEvidenceIds.add(id));
         requireReferences(
           statement.citations.claimIds,
-          claimIds,
+          historicalClaimIds,
           `${path}.preview.sections.${sectionIndex}.statements.${statementIndex}.citations.claimIds`,
           issues,
         );
         requireReferences(
-          statement.citations.workspacePaths,
-          validWorkspaceCitationPaths(replayCase),
-          `${path}.preview.sections.${sectionIndex}.statements.${statementIndex}.citations.workspacePaths`,
-          issues,
-        );
-        requireReferences(
           statement.citations.evidenceIds,
-          evidenceIds,
+          historicalEvidenceIds,
           `${path}.preview.sections.${sectionIndex}.statements.${statementIndex}.citations.evidenceIds`,
           issues,
         );
       });
     });
+    requireSameReferenceSet(
+      snapshot.preview.includedClaimIds,
+      citedClaimIds,
+      `${path}.preview.includedClaimIds`,
+      issues,
+    );
+    requireSameReferenceSet(
+      snapshot.preview.includedEvidenceIds,
+      citedEvidenceIds,
+      `${path}.preview.includedEvidenceIds`,
+      issues,
+    );
   });
 
   if (replayCase.selectedItem) {
@@ -464,7 +948,10 @@ export function validateCaseReferences(replayCase: ReplayCase): CaseReferenceIss
       report: new Set([replayCase.id, "report-preview", ...snapshotIds]),
     };
     if (!knownByType[replayCase.selectedItem.type].has(replayCase.selectedItem.id)) {
-      issues.push({ path: "selectedItem.id", message: "Selected workspace item does not exist" });
+      addReferenceIssue(issues, {
+        path: "selectedItem.id",
+        message: "Selected workspace item does not exist",
+      });
     }
   }
 
@@ -477,6 +964,92 @@ export interface ImportReplayCaseOptions {
   now?: string;
   /** Opens an imported transfer as a distinct local case instead of overwriting the source ID. */
   rekeyCaseId?: string;
+}
+
+export interface ReplayImportTrustResetSummary {
+  confirmedClaims: number;
+  confirmedDamageMarkers: number;
+  confirmedTimelineEvents: number;
+  answeredQuestions: number;
+  evidenceFilesUnavailable: number;
+  reviewedReportNotes: number;
+  completenessAttestations: number;
+  finalizedSnapshots: number;
+  proposalRevisions: number;
+  proposalDecisions: number;
+}
+
+export interface PreparedReplayCaseImport {
+  replayCase: ReplayCase;
+  trustResetSummary: ReplayImportTrustResetSummary;
+}
+
+function importTrustResetSummary(replayCase: ReplayCase): ReplayImportTrustResetSummary {
+  return {
+    confirmedClaims: replayCase.claims.filter(
+      (claim) => claim.status === "confirmed" || claim.humanConfirmed,
+    ).length,
+    confirmedDamageMarkers: replayCase.actors
+      .flatMap((actor) => actor.damageMarkers)
+      .filter((marker) => marker.status === "confirmed").length,
+    confirmedTimelineEvents: replayCase.timelineEvents.filter(
+      (event) => event.certainty === "confirmed",
+    ).length,
+    answeredQuestions: replayCase.questions.filter((question) => question.status === "answered")
+      .length,
+    evidenceFilesUnavailable: replayCase.evidence.filter(
+      (asset) => !asset.deleted && asset.localBlobKey.startsWith("evidence:"),
+    ).length,
+    reviewedReportNotes: replayCase.reportNotes.filter((note) => note.reviewedByHuman).length,
+    completenessAttestations: replayCase.completenessAttestations.filter(
+      (attestation) => attestation.humanAttestationTrusted,
+    ).length,
+    finalizedSnapshots: replayCase.reportSnapshots.length,
+    proposalRevisions: replayCase.proposals.reduce(
+      (count, proposal) =>
+        count + proposal.revisions.filter((revision) => revision.authorshipTrusted).length,
+      0,
+    ),
+    proposalDecisions: replayCase.proposals.filter(
+      (proposal) => proposal.decision?.humanAttestationTrusted,
+    ).length,
+  };
+}
+
+function truncateDiagnostic(value: string, maxLength = 240): string {
+  return value.length <= maxLength ? value : `${truncateXmlSafeText(value, maxLength - 1)}…`;
+}
+
+function schemaImportErrorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null) {
+    const candidateIssues: unknown = Reflect.get(error, "issues");
+    if (Array.isArray(candidateIssues)) {
+      const details = candidateIssues.slice(0, 4).flatMap((candidate): string[] => {
+        if (typeof candidate !== "object" || candidate === null) return [];
+        const path: unknown = Reflect.get(candidate, "path");
+        const message: unknown = Reflect.get(candidate, "message");
+        if (typeof message !== "string") return [];
+        const normalizedPath = Array.isArray(path)
+          ? path
+              .filter((segment): segment is string | number =>
+                ["string", "number"].includes(typeof segment),
+              )
+              .join(".")
+          : "";
+        return [
+          `${normalizedPath ? `${truncateDiagnostic(normalizedPath)}: ` : ""}${truncateDiagnostic(message)}`,
+        ];
+      });
+      const omitted = candidateIssues.length - details.length;
+      return details.length > 0
+        ? `Case import failed schema validation. ${details.join("; ")}${omitted > 0 ? `; ${omitted} more issue${omitted === 1 ? "" : "s"} omitted.` : ""}`
+        : "Case import failed schema validation.";
+    }
+  }
+  if (error instanceof Error && error.message) {
+    return `Case import failed schema validation. ${truncateDiagnostic(error.message, 1_000)}`;
+  }
+  return "Case import failed schema validation.";
 }
 
 function rekeyImportedCase(replayCase: ReplayCase, nextCaseId: string): ReplayCase {
@@ -500,6 +1073,12 @@ function rekeyImportedCase(replayCase: ReplayCase, nextCaseId: string): ReplayCa
   });
   rekeyed.reportSnapshots.forEach((snapshot) => {
     snapshot.preview.caseId = normalizedCaseId;
+    if (snapshot.preview.reviewBinding) {
+      const scope = snapshot.preview.reviewBinding;
+      const content = structuredClone(snapshot.preview);
+      delete content.reviewBinding;
+      snapshot.preview.reviewBinding = createReportPreviewReviewBinding(content, scope);
+    }
   });
   if (rekeyed.selectedItem?.type === "report" && rekeyed.selectedItem.id === previousCaseId) {
     rekeyed.selectedItem.id = normalizedCaseId;
@@ -519,7 +1098,7 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
       ...change,
       author: "system",
       origin: "system",
-      summary: `Imported history (unverified): ${change.summary}`.slice(0, 500),
+      summary: truncateXmlSafeText(`Imported history (unverified): ${change.summary}`, 500),
     }));
   });
   sanitized.actors.forEach((actor) => {
@@ -532,7 +1111,7 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
       ...change,
       author: "system",
       origin: "system",
-      summary: `Imported history (unverified): ${change.summary}`.slice(0, 500),
+      summary: truncateXmlSafeText(`Imported history (unverified): ${change.summary}`, 500),
     }));
   });
   sanitized.timelineEvents.forEach((event) => {
@@ -541,7 +1120,7 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
       ...change,
       author: "system",
       origin: "system",
-      summary: `Imported history (unverified): ${change.summary}`.slice(0, 500),
+      summary: truncateXmlSafeText(`Imported history (unverified): ${change.summary}`, 500),
     }));
   });
   sanitized.branches.forEach((branch) => {
@@ -549,7 +1128,7 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
       ...change,
       author: "system",
       origin: "system",
-      summary: `Imported history (unverified): ${change.summary}`.slice(0, 500),
+      summary: truncateXmlSafeText(`Imported history (unverified): ${change.summary}`, 500),
     }));
   });
   sanitized.questions.forEach((question) => {
@@ -573,6 +1152,9 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
     });
     if (proposal.decision) proposal.decision.humanAttestationTrusted = false;
   });
+  sanitized.completenessAttestations.forEach((attestation) => {
+    attestation.humanAttestationTrusted = false;
+  });
   sanitized.reportSnapshots = [];
   if (
     sanitized.selectedItem?.type === "report" &&
@@ -586,7 +1168,7 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
       ...activity,
       author: "system" as const,
       origin: "system" as const,
-      summary: `Imported history (unverified): ${activity.summary}`.slice(0, 500),
+      summary: truncateXmlSafeText(`Imported history (unverified): ${activity.summary}`, 500),
       undoable: false,
     };
     delete imported.requestId;
@@ -601,7 +1183,7 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
     origin: "system",
     actionType: "case.imported-untrusted",
     summary:
-      "Imported an unsigned structured case export. Human confirmations, answers, reviewed notes, and finalized snapshots require fresh local review.",
+      "Imported an unsigned structured case export. Human confirmations, completeness records, answers, reviewed notes, and finalized snapshots require fresh local review.",
     affectedIds: [sanitized.id],
     undoable: false,
     createdAt: now,
@@ -613,18 +1195,20 @@ function resetUntrustedImportAttestations(replayCase: ReplayCase, now: string): 
 export function migrateReplayCase(input: unknown): unknown {
   if (typeof input !== "object" || input === null) return input;
   const source = input as Record<string, unknown>;
-  if (source.schemaVersion !== 1) return input;
+  if (source.schemaVersion !== 1 && source.schemaVersion !== REPLAY_SCHEMA_VERSION) return input;
   const migrated = structuredClone(source);
-  migrated.schemaVersion = 2;
-  migrated.proposals = [];
-  if (Array.isArray(migrated.evidence)) {
-    migrated.evidence = migrated.evidence.map((asset: unknown): unknown =>
-      typeof asset === "object" && asset !== null
-        ? { ...(asset as Record<string, unknown>), annotationLinks: [] }
-        : asset,
-    );
+  if (source.schemaVersion === 1) {
+    migrated.schemaVersion = REPLAY_SCHEMA_VERSION;
+    migrated.proposals = [];
+    if (Array.isArray(migrated.evidence)) {
+      migrated.evidence = migrated.evidence.map((asset: unknown): unknown =>
+        typeof asset === "object" && asset !== null
+          ? { ...(asset as Record<string, unknown>), annotationLinks: [] }
+          : asset,
+      );
+    }
   }
-  if (Array.isArray(migrated.reportSnapshots)) {
+  if (source.schemaVersion === 1 && Array.isArray(migrated.reportSnapshots)) {
     migrated.reportSnapshots = migrated.reportSnapshots.map((snapshot: unknown): unknown => {
       if (typeof snapshot !== "object" || snapshot === null) return snapshot;
       const nextSnapshot = structuredClone(snapshot as Record<string, unknown>);
@@ -659,13 +1243,14 @@ export function migrateReplayCase(input: unknown): unknown {
       return nextSnapshot;
     });
   }
+  if (!("completenessAttestations" in migrated)) migrated.completenessAttestations = [];
   return migrated;
 }
 
-export function importReplayCase(
+export function prepareReplayCaseImport(
   input: unknown,
   options: ImportReplayCaseOptions = {},
-): ReplayCase {
+): PreparedReplayCaseImport {
   const maxBytes = options.maxBytes ?? 20 * 1024 * 1024;
   let raw: unknown = input;
   if (typeof input === "string") {
@@ -690,9 +1275,22 @@ export function importReplayCase(
   try {
     parsed = parseReplayCase(raw);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Case import failed schema validation";
-    throw new ReplayImportError(message);
+    throw new ReplayImportError(schemaImportErrorMessage(error));
   }
+  const trustResetSummary = options.trustHumanAttestations
+    ? {
+        confirmedClaims: 0,
+        confirmedDamageMarkers: 0,
+        confirmedTimelineEvents: 0,
+        answeredQuestions: 0,
+        evidenceFilesUnavailable: 0,
+        reviewedReportNotes: 0,
+        completenessAttestations: 0,
+        finalizedSnapshots: 0,
+        proposalRevisions: 0,
+        proposalDecisions: 0,
+      }
+    : importTrustResetSummary(parsed);
   if (!options.trustHumanAttestations) {
     parsed = resetUntrustedImportAttestations(parsed, options.now ?? new Date().toISOString());
   }
@@ -702,7 +1300,14 @@ export function importReplayCase(
     throw new ReplayImportError("Case import contains invalid object references", referenceIssues);
   }
   parsed.consistencyIssues = validateConsistency(parsed);
-  return parseReplayCase(parsed);
+  return { replayCase: parseReplayCase(parsed), trustResetSummary };
+}
+
+export function importReplayCase(
+  input: unknown,
+  options: ImportReplayCaseOptions = {},
+): ReplayCase {
+  return prepareReplayCaseImport(input, options).replayCase;
 }
 
 export interface ExportReplayCaseOptions {

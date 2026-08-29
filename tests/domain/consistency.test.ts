@@ -57,6 +57,41 @@ function ruleIds(replayCase: ReplayCase, scope: "all" | "scene" | "geometry" | "
 }
 
 describe("calibrated deterministic consistency advisories", () => {
+  it("flags legacy agent claims that overstate external provenance", () => {
+    const replayCase = createDemoCase();
+    const source = replayCase.claims.find((claim) => claim.id === "claim-initial-statement");
+    if (!source) throw new Error("Missing seeded human statement");
+    replayCase.claims.push({
+      ...structuredClone(source),
+      id: "claim-agent-provenance-spoof",
+      statement: "An agent incorrectly labelled this as a witness account.",
+      sourceType: "witness-statement",
+      sourceIds: ["actor-vehicle-a"],
+      createdBy: "agent",
+      humanConfirmed: false,
+      changeHistory: [
+        {
+          id: "change-agent-provenance-spoof",
+          caseVersion: replayCase.caseVersion,
+          author: "agent",
+          origin: "webmcp",
+          summary: "Created claim.",
+          createdAt: NOW,
+          requestId: "request-agent-provenance-spoof",
+        },
+      ],
+    });
+
+    const provenanceIssue = validateConsistency(replayCase, { scope: "provenance" }).find(
+      (item) => item.ruleId === "provenance.agent-external-source-missing",
+    );
+    expect(provenanceIssue).toMatchObject({
+      severity: "error",
+      affectedIds: expect.arrayContaining(["claim-agent-provenance-spoof"]),
+    });
+    expect(provenanceIssue?.explanation).toContain("witness-statement");
+  });
+
   it("adaptively catches a complete vehicle pass-through between 100 ms endpoints", () => {
     const replayCase = createBlankCase(
       {
@@ -146,6 +181,24 @@ describe("calibrated deterministic consistency advisories", () => {
     expect(thresholds.maxYawRateDegPerSecond).toBe(90);
     expect(thresholds.maxHeadingMismatchDeg).toBe(25);
     expect(thresholds.minTurnRadiusM).toBeCloseTo(2.8 / Math.tan((40 * Math.PI) / 180), 8);
+  });
+
+  it("uses a labelled template review default when no posted limit is established", () => {
+    const replayCase = blankCase("straight-road", "dry");
+    delete replayCase.environment.postedSpeedLimitKph;
+    const actor = replayCase.actors[0];
+    if (!actor) throw new Error("Missing test actor");
+    attachTrajectory(replayCase, [
+      { timeMs: 0, x: 10, y: 50, rotationDeg: 90 },
+      { timeMs: 1_000, x: 50, y: 50, rotationDeg: 90 },
+    ]);
+
+    expect(motionAdvisoryThresholdsForCase(replayCase, actor).maxSpeedMps).toBeCloseTo(30, 8);
+    const speedIssue = validateConsistency(replayCase, { scope: "motion" }).find(
+      (issue) => issue.ruleId === "motion.speed",
+    );
+    expect(speedIssue?.explanation).toContain("80 km/h straight-road template default");
+    expect(speedIssue?.explanation).not.toContain("posted 80 km/h limit");
   });
 
   it("uses the case's metre calibration for speed instead of raw scene coordinates", () => {

@@ -3,13 +3,15 @@ name: Deploy REPLAY to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ (github.event_name == 'pull_request' || github.ref != 'refs/heads/main') && format('verify-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 jobs:
   verify-and-build:
@@ -17,6 +19,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    outputs:
+      payload_manifest_sha256: ${{ steps.release_evidence.outputs.payload_manifest_sha256 }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,22 +29,27 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 22.13.0
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Audit dependencies
+        run: |
+          mkdir -p test-results
+          npm audit --audit-level=moderate --json > test-results/npm-audit-full.json
+          npm audit --omit=dev --audit-level=moderate --json > test-results/npm-audit-production.json
       - name: Check formatting
         run: npm run format:check
       - name: Lint source
         run: npm run lint
       - name: Type-check source
         run: npm run typecheck
-      - name: Run unit and component tests
+      - name: Run unit and component tests with coverage
         run: |
           mkdir -p test-results
-          npm test -- --reporter=default --reporter=junit --outputFile.junit=test-results/vitest-junit.xml
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+          npm test -- --coverage --reporter=default --reporter=junit --outputFile.junit=test-results/vitest-junit.xml
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
       - name: Run full Playwright suite
         run: npm run test:e2e
       - name: Upload test diagnostics
@@ -49,20 +58,62 @@ jobs:
         with:
           name: test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            coverage/
             playwright-report/
             test-results/
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 30
       - name: Build static application
         run: npm run build
         env:
           VITE_BASE_PATH: /replay-sol/
+      - name: Verify and attest release artifact
+        id: release_evidence
+        run: npm run verify:artifact:clean
+        env:
+          REPLAY_EXPECT_BASE_PATH: /replay-sol/
+          REPLAY_SOURCE_COMMIT: ${{ github.sha }}
+      - name: Run focused matrix against verified Pages subpath
+        run: |
+          npx playwright test \
+            tests/e2e/release-smoke.spec.ts \
+            tests/e2e/replay.spec.ts \
+            tests/e2e/handler-contract.spec.ts \
+            tests/e2e/submission-story.spec.ts \
+            --grep "boots the configured base path|opens the high-speed scenario|impact focus exposes boundary contact|keeps the complete browser Site Tools read bounded|rehearses the complete Site Tools"
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-release-report
+          PLAYWRIGHT_OUTPUT_DIR: test-results-release
+          REPLAY_E2E_BASE_PATH: /replay-sol/
+          REPLAY_E2E_SKIP_BUILD: "true"
+          VITE_BASE_PATH: /replay-sol/
+      - name: Retain configured-base diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: configured-base-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            playwright-release-report/
+            test-results-release/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Retain release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/release-evidence.json
+            package-lock.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Upload Pages artifact
+        if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist
 
   deploy:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     needs: verify-and-build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -72,7 +123,33 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+
+  verify-deployment:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: [verify-and-build, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out verification script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+      - name: Byte-verify the deployed release
+        run: npm run verify:deployment
+        env:
+          REPLAY_DEPLOYED_URL: ${{ needs.deploy.outputs.page_url }}
+          REPLAY_DEPLOYED_COMMIT: ${{ github.sha }}
+          REPLAY_DEPLOY_REQUIRE_CLEAN_TREE: "true"
+          REPLAY_EXPECT_PAYLOAD_MANIFEST_SHA256: ${{ needs.verify-and-build.outputs.payload_manifest_sha256 }}

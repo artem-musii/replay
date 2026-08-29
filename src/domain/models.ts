@@ -1,5 +1,5 @@
 export const REPLAY_SCHEMA_VERSION = 2 as const;
-export const REPLAY_SEED_VERSION = 5 as const;
+export const REPLAY_SEED_VERSION = 6 as const;
 
 export type ActorKind = "vehicle";
 
@@ -316,6 +316,18 @@ export interface AgentProposalActorPoseChange {
   actorId: string;
   basePose: ActorPose;
   proposedPose: ActorPose;
+  /** Branch whose trajectory presence and contents were reviewed with this pose. */
+  branchId?: string | undefined;
+  /** Exact reviewed playhead time for this pose. */
+  targetTimeMs?: number | undefined;
+  /** Omitted only when the reviewed branch had no trajectory for this actor. */
+  baseTrajectory?:
+    | {
+        trajectoryId: string;
+        keyframes: ActorKeyframe[];
+        visible: boolean;
+      }
+    | undefined;
 }
 
 export interface AgentProposalTrajectoryChange {
@@ -407,7 +419,7 @@ export interface ReportCitation {
 export interface ReportStatement {
   id: string;
   text: string;
-  certainty: "confirmed" | "reported" | "uncertain" | "hypothesis" | "system";
+  certainty: "confirmed" | "reported" | "uncertain" | "hypothesis" | "attested" | "system";
   citations: ReportCitation;
 }
 
@@ -428,6 +440,18 @@ export interface ReportPreview {
   unresolvedQuestionIds: string[];
   missingRequirements: string[];
   disclaimer: string;
+  /**
+   * Present on previews built by this release. Optional only so older immutable
+   * snapshots remain readable; an unbound preview can never be finalized.
+   */
+  reviewBinding?: ReportPreviewReviewBinding | undefined;
+}
+
+export interface ReportPreviewReviewBinding {
+  algorithm: "SHA-256";
+  fingerprint: string;
+  branchIds: string[];
+  includeHypotheses: boolean;
 }
 
 export interface ReportSnapshot {
@@ -452,6 +476,35 @@ export interface ReportNote {
   reviewedByHuman: boolean;
   createdAt: string;
 }
+
+interface CompletenessAttestationBase {
+  id: string;
+  attestedBy: "human";
+  origin: "ui";
+  attestedAt: string;
+  /** Binds the decision to the exact relevant case state reviewed by the person. */
+  basisFingerprint: string;
+  /** Unsigned imports preserve the record as history, not as fresh local human authority. */
+  humanAttestationTrusted: boolean;
+}
+
+export type CompletenessAttestation =
+  | (CompletenessAttestationBase & {
+      kind: "no-evidence-supplied";
+    })
+  | (CompletenessAttestationBase & {
+      kind: "actor-damage";
+      actorId: string;
+      outcome: "unknown" | "not-assessed";
+    })
+  | (CompletenessAttestationBase & {
+      kind: "uncertainty-review-completed";
+    });
+
+export type CompletenessAttestationInput =
+  | { kind: "no-evidence-supplied" }
+  | { kind: "actor-damage"; actorId: string; outcome: "unknown" | "not-assessed" }
+  | { kind: "uncertainty-review-completed" };
 
 export interface WorkspaceSelection {
   type: WorkspaceItemType;
@@ -482,6 +535,7 @@ export interface ReplayCase {
   proposals: AgentProposal[];
   activity: ActivityEvent[];
   consistencyIssues: ConsistencyIssue[];
+  completenessAttestations: CompletenessAttestation[];
   reportNotes: ReportNote[];
   reportSnapshots: ReportSnapshot[];
   selectedItem?: WorkspaceSelection | undefined;

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { createDemoCase } from "../../src/domain/seed";
+import { validateConsistency } from "../../src/domain/consistency";
 import type { Trajectory } from "../../src/domain/models";
 import {
   analyzeBranchMotion,
+  analyzeImpactAdjacentPaths,
   analyzeTrajectoryMotion,
   analyzeVehicleFootprintRelation,
   createOrientedVehicleFootprint,
@@ -225,7 +227,7 @@ describe("compact branch motion analysis", () => {
     });
     expect(analysis.totals).toMatchObject({
       trajectoryCount: 2,
-      segmentCount: 24,
+      segmentCount: 22,
       impactPairCount: 1,
       overlappingImpactPairCount: 1,
     });
@@ -242,11 +244,186 @@ describe("compact branch motion analysis", () => {
       separationM: 0,
     });
     expect(analysis.impactFootprints[0]?.penetrationDepthM).toBeCloseTo(0, 8);
+    expect(analysis.impactAdjacentPaths).toHaveLength(2);
+    expect(analysis.impactAdjacentPaths.every((item) => item.authoredImpactKeyframe)).toBe(true);
   });
 
   it("rejects an unknown branch", () => {
     expect(() => analyzeBranchMotion(createDemoCase(), "branch-missing")).toThrow(
       /unknown branch/i,
     );
+  });
+});
+
+describe("impact-adjacent authored path analysis", () => {
+  it("makes the roundabout demo's post-contact slowdown and course change inspectable", () => {
+    const replayCase = createDemoCase();
+    const transitions = analyzeImpactAdjacentPaths(replayCase, "event-impact");
+    const vehicleA = transitions.find((transition) => transition.actorId === "actor-vehicle-a");
+    const vehicleB = transitions.find((transition) => transition.actorId === "actor-vehicle-b");
+
+    expect(transitions).toHaveLength(2);
+    expect(vehicleA).toMatchObject({
+      trajectoryId: "trajectory-a-baseline",
+      authoredImpactKeyframe: true,
+    });
+    expect(vehicleB).toMatchObject({
+      trajectoryId: "trajectory-b-baseline",
+      authoredImpactKeyframe: true,
+    });
+    expect(vehicleA?.incoming?.speedMps).toBeCloseTo(6.652, 3);
+    expect(vehicleA?.outgoing?.speedMps).toBeCloseTo(5.04, 3);
+    expect(-(vehicleA?.speedChangeMps ?? 0) * 3.6).toBeGreaterThan(5);
+    expect(vehicleA?.courseChangeDeg).toBeCloseTo(-1.457, 3);
+    expect(vehicleB?.incoming?.speedMps).toBeCloseTo(6.482, 3);
+    expect(vehicleB?.outgoing?.speedMps).toBeCloseTo(5.04, 3);
+    expect(-(vehicleB?.speedChangeMps ?? 0) * 3.6).toBeGreaterThan(5);
+    expect(vehicleB?.courseChangeDeg).toBeCloseTo(-17.081, 3);
+    expect(replayCase.consistencyIssues.filter((issue) => issue.scope === "motion")).toEqual([]);
+  });
+
+  it("distinguishes an interpolated event time from an explicitly authored impact point", () => {
+    const replayCase = createDemoCase();
+    const impact = replayCase.timelineEvents.find((event) => event.id === "event-impact");
+    if (!impact) throw new Error("Expected impact event");
+    impact.timeMs = 9_750;
+
+    const transitions = analyzeImpactAdjacentPaths(replayCase, impact.id);
+
+    expect(transitions.every((transition) => !transition.authoredImpactKeyframe)).toBe(true);
+    expect(transitions.every((transition) => transition.incoming && transition.outgoing)).toBe(
+      true,
+    );
+    const issues = validateConsistency(replayCase, { scope: "motion" });
+    expect(
+      issues.filter((issue) => issue.ruleId === "motion.impact-between-keyframes"),
+    ).toHaveLength(2);
+    expect(
+      issues.find((issue) => issue.ruleId === "motion.impact-between-keyframes")?.explanation,
+    ).toMatch(/does not assume that contact must change motion/i);
+  });
+
+  it("does not invent adjacent legs or a between-keyframes issue outside path coverage", () => {
+    const replayCase = createDemoCase();
+    const impact = replayCase.timelineEvents.find((event) => event.id === "event-impact");
+    if (!impact) throw new Error("Expected impact event");
+    for (const trajectory of replayCase.trajectories) {
+      trajectory.keyframes = trajectory.keyframes.filter((keyframe) => keyframe.timeMs >= 2_000);
+    }
+
+    for (const outsideTimeMs of [1_000, 18_000]) {
+      impact.timeMs = outsideTimeMs;
+      const transitions = analyzeImpactAdjacentPaths(replayCase, impact.id);
+
+      expect(transitions).toHaveLength(2);
+      expect(transitions.every((transition) => transition.trajectoryId !== null)).toBe(true);
+      expect(
+        transitions.every(
+          (transition) =>
+            !transition.authoredImpactKeyframe &&
+            transition.incoming === null &&
+            transition.outgoing === null &&
+            transition.speedChangeMps === null &&
+            transition.courseChangeDeg === null,
+        ),
+      ).toBe(true);
+      expect(
+        validateConsistency(replayCase, { scope: "motion" }).filter(
+          (issue) => issue.ruleId === "motion.impact-between-keyframes",
+        ),
+      ).toEqual([]);
+      expect(
+        validateConsistency(replayCase, { scope: "motion" }).filter(
+          (issue) => issue.ruleId === "motion.impact-path-coverage",
+        ),
+      ).toHaveLength(2);
+    }
+  });
+
+  it("requires genuine timed legs on both sides at trajectory boundaries", () => {
+    const replayCase = createDemoCase();
+    const impact = replayCase.timelineEvents.find((event) => event.id === "event-impact");
+    if (!impact) throw new Error("Expected impact event");
+    const representativePath = replayCase.trajectories[0];
+    const firstTimeMs = representativePath?.keyframes[0]?.timeMs;
+    const lastTimeMs = representativePath?.keyframes.at(-1)?.timeMs;
+    if (firstTimeMs === undefined || lastTimeMs === undefined) {
+      throw new Error("Expected a timed demo trajectory");
+    }
+
+    for (const boundaryTimeMs of [firstTimeMs, lastTimeMs]) {
+      impact.timeMs = boundaryTimeMs;
+      const transitions = analyzeImpactAdjacentPaths(replayCase, impact.id);
+
+      expect(transitions).toHaveLength(2);
+      expect(transitions.every((transition) => transition.authoredImpactKeyframe)).toBe(true);
+      expect(
+        transitions.every(
+          (transition) =>
+            (transition.incoming === null) !== (transition.outgoing === null) &&
+            transition.speedChangeMps === null &&
+            transition.courseChangeDeg === null,
+        ),
+      ).toBe(true);
+      const issues = validateConsistency(replayCase, { scope: "motion" });
+      expect(issues.filter((issue) => issue.ruleId === "motion.impact-path-coverage")).toHaveLength(
+        2,
+      );
+      expect(issues.filter((issue) => issue.ruleId === "motion.impact-between-keyframes")).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("surfaces missing linked-vehicle paths without inferring stationary motion", () => {
+    const replayCase = createDemoCase();
+    const baseline = replayCase.branches.find((branch) => branch.id === replayCase.activeBranchId);
+    if (!baseline) throw new Error("Expected baseline branch");
+    replayCase.trajectories = replayCase.trajectories.filter(
+      (trajectory) => trajectory.actorId !== "actor-vehicle-a",
+    );
+    baseline.trajectoryIds = baseline.trajectoryIds.filter(
+      (trajectoryId) => trajectoryId !== "trajectory-a-baseline",
+    );
+
+    const issues = validateConsistency(replayCase, { scope: "motion" });
+    const missing = issues.filter((issue) => issue.ruleId === "motion.impact-path-missing");
+
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toMatchObject({
+      severity: "question",
+      affectedIds: expect.arrayContaining([
+        "event-impact",
+        "actor-vehicle-a",
+        replayCase.activeBranchId,
+      ]),
+    });
+    expect(missing[0]?.explanation).toMatch(/does not imply stationary motion/i);
+  });
+
+  it("deduplicates imported actor links and asks for two distinct impact vehicles", () => {
+    const replayCase = createDemoCase();
+    const impact = replayCase.timelineEvents.find((event) => event.id === "event-impact");
+    if (!impact) throw new Error("Expected impact event");
+    impact.linkedActorIds = ["actor-vehicle-a", "actor-vehicle-a"];
+
+    const adjacent = analyzeImpactAdjacentPaths(replayCase, impact.id);
+    const branch = analyzeBranchMotion(replayCase, replayCase.activeBranchId);
+    const timelineIssues = validateConsistency(replayCase, { scope: "timeline" });
+
+    expect(adjacent).toHaveLength(1);
+    expect(branch.impactAdjacentPaths).toHaveLength(1);
+    expect(branch.impactFootprints).toHaveLength(0);
+    expect(
+      timelineIssues.filter((issue) => issue.ruleId === "timeline.impact-actors-incomplete"),
+    ).toHaveLength(1);
+  });
+
+  it("rejects missing and non-impact events", () => {
+    const replayCase = createDemoCase();
+    expect(() => analyzeImpactAdjacentPaths(replayCase, "event-missing")).toThrow(
+      /unknown timeline event/i,
+    );
+    expect(() => analyzeImpactAdjacentPaths(replayCase, "event-start-a")).toThrow(/not an impact/i);
   });
 });

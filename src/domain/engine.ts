@@ -6,8 +6,10 @@ import type {
   ReplayMutationCommand,
 } from "./commandSchemas";
 import { ReplayCommandSchema } from "./commandSchemas";
+import { isCompletenessAttestationCurrent } from "./completeness";
 import { validateConsistency } from "./consistency";
 import { validateCaseReferences } from "./importExport";
+import { truncateXmlSafeText } from "./languageSafety";
 import type { ActivityEvent, ConsistencyIssue, ReplayCase } from "./models";
 import { applyReplayMutation, DomainCommandError } from "./reducer";
 import { parseReplayCase } from "./schema";
@@ -19,7 +21,6 @@ type HistoryCommand = UndoCommand | RedoCommand;
 const NON_MATERIAL_ACTIVITY_TYPES = new Set([
   "case.validate",
   "consistency.updated",
-  "workspace.focus",
   "proposal.adjust",
   "proposal.accept",
   "proposal.reject",
@@ -95,6 +96,43 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function restoredHumanAuthority(
+  current: ReplayCase,
+  restored: ReplayCase,
+): Readonly<{
+  claimIds: string[];
+  completenessAttestationIds: string[];
+  reportSnapshotIds: string[];
+}> {
+  const currentClaims = new Map(current.claims.map((claim) => [claim.id, claim] as const));
+  const claimIds = restored.claims.flatMap((claim) => {
+    if (claim.status !== "confirmed" || !claim.humanConfirmed) return [];
+    const currentClaim = currentClaims.get(claim.id);
+    return currentClaim?.status === "confirmed" &&
+      currentClaim.humanConfirmed &&
+      currentClaim.confirmedAt === claim.confirmedAt
+      ? []
+      : [claim.id];
+  });
+  const currentSnapshotIds = new Set(current.reportSnapshots.map((snapshot) => snapshot.id));
+  const reportSnapshotIds = restored.reportSnapshots.flatMap((snapshot) =>
+    currentSnapshotIds.has(snapshot.id) ? [] : [snapshot.id],
+  );
+  const currentAttestations = new Map(
+    current.completenessAttestations.map((attestation) => [attestation.id, attestation] as const),
+  );
+  const completenessAttestationIds = restored.completenessAttestations.flatMap((attestation) => {
+    if (!isCompletenessAttestationCurrent(restored, attestation)) return [];
+    const currentAttestation = currentAttestations.get(attestation.id);
+    if (!currentAttestation) return [attestation.id];
+    return currentAttestation.basisFingerprint === attestation.basisFingerprint &&
+      isCompletenessAttestationCurrent(current, currentAttestation)
+      ? []
+      : [attestation.id];
+  });
+  return { claimIds, completenessAttestationIds, reportSnapshotIds };
+}
+
 export class ReplayEngine {
   private replayCase: ReplayCase;
   private readonly now: () => string;
@@ -139,11 +177,20 @@ export class ReplayEngine {
 
   canRevertAgentAction(targetRequestId: string): boolean {
     const entry = this.undoStack[this.undoStack.length - 1];
+    if (
+      entry?.command.requestId !== targetRequestId ||
+      entry.command.actor !== "agent" ||
+      entry.command.origin !== "webmcp" ||
+      !entry.undoable ||
+      entry.barrier
+    ) {
+      return false;
+    }
+    const restoredAuthority = restoredHumanAuthority(this.replayCase, entry.before);
     return (
-      entry?.command.requestId === targetRequestId &&
-      entry.command.actor === "agent" &&
-      entry.undoable &&
-      !entry.barrier
+      restoredAuthority.claimIds.length === 0 &&
+      restoredAuthority.completenessAttestationIds.length === 0 &&
+      restoredAuthority.reportSnapshotIds.length === 0
     );
   }
 
@@ -267,6 +314,22 @@ export class ReplayEngine {
         `No safely undoable agent action matches request ${targetRequestId}`,
       );
     }
+    const restoredAuthority = restoredHumanAuthority(this.replayCase, entry.before);
+    if (
+      restoredAuthority.claimIds.length > 0 ||
+      restoredAuthority.completenessAttestationIds.length > 0 ||
+      restoredAuthority.reportSnapshotIds.length > 0
+    ) {
+      return this.failure(
+        "UNSAFE_REVERT",
+        "Only a human UI action may restore a prior claim confirmation, completeness record, or finalized report snapshot",
+        {
+          restoredClaimIds: restoredAuthority.claimIds,
+          restoredCompletenessAttestationIds: restoredAuthority.completenessAttestationIds,
+          restoredReportSnapshotIds: restoredAuthority.reportSnapshotIds,
+        },
+      );
+    }
     if (!this.canRevertAgentAction(targetRequestId) || index !== this.undoStack.length - 1) {
       return this.failure(
         "UNSAFE_REVERT",
@@ -347,7 +410,7 @@ export class ReplayEngine {
     intent: RequestIntent,
   ): ReplayCommandResult {
     const before = clone(this.replayCase);
-    const createdAt = this.now();
+    const createdAt = this.nextMutationTimestamp(command);
     try {
       const outcome = applyReplayMutation(before, command, {
         now: createdAt,
@@ -430,20 +493,54 @@ export class ReplayEngine {
     const destination = direction === "undo" ? this.redoStack : this.undoStack;
     const entry = source[source.length - 1];
     if (!entry) return this.failure("HISTORY_EMPTY", `There is nothing to ${direction}`);
-    if (direction === "undo" && (!entry.undoable || entry.barrier)) {
+    const isHumanUi = command.actor === "human" && command.origin === "ui";
+    if (
+      !isHumanUi &&
+      (direction === "redo" || entry.command.actor !== "agent" || entry.command.origin !== "webmcp")
+    ) {
       return this.failure(
-        "HISTORY_BARRIER",
-        "History cannot cross an immutable finalized report snapshot",
-        { commandType: entry.command.type },
+        "UNSAFE_REVERT",
+        direction === "redo"
+          ? "Only a human UI action may redo command history"
+          : "An agent may only undo the latest agent-authored WebMCP action",
+        {
+          direction,
+          targetCommandType: entry.command.type,
+          targetActor: entry.command.actor,
+          targetOrigin: entry.command.origin,
+        },
       );
     }
+    if (direction === "undo" && (!entry.undoable || entry.barrier)) {
+      return this.failure("HISTORY_BARRIER", "History cannot cross an irreversible operation", {
+        commandType: entry.command.type,
+      });
+    }
 
-    const createdAt = this.now();
+    const createdAt = this.nextMutationTimestamp(command);
     const currentActivity = clone(this.replayCase.activity);
     const currentIssues = clone(this.replayCase.consistencyIssues);
     const currentWorkspaceMode = this.replayCase.workspaceMode;
     const currentSelection = clone(this.replayCase.selectedItem);
     const restored = clone(direction === "undo" ? entry.before : entry.after);
+    if (!isHumanUi) {
+      const restoredAuthority = restoredHumanAuthority(this.replayCase, restored);
+      if (
+        restoredAuthority.claimIds.length > 0 ||
+        restoredAuthority.completenessAttestationIds.length > 0 ||
+        restoredAuthority.reportSnapshotIds.length > 0
+      ) {
+        return this.failure(
+          "UNSAFE_REVERT",
+          "Only a human UI action may restore a prior claim confirmation, completeness record, or finalized report snapshot",
+          {
+            restoredClaimIds: restoredAuthority.claimIds,
+            restoredCompletenessAttestationIds: restoredAuthority.completenessAttestationIds,
+            restoredReportSnapshotIds: restoredAuthority.reportSnapshotIds,
+          },
+        );
+      }
+    }
     restored.activity = currentActivity;
     restored.workspaceMode = currentWorkspaceMode;
     if (currentSelection) restored.selectedItem = currentSelection;
@@ -542,6 +639,18 @@ export class ReplayEngine {
     };
   }
 
+  private nextMutationTimestamp(command: ReplayMutationCommand | HistoryCommand): string {
+    const candidate = this.now();
+    const candidateTime = Date.parse(candidate);
+    if (!Number.isFinite(candidateTime)) return candidate;
+    const minimumTimes = [Date.parse(this.replayCase.updatedAt)];
+    if (command.type === "report.finalize") {
+      minimumTimes.push(Date.parse(command.reviewedPreview.generatedAt));
+    }
+    const minimumTime = Math.max(...minimumTimes);
+    return candidateTime < minimumTime ? new Date(minimumTime).toISOString() : candidate;
+  }
+
   private recordReceipt(
     requestId: string | undefined,
     intent: RequestIntent,
@@ -587,7 +696,7 @@ export class ReplayEngine {
             overridesActivityId: overriddenActivity.id,
           }
         : {}),
-      summary: stableSummary.slice(0, 500),
+      summary: truncateXmlSafeText(stableSummary, 500),
       affectedIds: stableAffectedIds,
       ...(command.requestId ? { requestId: command.requestId } : {}),
       ...(command.requestId ? { requestIntentFingerprint: intent.fingerprint } : {}),

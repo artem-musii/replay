@@ -96,6 +96,40 @@ describe("trajectory interpolation", () => {
     expect(samples[4]).toEqual(interpolateTrajectory(turning, 1_000));
   });
 
+  it("keeps the roundabout opening hold stationary before moving each vehicle forward", () => {
+    const replayCase = createDemoCase();
+
+    for (const trajectory of replayCase.trajectories) {
+      const firstFrame = trajectory.keyframes[0];
+      const holdFrame = trajectory.keyframes[1];
+      if (!firstFrame || !holdFrame) throw new Error("Expected two opening path points");
+
+      for (const timeMs of [500, 1_000, 1_500, 2_000, holdFrame.timeMs]) {
+        expect(interpolateTrajectory(trajectory, timeMs)).toMatchObject({
+          x: firstFrame.x,
+          y: firstFrame.y,
+        });
+      }
+
+      const afterHold = interpolateTrajectory(trajectory, holdFrame.timeMs + 100);
+      const headingRadians = (holdFrame.rotationDeg * Math.PI) / 180;
+      const sceneWidth = replayCase.environment.bounds.maxX - replayCase.environment.bounds.minX;
+      const sceneHeight = replayCase.environment.bounds.maxY - replayCase.environment.bounds.minY;
+      const deltaMeters = {
+        x:
+          ((afterHold.x - holdFrame.x) * replayCase.environment.calibration.widthMeters) /
+          sceneWidth,
+        y:
+          ((afterHold.y - holdFrame.y) * replayCase.environment.calibration.heightMeters) /
+          sceneHeight,
+      };
+      const forwardProgressMeters =
+        deltaMeters.x * Math.sin(headingRadians) - deltaMeters.y * Math.cos(headingRadians);
+
+      expect(forwardProgressMeters).toBeGreaterThan(0);
+    }
+  });
+
   it("keeps explicitly linear trajectories on each keyframe chord without curve overshoot", () => {
     const turning: Trajectory = {
       ...trajectory,

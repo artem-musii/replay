@@ -24,6 +24,8 @@ export interface WebMCPToolInstrumentation {
   onCancel?(toolName: WebMCPToolName, reason: unknown): void;
 }
 
+export const WEBMCP_READ_OUTPUT_LIMIT_BYTES = 512 * 1024;
+
 interface ToolMetadata {
   title: string;
   description: string;
@@ -32,120 +34,122 @@ interface ToolMetadata {
 
 const READ_UNTRUSTED = { readOnlyHint: true, untrustedContentHint: true } as const;
 const WRITE_UNTRUSTED = { readOnlyHint: false, untrustedContentHint: true } as const;
+const RESULT_CONTRACT =
+  " Returns versioned {ok:boolean, data?, visibleState} with a machine-readable code on failure.";
 
 const metadata = {
   get_case_summary: {
     title: "Get case summary",
     description:
-      "Reads compact metadata for the open case, separating confirmed, reported, disputed, and hypothetical information and identifying the active branch and unresolved blockers. Use before planning work. It does not mutate state or change the visible workspace. An open case is required.",
+      "Reads compact open-case metadata, certainty counts, the active branch, and unresolved blockers. Use before planning or to refresh caseVersion after a human edit. Read-only: it changes neither case state nor visible workspace.",
     annotations: READ_UNTRUSTED,
   },
   get_workspace_state: {
     title: "Get workspace state",
     description:
-      "Reads only the requested live scene, timeline, claims, evidence, questions, hypotheses, report, or selection sections. Use to inspect geometry, timing, provenance, or the human's latest correction without retrieving the full case. It does not mutate state or change the visible workspace. An open case is required.",
+      "Reads compact live sections without histories, blob addresses, or snapshot bodies. branchId projects scene/timeline but does not activate that branch. Results include coordinateSystem; in-bounds x/y are normalized scene coordinates from 0 to 1 and reusable in mutations. Reports include snapshot previewSummary metadata and the full current visiblePreview with visiblePreviewStatus. Read-only; no UI change.",
     annotations: READ_UNTRUSTED,
   },
   get_recent_activity: {
     title: "Get recent activity",
     description:
-      "Reads a bounded list of recent human, agent, and system activity. Use after an agent action to detect human overrides and subsequent validation. It does not mutate state or change the visible workspace. An open case is required.",
+      "Reads bounded human, agent, system, and session activity. current revertEligible comes from live command history, not stored undoable metadata. Use after human corrections or agent writes; only an eligible canonical id can be reverted. Read-only with no UI change.",
     annotations: READ_UNTRUSTED,
   },
   validate_case_consistency: {
     title: "Validate case consistency",
     description:
-      "Runs deterministic timeline, calibrated geometry, motion-envelope, provenance, integrity, completeness, and report rules for a branch or scope. Results are review advisories with explicit assumptions, not forensic findings or judgments about intent. Use after reconstruction changes or before report review. It does not mutate factual case content or navigate the workspace. An open case is required.",
+      "Runs deterministic timeline, geometry, motion, damage, provenance, integrity, completeness, or report checks for a branch/scope. Results are review advisories with assumptions, not forensic or intent findings. Read-only; use after edits or before report review.",
     annotations: READ_UNTRUSTED,
   },
   focus_workspace_item: {
     title: "Focus workspace item",
     description:
-      "Selects and visibly reveals one existing actor, trajectory, event, claim, evidence item, question, hypothesis, or issue so the human and agent can discuss the same object. Use after identifying a specific item. It changes UI focus only and does not alter factual case content. The item must exist.",
+      "Visibly selects one existing workspace item for shared review. Supply branchId for an inactive-branch trajectory/event; focus does not activate a branch. This is a session-only UI change: no caseVersion or canonical activity change. The invocation remains session-audited.",
     annotations: WRITE_UNTRUSTED,
   },
   revert_agent_action: {
     title: "Revert agent action",
     description:
-      "Reverses one identified agent activity when the canonical command layer still considers it safely undoable. Use to honor a human correction or retract an agent change. It visibly restores the prior case state and appends activity, so it mutates the case. The activity must be agent-authored, undoable, and at the expected case version.",
+      "Reverts the latest safely reversible agent/WebMCP mutation. Pass the canonical activity id—not requestId/session id—from a fresh activity item with current revertEligible=true. This mutates visible case state and appends activity; current caseVersion is required.",
     annotations: WRITE_UNTRUSTED,
   },
   upsert_scene_actor: {
     title: "Add or update scene actor",
     description:
-      "Adds a vehicle actor or updates one existing actor's label, normalized position, rotation, real dimensions in metres, vehicle class, estimated/template source, wheelbase, and optional color. An agent cannot label dimensions as measured or manufacturer-sourced; only the human UI can attest those sources. It mutates canonical case content, updates the canvas and activity feed, and requires a scene plus the current case version; locked actors remain protected.",
+      "Adds a vehicle or updates only the supplied fields of an existing actor. Existing-actor position/rotation edits require expectedPoseTarget copied from the latest scene read and fail if its active branch or playhead moved. Creation needs label, normalized pose, and metre dimensions. It mutates scene/activity; trusted measured specifications and locks remain protected. Current caseVersion is required.",
     annotations: WRITE_UNTRUSTED,
   },
   set_actor_trajectory: {
     title: "Set actor trajectory",
     description:
-      "Sets ordered normalized keyframes for one existing actor in one existing hypothesis branch. Use to make a proposed movement path visible on the scene and timeline. It mutates canonical case content and activity, and requires an unlocked trajectory, valid actor and branch, and the current case version.",
+      "Directly creates or replaces canonical trajectory geometry for one actor/branch using ordered normalized keyframes. This applies immediately; use propose_scene_changes for coordinated human review. It mutates scene, timeline, and activity. Valid unlocked targets and current caseVersion are required.",
     annotations: WRITE_UNTRUSTED,
   },
   propose_scene_changes: {
     title: "Propose coordinated scene changes",
     description:
-      "Creates a visible, reversible preview of coordinated position or trajectory changes for two or more actors without applying them. Use for major multi-object reconstruction changes that need human review. It mutates only the proposal ledger and activity feed; the human must explicitly accept, reject, or adjust the proposal in REPLAY before scene geometry changes. Existing unlocked actors and branches plus the current case version are required.",
+      "Creates a multi-actor preview without applying geometry. actor-pose requires expectedPoseTarget from the latest scene read and fails if branch/playhead moved. Prefer trajectory-keyframe-patch for 1–8 interior edits while preserving path, timing, IDs, and endpoints. Only the proposal ledger changes; a human must adjust, accept, or reject. Current version and unlocked targets are required.",
     annotations: WRITE_UNTRUSTED,
   },
   mark_impact_event: {
     title: "Mark impact event",
     description:
-      "Creates or updates an impact event at a normalized location and timeline position for identified actors in a branch. Use when the current information supports placing a provisional impact. It visibly updates scene, timeline, and activity and mutates case content. Agent-created impacts cannot be confirmed and require the current case version.",
+      "Creates a provisional impact or updates the supplied existing impact on its branch. It mutates scene, timeline, and activity at a normalized location/time. Agent impacts cannot be confirmed; valid actors, branch, and current caseVersion are required.",
     annotations: WRITE_UNTRUSTED,
   },
   mark_vehicle_damage: {
     title: "Mark vehicle damage",
     description:
-      "Adds a sourced, non-confirmed damage observation to a region of an existing vehicle. Use to preserve visible damage separately from movement hypotheses. It mutates the actor, claims, and activity feed and requires valid source IDs, an unlocked actor, and the current case version.",
+      "Adds sourced, non-confirmed damage to an existing vehicle, separate from movement hypotheses. It mutates the damage ledger/activity and adds cited backlinks, but does not create or confirm a claim. At least one active evidence/observation source, an unlocked actor, and current caseVersion are required.",
     annotations: WRITE_UNTRUSTED,
   },
   add_observation: {
     title: "Add observation",
     description:
-      "Adds a sourced observation with explicit uncertainty and shared or branch scope. Use to record a statement without converting agent inference into confirmed fact. It visibly updates facts and activity and mutates case content. Confirmed status is unavailable and the current case version is required.",
+      "Adds an unconfirmed observation with provenance, context, certainty, and branch scope. sourceIds are canonical evidence/observation sources; relatedIds are inspectable context such as actors, paths, events, or damage. External attribution needs compatible provenance; agent reasoning uses agent-inference. It mutates facts/activity but cannot confirm. Current caseVersion is required.",
     annotations: WRITE_UNTRUSTED,
   },
   link_evidence: {
     title: "Link evidence",
     description:
-      "Links one existing evidence asset or annotation to one existing claim, scene item, event, damage marker, hypothesis, or hypothesis assumption. An assumption link records the asset as supporting evidence. Use to make provenance inspectable. It visibly updates both evidence and target plus activity and mutates relationships. All referenced IDs and the current case version are required.",
+      "Links existing evidence or one annotation to a claim, scene item, event, damage, hypothesis, or assumption. It mutates reciprocal relationships/activity and may invalidate an old exact-revision claim confirmation. Existing IDs and current caseVersion are required.",
     annotations: WRITE_UNTRUSTED,
   },
   create_open_question: {
     title: "Create open question",
     description:
-      "Creates a prioritized unresolved question tied to relevant case items. Use when missing information blocks or would materially improve the reconstruction or report. It visibly updates the questions panel and activity and mutates case content. It cannot answer or dismiss a question and requires the current case version.",
+      "Creates a prioritized unresolved question related to observations, actors, paths, events, damage, or hypotheses. Direct evidence links are rejected; relate the item that evidence supports. It mutates questions/activity but cannot answer or dismiss. Current caseVersion is required.",
     annotations: WRITE_UNTRUSTED,
   },
   fork_hypothesis: {
     title: "Fork hypothesis",
     description:
-      "Creates a visible alternative branch from an existing reconstruction with explicit assumptions while preserving shared locked facts. Use when more than one explanation remains plausible. It mutates branches and activity and changes the visible hypothesis workspace. A baseline branch and current case version are required.",
+      "Forks an alternative branch with explicit assumptions while preserving shared locked facts. Assumption relatedIds accept active supporting evidence only. It mutates branches/activity and opens hypothesis review. A valid source branch and current caseVersion are required.",
     annotations: WRITE_UNTRUSTED,
   },
   update_hypothesis_assumption: {
     title: "Update hypothesis assumption",
     description:
-      "Adds, edits, or removes one explicit assumption in an existing hypothesis branch. Use to refine an alternative without changing shared confirmed facts. It visibly updates branch comparison and activity and mutates case content. The branch, operation-specific fields, and current case version are required.",
+      "Adds, edits, or withdraws one assumption in an active hypothesis. relatedIds accept active supporting evidence only. It mutates the branch/activity without changing shared confirmed facts. Operation-specific fields and current caseVersion are required.",
     annotations: WRITE_UNTRUSTED,
   },
   compare_hypotheses: {
     title: "Compare hypotheses",
     description:
-      "Compares deterministic differences across two or more branches, including assumptions, geometry, timing, evidence relationships, issue counts, and unresolved questions, and visibly opens the comparison. Use before asking the human to choose or refine an explanation. It changes UI comparison state but does not alter factual case content. Existing distinct branches are required.",
+      "Returns assumptions, evidence, issues, questions, and bounded trajectory and event deltas across distinct branches, then opens comparison. It is a session UI change only: it does not activate a branch, mutate facts, or increment caseVersion. Use before human review of alternatives.",
     annotations: WRITE_UNTRUSTED,
   },
   build_report_preview: {
     title: "Build report preview",
     description:
-      "Builds a neutral evidence-bound preview from current structured state, identifies missing requirements, and visibly opens report review. Use only when the case is ready for meaningful review. It updates preview and UI state but never finalizes or marks facts confirmed. The current case version is required.",
+      "Builds and opens a neutral evidence-bound preview. add_report_note becomes available in the next Site Tools inventory. Results keep preview requirement completeness separate from finalized and share-ready status. This UI projection never confirms, shares, or finalizes; a human must review and finalize. Current caseVersion is required.",
     annotations: WRITE_UNTRUSTED,
   },
   add_report_note: {
     title: "Add supported report note",
     description:
-      "Proposes neutral report wording supported by explicit existing claim or evidence IDs. Use to add evidence-bound context for human review. It visibly adds an agent-authored, human-unreviewed note and activity, so it mutates case content. References must exist and the current case version is required.",
+      "Adds neutral agent-authored wording supported by existing claim/evidence IDs. The note stays human-unreviewed and mutates case/activity. That mutation invalidates the open preview, so this tool leaves the next inventory; build a fresh preview before another note or final review. Current caseVersion is required.",
     annotations: WRITE_UNTRUSTED,
   },
 } as const satisfies Record<WebMCPToolName, ToolMetadata>;
@@ -188,22 +192,61 @@ function visibleState(adapter: ReplayWebMCPAdapter): ReplayVisibleState {
 function readResult(
   adapter: ReplayWebMCPAdapter,
   message: string,
+  caseVersion: number,
   data: unknown,
   issues: readonly Readonly<Record<string, unknown>>[] = [],
 ): WebMCPResult {
-  return {
+  const result: WebMCPResult = {
     ok: true,
     message,
-    caseVersion: adapter.getLifecycle().caseVersion,
+    caseVersion,
     affectedIds: [],
     issues: [...issues],
     visibleState: visibleState(adapter),
     data,
   };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(result);
+  } catch {
+    throw new ReplayWebMCPContractError(
+      "OUTPUT_BUDGET_EXCEEDED",
+      "The Site Tools read result could not be serialized safely. Request a narrower read.",
+    );
+  }
+  const outputBytes = new TextEncoder().encode(serialized).byteLength;
+  if (outputBytes > WEBMCP_READ_OUTPUT_LIMIT_BYTES) {
+    throw new ReplayWebMCPContractError(
+      "OUTPUT_BUDGET_EXCEEDED",
+      `The Site Tools read result is ${String(outputBytes)} bytes, above the ${String(WEBMCP_READ_OUTPUT_LIMIT_BYTES)}-byte safety budget. Request fewer workspace sections or a narrower targeted read.`,
+    );
+  }
+  return result;
+}
+
+const STABLE_READ_ATTEMPTS = 2;
+
+async function readStableCaseSnapshot<T>(
+  adapter: ReplayWebMCPAdapter,
+  context: ReplayInvocationContext,
+  read: () => T | Promise<T>,
+): Promise<Readonly<{ caseVersion: number; data: T }>> {
+  for (let attempt = 0; attempt < STABLE_READ_ATTEMPTS; attempt += 1) {
+    const caseVersion = adapter.getLifecycle().caseVersion;
+    const data = await read();
+    throwIfAborted(context.signal);
+    if (adapter.getLifecycle().caseVersion === caseVersion) {
+      return { caseVersion, data };
+    }
+  }
+  throw new ReplayWebMCPContractError(
+    "VERSION_CONFLICT",
+    "The case changed while the read snapshot was being assembled. Retry the read against the current caseVersion.",
+  );
 }
 
 function adapterResult(adapter: ReplayWebMCPAdapter, result: ReplayAdapterResult): WebMCPResult {
-  return {
+  const complete: WebMCPResult = {
     ok: result.ok,
     message: result.message,
     caseVersion: result.caseVersion,
@@ -214,6 +257,30 @@ function adapterResult(adapter: ReplayWebMCPAdapter, result: ReplayAdapterResult
     visibleState: visibleState(adapter),
     ...(result.code === undefined ? {} : { code: result.code }),
     ...(result.data === undefined ? {} : { data: result.data }),
+  };
+  try {
+    if (
+      new TextEncoder().encode(JSON.stringify(complete)).byteLength <=
+      WEBMCP_READ_OUTPUT_LIMIT_BYTES
+    ) {
+      return complete;
+    }
+  } catch {
+    // Preserve the canonical outcome and replace only non-contract-safe detail.
+  }
+  return {
+    ...complete,
+    message: `${complete.message} Response details were truncated to stay within the Site Tools output safety budget.`,
+    affectedIds: complete.affectedIds.slice(0, 50),
+    issues: [],
+    data: {
+      resultTruncated: true,
+      totalAffectedIds: complete.affectedIds.length,
+      totalIssues: complete.issues.length,
+      originalDataOmitted: complete.data !== undefined,
+      nextAction:
+        "Use get_workspace_state with targeted sections or validate_case_consistency for current detail.",
+    },
   };
 }
 
@@ -292,7 +359,7 @@ function defineTool<TSchema extends z.ZodType>(
   return {
     name,
     title: toolMetadata.title,
-    description: toolMetadata.description,
+    description: `${toolMetadata.description}${RESULT_CONTRACT}`,
     inputSchema: toJSONSchema(schema),
     annotations: toolMetadata.annotations,
     validationSchema: schema,
@@ -397,9 +464,15 @@ export function createReplayWebMCPTools(
       "base",
       webMCPInputSchemas.get_case_summary,
       async (_, context) => {
-        const data = await adapter.getCaseSummary(context);
-        throwIfAborted(context.signal);
-        return readResult(adapter, "Returned the compact live case summary.", data);
+        const snapshot = await readStableCaseSnapshot(adapter, context, () =>
+          adapter.getCaseSummary(context),
+        );
+        return readResult(
+          adapter,
+          "Returned the compact live case summary.",
+          snapshot.caseVersion,
+          snapshot.data,
+        );
       },
     ),
 
@@ -411,12 +484,18 @@ export function createReplayWebMCPTools(
       webMCPInputSchemas.get_workspace_state,
       async (input, context) => {
         const sections = [...new Set(input.sections)] as WorkspaceSection[];
-        const data = await adapter.getWorkspaceState(sections, context);
-        throwIfAborted(context.signal);
+        const snapshot = await readStableCaseSnapshot(adapter, context, () =>
+          adapter.getWorkspaceState(
+            sections,
+            context,
+            input.branchId === undefined ? undefined : { branchId: input.branchId },
+          ),
+        );
         return readResult(
           adapter,
           `Returned ${String(sections.length)} requested workspace section${sections.length === 1 ? "" : "s"}.`,
-          data,
+          snapshot.caseVersion,
+          snapshot.data,
         );
       },
     ),
@@ -428,12 +507,15 @@ export function createReplayWebMCPTools(
       "base",
       webMCPInputSchemas.get_recent_activity,
       async (input, context) => {
-        const data = await adapter.getRecentActivity(
-          { limit: input.limit, author: input.author },
-          context,
+        const snapshot = await readStableCaseSnapshot(adapter, context, () =>
+          adapter.getRecentActivity({ limit: input.limit, author: input.author }, context),
         );
-        throwIfAborted(context.signal);
-        return readResult(adapter, "Returned bounded recent case activity.", data);
+        return readResult(
+          adapter,
+          "Returned bounded recent case activity.",
+          snapshot.caseVersion,
+          snapshot.data,
+        );
       },
     ),
 
@@ -444,17 +526,20 @@ export function createReplayWebMCPTools(
       "base",
       webMCPInputSchemas.validate_case_consistency,
       async (input, context) => {
-        const issues = await adapter.validateConsistency(
-          {
-            ...(input.branchId === undefined ? {} : { branchId: input.branchId }),
-            scope: input.scope,
-          },
-          context,
+        const snapshot = await readStableCaseSnapshot(adapter, context, () =>
+          adapter.validateConsistency(
+            {
+              ...(input.branchId === undefined ? {} : { branchId: input.branchId }),
+              scope: input.scope,
+            },
+            context,
+          ),
         );
-        throwIfAborted(context.signal);
+        const issues = snapshot.data;
         return readResult(
           adapter,
           `Consistency validation found ${String(issues.length)} deterministic issue${issues.length === 1 ? "" : "s"}.`,
+          snapshot.caseVersion,
           { branchId: input.branchId, scope: input.scope, issueCount: issues.length },
           issues,
         );
@@ -472,7 +557,7 @@ export function createReplayWebMCPTools(
           {
             itemType: input.itemType,
             itemId: input.itemId,
-            ...(input.workspaceMode === undefined ? {} : { workspaceMode: input.workspaceMode }),
+            ...(input.branchId === undefined ? {} : { branchId: input.branchId }),
           },
           context,
         );
@@ -583,13 +668,18 @@ export function createReplayWebMCPTools(
       webMCPInputSchemas.compare_hypotheses,
       async (input, context) => {
         const branchIds = [...new Set(input.branchIds)];
-        const data = await adapter.compareHypotheses({ branchIds }, context);
-        throwIfAborted(context.signal);
-        return readResult(
+        const snapshot = await readStableCaseSnapshot(adapter, context, () =>
+          adapter.compareHypotheses({ branchIds }, context),
+        );
+        const result = readResult(
           adapter,
           `Compared ${String(branchIds.length)} hypotheses and opened the visible comparison.`,
-          data,
+          snapshot.caseVersion,
+          snapshot.data,
         );
+        throwIfAborted(context.signal);
+        await adapter.revealHypothesisComparison?.(branchIds, context);
+        return result;
       },
     ),
 
@@ -617,7 +707,19 @@ export function createReplayWebMCPTools(
       "add_report_note",
       "report",
       webMCPInputSchemas.add_report_note,
-      (input, context) => executeMutation(adapter, "add_report_note", input, context),
+      async (input, context) => {
+        throwIfAborted(context.signal);
+        const result = await adapter.execute(mutationCommand("add_report_note", input), context);
+        return adapterResult(
+          adapter,
+          result.ok
+            ? {
+                ...result,
+                message: `${result.message} The prior report preview is now invalid and closed; add_report_note leaves the next Site Tools inventory. Build a fresh preview before another note or final review.`,
+              }
+            : result,
+        );
+      },
     ),
   ];
 }

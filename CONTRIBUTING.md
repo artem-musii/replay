@@ -31,10 +31,15 @@ npm run format:check
 npm run lint
 npm run typecheck
 npm test -- --run
+npx playwright install chromium firefox webkit
 npm run test:e2e
-npm run build
-npm audit
+npm audit --audit-level=moderate
+npm audit --omit=dev --audit-level=moderate
+VITE_BASE_PATH=/replay-sol/ npm run build
+REPLAY_EXPECT_BASE_PATH=/replay-sol/ npm run verify:artifact:clean
 ```
+
+The clean verifier fails unless the source tree is clean and records that state in `dist/release-evidence.json`. Use `npm run verify:artifact` only for deliberately dirty local diagnostics.
 
 Changes to WebMCP tools must update the fixed schema, description, annotations, lifecycle tests, [tool contract](docs/webmcp-tools.md), and relevant [eval specification](evals/webmcp-evals.json). UI changes should include desktop and mobile coverage where the behavior differs. Accessibility fixes should state both the automated and manual checks performed.
 

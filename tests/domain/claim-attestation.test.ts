@@ -127,6 +127,100 @@ describe("confirmed claim attestations", () => {
     expectInvalidated(added, "claim-road-wet", "agent");
   });
 
+  it("invalidates confirmation when a linked evidence annotation changes", () => {
+    const engine = createEngine();
+    const annotation = {
+      id: "annotation-road-surface",
+      kind: "point" as const,
+      x: 0.4,
+      y: 0.6,
+      label: "Wet road marking",
+    };
+    expect(
+      engine.execute({
+        type: "evidence.update",
+        actor: "human",
+        origin: "ui",
+        expectedVersion: 1,
+        evidenceId: "evidence-road",
+        annotations: [annotation],
+      }),
+    ).toMatchObject({ ok: true, caseVersion: 2 });
+    expect(
+      engine.execute({
+        type: "evidence.link",
+        actor: "human",
+        origin: "ui",
+        expectedVersion: 2,
+        evidenceId: "evidence-road",
+        annotationId: annotation.id,
+        targetType: "claim",
+        targetId: "claim-road-wet",
+      }),
+    ).toMatchObject({ ok: true, caseVersion: 3 });
+    expect(
+      engine.execute({
+        type: "claim.confirm",
+        actor: "human",
+        origin: "ui",
+        expectedVersion: 3,
+        claimId: "claim-road-wet",
+      }),
+    ).toMatchObject({ ok: true, caseVersion: 4 });
+
+    expect(
+      engine.execute({
+        type: "evidence.update",
+        actor: "agent",
+        origin: "webmcp",
+        requestId: "agent-change-linked-annotation",
+        expectedVersion: 4,
+        evidenceId: "evidence-road",
+        annotations: [{ ...annotation, x: 0.5 }],
+      }),
+    ).toMatchObject({
+      ok: true,
+      caseVersion: 5,
+      affectedIds: expect.arrayContaining(["claim-road-wet"]),
+    });
+    expectInvalidated(engine, "claim-road-wet", "agent");
+  });
+
+  it("preserves confirmation when linked evidence annotations are semantically unchanged", () => {
+    const replayCase = createDemoCase();
+    const asset = replayCase.evidence.find((candidate) => candidate.id === "evidence-road");
+    if (!asset) throw new Error("Expected seeded road evidence");
+    const annotation = {
+      id: "annotation-road-surface",
+      kind: "point" as const,
+      x: 0.4,
+      y: 0.6,
+      label: "Wet road marking",
+    };
+    asset.annotations = [annotation];
+    asset.annotationLinks = [
+      { annotationId: annotation.id, targetType: "claim", targetId: "claim-road-wet" },
+    ];
+    const engine = createEngine(replayCase);
+    const before = engine.state.claims.find((claim) => claim.id === "claim-road-wet");
+
+    expect(
+      engine.execute({
+        type: "evidence.update",
+        actor: "human",
+        origin: "ui",
+        expectedVersion: 1,
+        evidenceId: asset.id,
+        annotations: [structuredClone(annotation)],
+      }),
+    ).toMatchObject({ ok: true, caseVersion: 2 });
+    expect(engine.state.claims.find((claim) => claim.id === "claim-road-wet")).toMatchObject({
+      status: "confirmed",
+      humanConfirmed: true,
+      confirmedAt: before?.confirmedAt,
+    });
+  });
+
   it("invalidates when linked or source evidence is deleted, including a source-only claim", () => {
     const linked = createEngine();
     expect(

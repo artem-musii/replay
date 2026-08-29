@@ -84,7 +84,12 @@ function trajectory(
     visible: true,
     locked: false,
     createdBy: "human",
-    changeHistory: [initialChange(id, "Created the initial incomplete demo trajectory.")],
+    changeHistory: [
+      initialChange(
+        id,
+        "Created the synthetic timed path, including explicitly authored post-contact poses.",
+      ),
+    ],
   };
 }
 
@@ -196,7 +201,7 @@ function buildDemoCase(): ReplayCase {
         subjectId: "actor-vehicle-a",
         sourceIds: ["evidence-damage-a"],
         linkedEvidenceIds: ["evidence-damage-a"],
-        linkedSceneObjectIds: ["actor-vehicle-a"],
+        linkedSceneObjectIds: ["actor-vehicle-a", "damage-a-front-left"],
       },
     ),
     claim(
@@ -208,7 +213,7 @@ function buildDemoCase(): ReplayCase {
         subjectId: "actor-vehicle-b",
         sourceIds: ["evidence-damage-b"],
         linkedEvidenceIds: ["evidence-damage-b"],
-        linkedSceneObjectIds: ["actor-vehicle-b"],
+        linkedSceneObjectIds: ["actor-vehicle-b", "damage-b-rear-right"],
       },
     ),
     claim(
@@ -216,12 +221,14 @@ function buildDemoCase(): ReplayCase {
       "The exact lane positions immediately before contact are unknown.",
       "unknown",
       "human-statement",
+      { linkedEventIds: ["event-maneuver"] },
     ),
     claim(
       "claim-lane-change",
       "It is unknown which vehicle, if either, crossed the lane boundary.",
       "unknown",
       "human-statement",
+      { linkedEventIds: ["event-maneuver"] },
     ),
     claim(
       "claim-indicator",
@@ -238,38 +245,46 @@ function buildDemoCase(): ReplayCase {
         linkedEventIds: ["event-impact"],
       },
     ),
+    claim(
+      "claim-post-impact-path-authorship",
+      "The baseline’s post-contact positions are illustrative authored path points, not output of a collision simulation.",
+      "reported",
+      "scene-observation",
+      {
+        linkedEventIds: ["event-post-impact-path"],
+        linkedSceneObjectIds: ["trajectory-a-baseline", "trajectory-b-baseline"],
+      },
+    ),
   ];
 
   const trajectories: Trajectory[] = [
     trajectory("trajectory-a-baseline", "actor-vehicle-a", [
       [0, 28, 50, 146.00796028785578],
-      [2_000, 34.1915717149675, 61.82416172947324, 138.5455349382937],
-      [4_000, 40.00511514490247, 68.89877090270534, 118.9956574127815],
-      [6_000, 46.422872717353705, 71.26129921120089, 90.1080088186585],
+      [2_300, 28, 50, 146.00796028785578],
+      [4_230, 34.637540830085776, 62.36686984386488, 137.04582281163624],
+      [6_090, 43.753939562087275, 70.27880181057206, 102.12142662700568],
       [8_000, 54.427086859869966, 68.94921834646428, 70.41888662772948],
       [9_000, 59.33106590351146, 66.05190937772906, 65.20410275462541],
-      [9_500, 62.06223980118462, 64.1699869923989, 63.39802436508319],
+      [9_500, 62.07803632150917, 64.2704765546731, 63.39802436508319],
       [10_000, 65, 62, 62],
-      [10_500, 67.9363643933261, 59.91801351965969, 65.30564296349309],
-      [11_000, 70.66134610467125, 58.26783685526854, 68.84573055389671],
-      [12_000, 75.5265230139792, 56.071720063632625, 76.39730188591892],
-      [14_000, 83.2632615069896, 54.75808225403853, 89.84205062252306],
-      [16_000, 89, 55, 90],
+      [10_500, 67.18238401753678, 60.2, 58],
+      [11_100, 69.80367055926155, 57.57793629096665, 52],
+      [11_700, 72.25501277724227, 54.639478646685326, 48],
+      [12_200, 74.0934904083273, 52.01308203084958, 42],
     ]),
     trajectory("trajectory-b-baseline", "actor-vehicle-b", [
       [0, 33.43140001707971, 55.10600264084333, 140.3233742900752],
-      [2_000, 39.438801998231774, 65.44876825685739, 130.803538376981],
-      [4_000, 45.27895234888766, 69.71453185441243, 100.60740924050492],
-      [6_000, 50.96907839876261, 68.5349659248217, 73.58587785390364],
+      [2_300, 33.43140001707971, 55.10600264084333, 140.3233742900752],
+      [4_230, 39.73542792751711, 65.66542981782118, 129.26985271340536],
+      [6_090, 48.757309424047065, 68.99346672143544, 84.08922773514229],
       [8_000, 57.89650625770585, 64.40689101843749, 65.73031240006605],
       [9_000, 62.45868601507999, 61.13632442484663, 62.75746138310603],
-      [9_500, 65.0705756608028, 59.13105618437583, 61.27196616465932],
+      [9_500, 65.05477914047825, 59.030566622101624, 61.27196616465932],
       [10_000, 67.91837531271479, 56.86283339943973, 62],
-      [10_500, 71.06615461423446, 55.01629469650408, 69.57254352241915],
-      [11_000, 74.02547748321842, 53.613485388065506, 75.61518197627868],
-      [12_000, 79.41645327660102, 51.959747145115685, 84.6710804104884],
-      [14_000, 88.2935199281569, 51.71524470403451, 88.617378060465],
-      [16_000, 95, 51.42142857142857, 88.24299849529098],
+      [10_500, 69.70028440130488, 54.31724898716816, 45],
+      [11_100, 71.69292599133315, 50.924766453355545, 35],
+      [11_700, 73.4710129440214, 47.29709311436144, 35],
+      [12_200, 74.7710129440214, 44.08042732887638, 25],
     ]),
   ];
 
@@ -314,10 +329,21 @@ function buildDemoCase(): ReplayCase {
         location: { x: 66.47553294047583, y: 59.40686638956397 },
       },
     ),
-    event("event-stop-a", 16_000, "actor-stop", "Vehicle A final position", ["actor-vehicle-a"], {
+    event(
+      "event-post-impact-path",
+      10_500,
+      "maneuver",
+      "Illustrative post-contact path change",
+      ["actor-vehicle-a", "actor-vehicle-b"],
+      {
+        certainty: "uncertain",
+        linkedClaimIds: ["claim-post-impact-path-authorship"],
+      },
+    ),
+    event("event-stop-a", 12_200, "actor-stop", "Vehicle A final position", ["actor-vehicle-a"], {
       linkedEvidenceIds: ["evidence-overview"],
     }),
-    event("event-stop-b", 16_000, "actor-stop", "Vehicle B final position", ["actor-vehicle-b"], {
+    event("event-stop-b", 12_200, "actor-stop", "Vehicle B final position", ["actor-vehicle-b"], {
       linkedEvidenceIds: ["evidence-overview"],
     }),
     event(
@@ -362,14 +388,22 @@ function buildDemoCase(): ReplayCase {
       "Vehicle A front-left damage — synthetic demo.webp",
       "f8e2a6110ac39c65133b7b25542472ef3ea8a5dd5c2eb0c331305defa3f551e6",
       ["vehicle-a", "damage", "synthetic-demo"],
-      { linkedClaimIds: ["claim-damage-a"], linkedSceneObjectIds: ["actor-vehicle-a"] },
+      {
+        linkedClaimIds: ["claim-damage-a"],
+        linkedEventIds: ["event-evidence"],
+        linkedSceneObjectIds: ["actor-vehicle-a", "damage-a-front-left"],
+      },
     ),
     evidence(
       "evidence-damage-b",
       "Vehicle B rear-right damage — synthetic demo.webp",
       "382f6f38420934d265529ef1b3588dc852580274cc07b7d4c514d056ad6c8326",
       ["vehicle-b", "damage", "synthetic-demo"],
-      { linkedClaimIds: ["claim-damage-b"], linkedSceneObjectIds: ["actor-vehicle-b"] },
+      {
+        linkedClaimIds: ["claim-damage-b"],
+        linkedEventIds: ["event-evidence"],
+        linkedSceneObjectIds: ["actor-vehicle-b", "damage-b-rear-right"],
+      },
     ),
     evidence(
       "evidence-road",
@@ -423,7 +457,7 @@ function buildDemoCase(): ReplayCase {
         dimensionsSource: "manufacturer",
         wheelbaseMeters: 2.6,
         colorToken: "vehicle-muted-blue",
-        pose: { x: 89, y: 55, rotationDeg: 90 },
+        pose: { x: 74.0934904083273, y: 52.01308203084958, rotationDeg: 42 },
         lastEditedBy: "human",
         lastEditedAt: CREATED_AT,
         locked: false,
@@ -449,7 +483,7 @@ function buildDemoCase(): ReplayCase {
         dimensionsSource: "manufacturer",
         wheelbaseMeters: 2.58,
         colorToken: "vehicle-silver",
-        pose: { x: 95, y: 51.42142857142857, rotationDeg: 88.24299849529098 },
+        pose: { x: 74.7710129440214, y: 44.08042732887638, rotationDeg: 25 },
         lastEditedBy: "human",
         lastEditedAt: CREATED_AT,
         locked: false,
@@ -553,6 +587,7 @@ function buildDemoCase(): ReplayCase {
       },
     ],
     consistencyIssues: [],
+    completenessAttestations: [],
     reportNotes: [],
     reportSnapshots: [],
     workspaceMode: "scene",

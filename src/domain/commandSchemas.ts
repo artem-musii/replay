@@ -8,14 +8,22 @@ import {
   ClaimStatusSchema,
   EnvironmentStateSchema,
   EvidenceAnnotationSchema,
+  PointSchema,
+  RotationDegreesSchema,
+  SceneCoordinateSchema,
   SceneActorSchema,
+  TimelineMillisecondsSchema,
+  TimeRangeSchema,
+  XmlSafeIdSchema,
+  XmlSafeLongTextSchema,
+  XmlSafeShortTextSchema,
+  xmlSafeString,
 } from "./schema";
 import type { ConsistencyIssue } from "./models";
 
-const id = z.string().trim().min(1).max(128);
-const shortText = z.string().trim().min(1).max(500);
-const longText = z.string().trim().min(1).max(10_000);
-const finite = z.number();
+const id = XmlSafeIdSchema;
+const shortText = XmlSafeShortTextSchema;
+const longText = XmlSafeLongTextSchema;
 const meta = {
   actor: ActionAuthorSchema,
   origin: ActionOriginSchema,
@@ -31,10 +39,17 @@ const createCommandSchema = <TType extends string, TShape extends z.ZodRawShape>
 const KeyframeInputSchema = z
   .object({
     id: id.optional(),
-    timeMs: finite.nonnegative(),
-    x: finite,
-    y: finite,
-    rotationDeg: finite,
+    timeMs: TimelineMillisecondsSchema,
+    x: SceneCoordinateSchema,
+    y: SceneCoordinateSchema,
+    rotationDeg: RotationDegreesSchema,
+  })
+  .strict();
+
+const PoseAtTimeSchema = z
+  .object({
+    branchId: id,
+    timeMs: TimelineMillisecondsSchema,
   })
   .strict();
 
@@ -48,19 +63,18 @@ export const CaseUpdateCommandSchema = createCommandSchema("case.update", {
     .optional(),
   sceneTemplateId: id.optional(),
   environment: EnvironmentStateSchema.optional(),
-  timeRangeMs: z
-    .object({ start: finite.nonnegative(), end: finite.positive() })
-    .strict()
-    .optional(),
+  timeRangeMs: TimeRangeSchema.optional(),
 });
 
 export const ActorUpsertCommandSchema = createCommandSchema("actor.upsert", {
   sceneActor: SceneActorSchema,
+  poseAt: PoseAtTimeSchema.optional(),
 });
 
 export const ActorUpdatePoseCommandSchema = createCommandSchema("actor.update-pose", {
   actorId: id,
   pose: ActorPoseSchema,
+  poseAt: PoseAtTimeSchema.optional(),
 });
 
 export const TrajectorySetCommandSchema = createCommandSchema("trajectory.set", {
@@ -71,42 +85,60 @@ export const TrajectorySetCommandSchema = createCommandSchema("trajectory.set", 
   visible: z.boolean().optional(),
 });
 
-const ProposalChangeInputSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("actor-pose"),
-      actorId: id,
-      proposedPose: ActorPoseSchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("trajectory-set"),
-      trajectoryId: id.optional(),
-      actorId: id,
-      branchId: id,
-      keyframes: z.array(KeyframeInputSchema).min(1).max(2_000),
-      visible: z.boolean().optional(),
-    })
-    .strict(),
-]);
+const ProposalChangeInputSchema = z
+  .discriminatedUnion("kind", [
+    z
+      .object({
+        kind: z.literal("actor-pose"),
+        actorId: id,
+        branchId: id.optional(),
+        targetTimeMs: TimelineMillisecondsSchema.optional(),
+        proposedPose: ActorPoseSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("trajectory-set"),
+        trajectoryId: id.optional(),
+        actorId: id,
+        branchId: id,
+        keyframes: z.array(KeyframeInputSchema).min(1).max(2_000),
+        visible: z.boolean().optional(),
+      })
+      .strict(),
+  ])
+  .superRefine((change, context) => {
+    if (
+      change.kind === "actor-pose" &&
+      (change.branchId === undefined) !== (change.targetTimeMs === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "An actor pose proposal binding requires both branchId and targetTimeMs",
+        path: change.branchId === undefined ? ["branchId"] : ["targetTimeMs"],
+      });
+    }
+  });
 
 export const ProposalCreateCommandSchema = createCommandSchema("proposal.create", {
   proposalId: id.optional(),
   title: shortText,
   rationale: longText,
   revisionSummary: shortText.optional(),
+  poseAt: PoseAtTimeSchema,
   changes: z.array(ProposalChangeInputSchema).min(1).max(25),
 });
 
 export const ProposalAdjustCommandSchema = createCommandSchema("proposal.adjust", {
   proposalId: id,
   summary: shortText,
+  poseAt: PoseAtTimeSchema,
   changes: z.array(ProposalChangeInputSchema).min(1).max(25),
 });
 
 export const ProposalAcceptCommandSchema = createCommandSchema("proposal.accept", {
   proposalId: id,
+  poseAt: PoseAtTimeSchema,
   note: longText.optional(),
 });
 
@@ -118,14 +150,14 @@ export const ProposalRejectCommandSchema = createCommandSchema("proposal.reject"
 export const TimelineUpsertCommandSchema = createCommandSchema("timeline.upsert", {
   eventId: id.optional(),
   branchId: id,
-  timeMs: finite.nonnegative(),
+  timeMs: TimelineMillisecondsSchema,
   eventType: z.enum(["actor-start", "maneuver", "impact", "observation", "evidence", "actor-stop"]),
   title: shortText,
   certainty: ClaimStatusSchema,
   linkedActorIds: z.array(id).max(500),
   linkedClaimIds: z.array(id).max(500).optional(),
   linkedEvidenceIds: z.array(id).max(500).optional(),
-  location: z.object({ x: finite, y: finite }).strict().optional(),
+  location: PointSchema.optional(),
 });
 
 export const DamageMarkCommandSchema = createCommandSchema("damage.mark", {
@@ -183,37 +215,58 @@ export const LockSetCommandSchema = createCommandSchema("lock.set", {
   targetType: z.enum(["actor", "trajectory", "timeline-event", "claim"]),
   targetId: id,
   locked: z.boolean(),
-  reason: z.string().trim().max(1_000).optional(),
+  reason: xmlSafeString(z.string().trim().max(1_000)).optional(),
 });
 
 export const EvidenceAddCommandSchema = createCommandSchema("evidence.add", {
   evidenceId: id.optional(),
-  name: z.string().trim().min(1).max(255),
+  name: xmlSafeString(z.string().trim().min(1).max(255)),
   mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
   sizeBytes: z
     .number()
     .int()
     .positive()
     .max(20 * 1024 * 1024),
-  localBlobKey: z.string().trim().min(1).max(500),
-  checksum: z.string().trim().min(8).max(256),
+  localBlobKey: xmlSafeString(z.string().trim().min(1).max(500)),
+  checksum: xmlSafeString(z.string().trim().min(8).max(256)),
   syntheticDemoAsset: z.boolean().optional(),
   source: z.enum(["demo", "local-upload", "import"]),
   capturedAt: z.iso.datetime({ offset: true }).optional(),
-  notes: z.string().max(10_000).optional(),
-  tags: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  notes: xmlSafeString(z.string().max(10_000)).optional(),
+  tags: z
+    .array(xmlSafeString(z.string().trim().min(1).max(100)))
+    .max(100)
+    .optional(),
   annotations: z.array(EvidenceAnnotationSchema).max(1_000).optional(),
 });
 
 export const EvidenceUpdateCommandSchema = createCommandSchema("evidence.update", {
   evidenceId: id,
   capturedAt: z.iso.datetime({ offset: true }).nullable().optional(),
-  notes: z.string().max(10_000).nullable().optional(),
-  tags: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  notes: xmlSafeString(z.string().max(10_000)).nullable().optional(),
+  tags: z
+    .array(xmlSafeString(z.string().trim().min(1).max(100)))
+    .max(100)
+    .optional(),
   annotations: z.array(EvidenceAnnotationSchema).max(1_000).optional(),
 });
 
 export const EvidenceLinkCommandSchema = createCommandSchema("evidence.link", {
+  evidenceId: id,
+  annotationId: id.optional(),
+  targetType: z.enum([
+    "claim",
+    "timeline-event",
+    "actor",
+    "trajectory",
+    "damage",
+    "hypothesis",
+    "assumption",
+  ]),
+  targetId: id,
+});
+
+export const EvidenceUnlinkCommandSchema = createCommandSchema("evidence.unlink", {
   evidenceId: id,
   annotationId: id.optional(),
   targetType: z.enum([
@@ -258,7 +311,7 @@ export const QuestionAddCommandSchema = createCommandSchema("question.add", {
 export const QuestionUpdateCommandSchema = createCommandSchema("question.update", {
   questionId: id,
   status: z.enum(["open", "answered", "deferred", "dismissed"]),
-  answer: z.string().trim().min(1).max(10_000).optional(),
+  answer: xmlSafeString(z.string().trim().min(1).max(10_000)).optional(),
   answerSource: ClaimSourceTypeSchema.optional(),
   convertAnswerToObservation: z.boolean().optional(),
   observationClaimId: id.optional(),
@@ -336,35 +389,42 @@ export const ReportReviewNoteCommandSchema = createCommandSchema("report.review-
   approved: z.boolean(),
 });
 
+const CompletenessAttestationInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("no-evidence-supplied") }).strict(),
+  z
+    .object({
+      kind: z.literal("actor-damage"),
+      actorId: id,
+      outcome: z.enum(["unknown", "not-assessed"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("uncertainty-review-completed") }).strict(),
+]);
+
+export const CompletenessAttestCommandSchema = createCommandSchema("completeness.attest", {
+  attestation: CompletenessAttestationInputSchema,
+});
+
+export const CompletenessWithdrawCommandSchema = createCommandSchema("completeness.withdraw", {
+  attestationId: id,
+});
+
 export const ReportFinalizeCommandSchema = createCommandSchema("report.finalize", {
   unresolvedQuestionsReviewed: z.literal(true),
   limitationsAcknowledged: z.literal(true),
   confirmedFactsReviewed: z.literal(true),
+  includedUnconfirmedContentReviewed: z.literal(true),
   manualConfirmation: z.literal(true),
-  includeHypotheses: z.boolean().optional(),
-});
-
-export const WorkspaceFocusCommandSchema = createCommandSchema("workspace.focus", {
-  itemType: z.enum([
-    "actor",
-    "trajectory",
-    "timeline-event",
-    "claim",
-    "evidence",
-    "question",
-    "hypothesis",
-    "report",
-  ]),
-  itemId: id,
-  workspaceMode: z.enum([
-    "scene",
-    "timeline",
-    "facts",
-    "evidence",
-    "questions",
-    "hypotheses",
-    "report",
-  ]),
+  reviewedPreview: z
+    .object({
+      caseId: id,
+      caseVersion: z.number().int().nonnegative(),
+      generatedAt: z.iso.datetime({ offset: true }),
+      fingerprint: z.string().regex(/^sha256-[a-f0-9]{64}$/),
+      branchIds: z.array(id).max(1_000),
+      includeHypotheses: z.boolean(),
+    })
+    .strict(),
 });
 
 export const CaseValidateCommandSchema = createCommandSchema("case.validate", {
@@ -405,6 +465,7 @@ export const ReplayMutationCommandSchema = z.discriminatedUnion("type", [
   EvidenceAddCommandSchema,
   EvidenceUpdateCommandSchema,
   EvidenceLinkCommandSchema,
+  EvidenceUnlinkCommandSchema,
   EvidenceDeleteCommandSchema,
   QuestionAddCommandSchema,
   QuestionUpdateCommandSchema,
@@ -417,16 +478,32 @@ export const ReplayMutationCommandSchema = z.discriminatedUnion("type", [
   HypothesisSetActiveCommandSchema,
   ReportAddNoteCommandSchema,
   ReportReviewNoteCommandSchema,
+  CompletenessAttestCommandSchema,
+  CompletenessWithdrawCommandSchema,
   ReportFinalizeCommandSchema,
-  WorkspaceFocusCommandSchema,
   CaseValidateCommandSchema,
 ]);
 
-export const ReplayCommandSchema = z.discriminatedUnion("type", [
-  ...ReplayMutationCommandSchema.options,
-  HistoryUndoCommandSchema,
-  HistoryRedoCommandSchema,
-]);
+export const ReplayCommandSchema = z
+  .discriminatedUnion("type", [
+    ...ReplayMutationCommandSchema.options,
+    HistoryUndoCommandSchema,
+    HistoryRedoCommandSchema,
+  ])
+  .superRefine((command, ctx) => {
+    const trustedPair =
+      (command.actor === "human" && command.origin === "ui") ||
+      (command.actor === "agent" && command.origin === "webmcp") ||
+      (command.actor === "system" && command.origin === "system");
+    if (!trustedPair) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["origin"],
+        message:
+          "Command author and origin must be a trusted pair: human/ui, agent/webmcp, or system/system.",
+      });
+    }
+  });
 
 export type ReplayMutationCommand = z.infer<typeof ReplayMutationCommandSchema>;
 export type ReplayCommand = z.infer<typeof ReplayCommandSchema>;
@@ -447,6 +524,7 @@ export type ReplayCommandErrorCode =
   | "INVALID_STATE"
   | "ARCHIVED_BRANCH"
   | "REPORT_REQUIREMENTS_MISSING"
+  | "REPORT_PREVIEW_STALE"
   | "HISTORY_EMPTY"
   | "HISTORY_BARRIER"
   | "UNSAFE_REVERT";

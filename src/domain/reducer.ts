@@ -1,6 +1,17 @@
 import type { ReplayMutationCommand, ReplayCommandErrorCode } from "./commandSchemas";
-import { validateConsistency } from "./consistency";
-import { buildReportPreview } from "./report";
+import {
+  agentObservationSourceRequirement,
+  compatibleAgentObservationSourceIds,
+  isExternallyAttributedClaimSourceType,
+} from "./claimProvenance";
+import { validateCurrentReportPreview } from "./consistency";
+import {
+  completenessAttestationKey,
+  completenessBasisFingerprint,
+  isCompletenessAttestationCurrent,
+} from "./completeness";
+import { clampTimeToRange, interpolateTrajectory } from "./interpolation";
+import { buildReportPreview, createReportPreviewReviewBinding } from "./report";
 import type {
   ActionAuthor,
   AgentProposal,
@@ -75,6 +86,89 @@ function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
+function ensureBranchOwnedIndex(
+  state: ReplayCase,
+  ownerBranchId: string,
+  collectionName: "trajectoryIds" | "eventIds",
+  objectId: string,
+): void {
+  state.branches.forEach((branch) => {
+    branch[collectionName] =
+      branch.id === ownerBranchId
+        ? unique([...branch[collectionName], objectId])
+        : branch[collectionName].filter((candidateId) => candidateId !== objectId);
+  });
+}
+
+type DamageMarkerOwner = {
+  actor: ReplayCase["actors"][number];
+  marker: ReplayCase["actors"][number]["damageMarkers"][number];
+};
+
+function damageMarkerOwners(state: ReplayCase): DamageMarkerOwner[] {
+  return state.actors.flatMap((actor) => actor.damageMarkers.map((marker) => ({ actor, marker })));
+}
+
+function requireDamageMarkerOwner(state: ReplayCase, markerId: string): DamageMarkerOwner {
+  const owner = damageMarkerOwners(state).find(({ marker }) => marker.id === markerId);
+  if (!owner) fail("NOT_FOUND", `Damage marker ${markerId} does not exist`, { markerId });
+  return owner;
+}
+
+function assertDamageMarkerLinkEditable(
+  owner: DamageMarkerOwner,
+  command: ReplayMutationCommand,
+): void {
+  ensureUnlocked(owner.actor, "actor");
+  if (owner.marker.status === "confirmed" && command.actor !== "human") {
+    fail(
+      "HUMAN_CONFIRMATION_REQUIRED",
+      "An agent cannot change links on a human-confirmed damage observation",
+    );
+  }
+}
+
+function damageClaimLinkChanges(
+  state: ReplayCase,
+  previousSceneObjectIds: readonly string[],
+  nextSceneObjectIds: readonly string[],
+  command: ReplayMutationCommand,
+): Array<DamageMarkerOwner & { linked: boolean }> {
+  const changes = damageMarkerOwners(state).flatMap((owner) => {
+    const wasLinked = previousSceneObjectIds.includes(owner.marker.id);
+    const linked = nextSceneObjectIds.includes(owner.marker.id);
+    return wasLinked === linked ? [] : [{ ...owner, linked }];
+  });
+  changes.forEach((owner) => assertDamageMarkerLinkEditable(owner, command));
+  return changes;
+}
+
+function setDamageEvidenceRelation(
+  marker: DamageMarkerOwner["marker"],
+  asset: EvidenceAsset,
+  linked: boolean,
+): void {
+  marker.linkedEvidenceIds = linked
+    ? unique([...marker.linkedEvidenceIds, asset.id])
+    : marker.linkedEvidenceIds.filter((id) => id !== asset.id);
+  asset.linkedSceneObjectIds = linked
+    ? unique([...asset.linkedSceneObjectIds, marker.id])
+    : asset.linkedSceneObjectIds.filter((id) => id !== marker.id);
+}
+
+function setDamageClaimRelation(
+  marker: DamageMarkerOwner["marker"],
+  claim: Claim,
+  linked: boolean,
+): void {
+  marker.linkedClaimIds = linked
+    ? unique([...marker.linkedClaimIds, claim.id])
+    : marker.linkedClaimIds.filter((id) => id !== claim.id);
+  claim.linkedSceneObjectIds = linked
+    ? unique([...claim.linkedSceneObjectIds, marker.id])
+    : claim.linkedSceneObjectIds.filter((id) => id !== marker.id);
+}
+
 function requireHumanUi(
   command: ReplayMutationCommand,
   code: ReplayCommandErrorCode,
@@ -90,6 +184,51 @@ function assertNotConfirmedByAgent(command: ReplayMutationCommand, status: strin
       "Only an explicit human interface action may create confirmed information.",
     );
   }
+}
+
+function resolveObservationSourceIds(
+  state: ReplayCase,
+  command: ReplayMutationCommand,
+  sourceType: Claim["sourceType"],
+  submittedSourceIds: readonly string[],
+): string[] {
+  const uniqueSourceIds = unique([...submittedSourceIds]);
+  const compatibleSourceIds = compatibleAgentObservationSourceIds(
+    state,
+    sourceType,
+    uniqueSourceIds,
+  );
+  if (
+    command.actor === "agent" &&
+    isExternallyAttributedClaimSourceType(sourceType) &&
+    compatibleSourceIds.length === 0
+  ) {
+    fail(
+      "FORBIDDEN_ACTION",
+      `An agent observation classified as ${sourceType} must cite ${agentObservationSourceRequirement(sourceType)}. Use agent-inference when no compatible external source exists.`,
+      {
+        sourceType,
+        providedSourceIds: uniqueSourceIds,
+      },
+    );
+  }
+  if (
+    command.actor === "human" &&
+    (sourceType === "photo" || sourceType === "document") &&
+    compatibleSourceIds.length === 0
+  ) {
+    fail(
+      "INVALID_COMMAND",
+      `A human observation classified as ${sourceType} must cite ${agentObservationSourceRequirement(sourceType)}.`,
+      {
+        sourceType,
+        providedSourceIds: uniqueSourceIds,
+      },
+    );
+  }
+  return command.actor === "agent" || sourceType === "photo" || sourceType === "document"
+    ? compatibleSourceIds
+    : uniqueSourceIds;
 }
 
 function requireNeutralHypothesis(text: string): void {
@@ -229,6 +368,7 @@ function allObjectIds(replayCase: ReplayCase): Set<string> {
       ]),
     ]),
     ...replayCase.activity.map((activity) => activity.id),
+    ...replayCase.completenessAttestations.map((attestation) => attestation.id),
     ...replayCase.reportNotes.map((note) => note.id),
     ...replayCase.reportSnapshots.map((snapshot) => snapshot.id),
   ]);
@@ -263,6 +403,32 @@ function requireTrajectory(replayCase: ReplayCase, trajectoryId: string): Trajec
   const trajectory = replayCase.trajectories.find((candidate) => candidate.id === trajectoryId);
   if (!trajectory) fail("NOT_FOUND", `Trajectory ${trajectoryId} does not exist`, { trajectoryId });
   return trajectory;
+}
+
+function trajectoriesForActorBranch(
+  replayCase: ReplayCase,
+  actorId: string,
+  branchId: string,
+): Trajectory[] {
+  return replayCase.trajectories.filter(
+    (trajectory) => trajectory.actorId === actorId && trajectory.branchId === branchId,
+  );
+}
+
+function requireUnambiguousTrajectoryForActorBranch(
+  replayCase: ReplayCase,
+  actorId: string,
+  branchId: string,
+): Trajectory | undefined {
+  const trajectories = trajectoriesForActorBranch(replayCase, actorId, branchId);
+  if (trajectories.length > 1) {
+    fail(
+      "INVALID_STATE",
+      `Actor ${actorId} has multiple trajectories (${trajectories.map((trajectory) => trajectory.id).join(", ")}) in branch ${branchId}; resolve the ambiguity before editing`,
+      { actorId, branchId, trajectoryIds: trajectories.map((trajectory) => trajectory.id) },
+    );
+  }
+  return trajectories[0];
 }
 
 function requireEvent(replayCase: ReplayCase, eventId: string): TimelineEvent {
@@ -437,12 +603,32 @@ function applyActorUpsert(
     const existing = state.actors[existingIndex];
     if (!existing) fail("INVALID_STATE", `Actor index ${String(existingIndex)} is invalid`);
     ensureUnlocked(existing, "actor");
+    const damageChanged =
+      JSON.stringify(existing.damageMarkers) !== JSON.stringify(incoming.damageMarkers);
     if (command.actor !== "human" || command.origin !== "ui") {
+      const existingHasTrustedDimensions =
+        existing.dimensionsSource === "measured" || existing.dimensionsSource === "manufacturer";
+      const incomingClaimsTrustedDimensions =
+        incoming.dimensionsSource === "measured" || incoming.dimensionsSource === "manufacturer";
+      const trustedDimensionsChanged =
+        existing.dimensionsSource !== incoming.dimensionsSource ||
+        existing.dimensions.width !== incoming.dimensions.width ||
+        existing.dimensions.length !== incoming.dimensions.length ||
+        existing.wheelbaseMeters !== incoming.wheelbaseMeters;
+      if (
+        trustedDimensionsChanged &&
+        (existingHasTrustedDimensions || incomingClaimsTrustedDimensions)
+      ) {
+        fail(
+          "FORBIDDEN_ACTION",
+          "An agent cannot alter measured/manufacturer dimensions, source, or wheelbase",
+        );
+      }
       if (incoming.locked) {
         fail("FORBIDDEN_ACTION", "An agent cannot lock a scene actor through an upsert command");
       }
       const confirmedDamageChanged =
-        JSON.stringify(existing.damageMarkers) !== JSON.stringify(incoming.damageMarkers) &&
+        damageChanged &&
         [...existing.damageMarkers, ...incoming.damageMarkers].some(
           (marker) => marker.status === "confirmed",
         );
@@ -453,13 +639,34 @@ function applyActorUpsert(
         );
       }
     }
+    if (damageChanged) {
+      fail(
+        "INVALID_COMMAND",
+        "Actor upsert cannot change damage markers; use the damage command so provenance links stay synchronized",
+      );
+    }
     state.actors[existingIndex] = incoming;
+    const trajectoryOutcome = command.poseAt
+      ? applyPoseAtTime(state, incoming.id, incoming.pose, command.poseAt, command, context)
+      : undefined;
     return {
       nextState: state,
-      affectedIds: [incoming.id],
+      affectedIds: unique([incoming.id, ...(trajectoryOutcome?.affectedIds ?? [])]),
       summary: `Updated ${incoming.label}.`,
       undoable: true,
     };
+  }
+  if (
+    (command.actor !== "human" || command.origin !== "ui") &&
+    (incoming.dimensionsSource === "measured" || incoming.dimensionsSource === "manufacturer")
+  ) {
+    fail("FORBIDDEN_ACTION", "An agent cannot create measured/manufacturer vehicle dimensions");
+  }
+  if (incoming.damageMarkers.length > 0) {
+    fail(
+      "INVALID_COMMAND",
+      "A new actor must be created before adding damage markers through the damage command",
+    );
   }
   if (
     (command.actor !== "human" || command.origin !== "ui") &&
@@ -488,6 +695,15 @@ function applyActorPose(
 ): MutationOutcome {
   const actor = requireActor(state, command.actorId);
   ensureUnlocked(actor, "actor");
+  const trajectoryOutcome = command.poseAt
+    ? applyPoseAtTime(state, actor.id, command.pose, command.poseAt, command, context)
+    : undefined;
+  if (trajectoryOutcome) {
+    return {
+      ...trajectoryOutcome,
+      summary: `${command.actor === "agent" ? "Agent" : "Human"} moved ${actor.label} at the playhead.`,
+    };
+  }
   actor.pose = structuredClone(command.pose);
   actor.lastEditedBy = command.actor;
   actor.lastEditedAt = context.now;
@@ -515,14 +731,34 @@ function applyTrajectorySet(
       fail("INVALID_COMMAND", "Trajectory keyframe times must be strictly increasing");
     }
   }
+  const actorBranchTrajectory = requireUnambiguousTrajectoryForActorBranch(
+    state,
+    actor.id,
+    branch.id,
+  );
   let trajectory = command.trajectoryId
     ? state.trajectories.find((candidate) => candidate.id === command.trajectoryId)
-    : state.trajectories.find(
-        (candidate) =>
-          candidate.actorId === command.actorId && candidate.branchId === command.branchId,
-      );
+    : actorBranchTrajectory;
+  if (trajectory && (trajectory.actorId !== actor.id || trajectory.branchId !== branch.id)) {
+    fail(
+      "INVALID_COMMAND",
+      "An existing trajectory cannot be reassigned to another actor or branch",
+    );
+  }
   if (command.trajectoryId && !trajectory && allObjectIds(state).has(command.trajectoryId)) {
     fail("DUPLICATE_ID", `Object ID ${command.trajectoryId} already exists`);
+  }
+  if (!trajectory && actorBranchTrajectory) {
+    fail(
+      "INVALID_COMMAND",
+      `Actor ${actor.id} already has trajectory ${actorBranchTrajectory.id} in branch ${branch.id}; update that trajectory instead of creating ${command.trajectoryId ?? "another trajectory"}`,
+      {
+        actorId: actor.id,
+        branchId: branch.id,
+        existingTrajectoryId: actorBranchTrajectory.id,
+        requestedTrajectoryId: command.trajectoryId,
+      },
+    );
   }
   const trajectoryId =
     trajectory?.id ?? reserveId(state, context, "trajectory", command.trajectoryId);
@@ -535,12 +771,6 @@ function applyTrajectorySet(
   });
   if (trajectory) {
     ensureUnlocked(trajectory, "trajectory");
-    if (trajectory.actorId !== actor.id || trajectory.branchId !== branch.id) {
-      fail(
-        "INVALID_COMMAND",
-        "An existing trajectory cannot be reassigned to another actor or branch",
-      );
-    }
     trajectory.keyframes = keyframes;
     if (command.visible !== undefined) trajectory.visible = command.visible;
     trajectory.changeHistory.push(changeRecord(context, command, "Updated trajectory keyframes."));
@@ -557,8 +787,8 @@ function applyTrajectorySet(
       changeHistory: [changeRecord(context, command, "Created trajectory.")],
     };
     state.trajectories.push(trajectory);
-    branch.trajectoryIds.push(trajectory.id);
   }
+  ensureBranchOwnedIndex(state, branch.id, "trajectoryIds", trajectory.id);
   const final = keyframes.at(-1);
   if (!final) fail("INVALID_COMMAND", "Trajectory requires at least one keyframe");
   actor.pose = { x: final.x, y: final.y, rotationDeg: final.rotationDeg };
@@ -571,6 +801,65 @@ function applyTrajectorySet(
     summary: `Updated ${actor.label} trajectory in ${branch.name}.`,
     undoable: true,
   };
+}
+
+function keyframesWithPoseAtTime(
+  state: ReplayCase,
+  trajectory: Trajectory,
+  timeMs: number,
+  pose: ActorPose,
+  makeKeyframeId: () => string,
+): ActorKeyframe[] {
+  const targetTimeMs = clampTimeToRange(timeMs, state.timeRangeMs);
+  const exactIndex = trajectory.keyframes.findIndex((keyframe) => keyframe.timeMs === targetTimeMs);
+  if (exactIndex >= 0) {
+    return trajectory.keyframes.map((keyframe, index) =>
+      index === exactIndex ? { ...keyframe, ...structuredClone(pose) } : structuredClone(keyframe),
+    );
+  }
+  if (trajectory.keyframes.length >= 2_000) {
+    fail("INVALID_COMMAND", `Trajectory ${trajectory.id} already has the maximum 2,000 keyframes`);
+  }
+  return [
+    ...structuredClone(trajectory.keyframes),
+    {
+      id: makeKeyframeId(),
+      actorId: trajectory.actorId,
+      timeMs: targetTimeMs,
+      ...structuredClone(pose),
+    },
+  ].sort((left, right) => left.timeMs - right.timeMs);
+}
+
+function applyPoseAtTime(
+  state: ReplayCase,
+  actorId: string,
+  pose: ActorPose,
+  poseAt: Readonly<{ branchId: string; timeMs: number }>,
+  sourceCommand: ReplayMutationCommand,
+  context: CommandExecutionContext,
+): MutationOutcome | undefined {
+  const branch = assertBranchEditable(state, poseAt.branchId);
+  const trajectory = requireUnambiguousTrajectoryForActorBranch(state, actorId, branch.id);
+  if (!trajectory) return undefined;
+  const keyframes = keyframesWithPoseAtTime(state, trajectory, poseAt.timeMs, pose, () =>
+    reserveId(state, context, "keyframe"),
+  );
+  return applyTrajectorySet(
+    state,
+    {
+      type: "trajectory.set",
+      actor: sourceCommand.actor,
+      origin: sourceCommand.origin,
+      ...(sourceCommand.requestId ? { requestId: sourceCommand.requestId } : {}),
+      trajectoryId: trajectory.id,
+      actorId,
+      branchId: branch.id,
+      keyframes,
+      visible: trajectory.visible,
+    },
+    context,
+  );
 }
 
 type ProposalChangeInput = Extract<
@@ -660,6 +949,7 @@ function canonicalizeProposalKeyframes(
 function canonicalizeProposalChanges(
   state: ReplayCase,
   inputs: ProposalChangeInput[],
+  poseAt: Readonly<{ branchId: string; timeMs: number }>,
   context: CommandExecutionContext,
   reservedIds: Set<string>,
 ): AgentProposalChange[] {
@@ -675,7 +965,18 @@ function canonicalizeProposalChanges(
     ensureUnlocked(actor, "actor");
     const changeId = allocateProposalScopedId(state, context, "proposal-change", reservedIds);
     if (input.kind === "actor-pose") {
-      if (posesEqual(actor.pose, input.proposedPose)) {
+      const reviewedBranchId = input.branchId ?? poseAt.branchId;
+      const reviewedTimeMs = clampTimeToRange(
+        input.targetTimeMs ?? poseAt.timeMs,
+        state.timeRangeMs,
+      );
+      const branch = assertBranchEditable(state, reviewedBranchId);
+      const trajectory = requireUnambiguousTrajectoryForActorBranch(state, actor.id, branch.id);
+      if (trajectory) ensureUnlocked(trajectory, "trajectory");
+      const currentPose = trajectory
+        ? interpolateTrajectory(trajectory, reviewedTimeMs)
+        : actor.pose;
+      if (posesEqual(currentPose, input.proposedPose)) {
         fail("INVALID_COMMAND", `Proposed pose for ${actor.label} does not change its position`);
       }
       return {
@@ -684,15 +985,29 @@ function canonicalizeProposalChanges(
         actorId: actor.id,
         basePose: structuredClone(actor.pose),
         proposedPose: structuredClone(input.proposedPose),
+        branchId: branch.id,
+        targetTimeMs: reviewedTimeMs,
+        ...(trajectory
+          ? {
+              baseTrajectory: {
+                trajectoryId: trajectory.id,
+                keyframes: structuredClone(trajectory.keyframes),
+                visible: trajectory.visible,
+              },
+            }
+          : {}),
       };
     }
 
     const branch = assertBranchEditable(state, input.branchId);
+    const actorBranchTrajectory = requireUnambiguousTrajectoryForActorBranch(
+      state,
+      actor.id,
+      branch.id,
+    );
     const trajectory = input.trajectoryId
       ? state.trajectories.find((candidate) => candidate.id === input.trajectoryId)
-      : state.trajectories.find(
-          (candidate) => candidate.actorId === actor.id && candidate.branchId === branch.id,
-        );
+      : actorBranchTrajectory;
     if (trajectory) {
       ensureUnlocked(trajectory, "trajectory");
       if (trajectory.actorId !== actor.id || trajectory.branchId !== branch.id) {
@@ -705,6 +1020,18 @@ function canonicalizeProposalChanges(
       fail("DUPLICATE_ID", `Object ID ${input.trajectoryId} already exists`, {
         id: input.trajectoryId,
       });
+    }
+    if (!trajectory && actorBranchTrajectory) {
+      fail(
+        "INVALID_COMMAND",
+        `A proposed trajectory for actor ${actor.id} in branch ${branch.id} must update existing trajectory ${actorBranchTrajectory.id} instead of creating ${input.trajectoryId ?? "another trajectory"}`,
+        {
+          actorId: actor.id,
+          branchId: branch.id,
+          existingTrajectoryId: actorBranchTrajectory.id,
+          requestedTrajectoryId: input.trajectoryId,
+        },
+      );
     }
 
     const trajectoryId =
@@ -783,7 +1110,13 @@ function applyProposalCreate(
   const proposalId = reserveId(state, context, "proposal", command.proposalId);
   const reservedIds = new Set<string>([proposalId]);
   const revisionId = allocateProposalScopedId(state, context, "proposal-revision", reservedIds);
-  const changes = canonicalizeProposalChanges(state, command.changes, context, reservedIds);
+  const changes = canonicalizeProposalChanges(
+    state,
+    command.changes,
+    command.poseAt,
+    context,
+    reservedIds,
+  );
   const proposal: AgentProposal = {
     id: proposalId,
     title: command.title,
@@ -827,9 +1160,51 @@ function applyProposalAdjust(
   );
   requireNeutralReportText(command.summary);
   const proposal = requirePendingProposal(state, command.proposalId);
+  const previousRevision = proposal.revisions.at(-1);
+  if (!previousRevision) {
+    fail("VERSION_CONFLICT", `Cannot adjust ${proposal.title}; it has no proposal revision`);
+  }
+  const boundChanges = command.changes.map((input) => {
+    if (input.kind !== "actor-pose") return input;
+    const previousChange = previousRevision.changes.find(
+      (change): change is Extract<AgentProposalChange, { kind: "actor-pose" }> =>
+        change.kind === "actor-pose" && change.actorId === input.actorId,
+    );
+    const reviewedBranchId = previousChange?.branchId;
+    const reviewedTimeMs = previousChange?.targetTimeMs;
+    if (!reviewedBranchId || reviewedTimeMs === undefined) {
+      return input;
+    }
+    if (
+      (input.branchId !== undefined && input.branchId !== reviewedBranchId) ||
+      (input.targetTimeMs !== undefined && input.targetTimeMs !== reviewedTimeMs)
+    ) {
+      fail(
+        "INVALID_COMMAND",
+        `Cannot move the reviewed branch or playhead binding while adjusting ${proposal.title}`,
+        {
+          proposalId: proposal.id,
+          actorId: input.actorId,
+          reviewedBranchId,
+          reviewedTimeMs,
+        },
+      );
+    }
+    return {
+      ...input,
+      branchId: reviewedBranchId,
+      targetTimeMs: reviewedTimeMs,
+    };
+  });
   const reservedIds = new Set<string>([proposal.id]);
   const revisionId = allocateProposalScopedId(state, context, "proposal-revision", reservedIds);
-  const changes = canonicalizeProposalChanges(state, command.changes, context, reservedIds);
+  const changes = canonicalizeProposalChanges(
+    state,
+    boundChanges,
+    command.poseAt,
+    context,
+    reservedIds,
+  );
   const revision: AgentProposalRevision = {
     id: revisionId,
     revisionNumber: proposal.revisions.length + 1,
@@ -854,6 +1229,7 @@ function assertProposalRevisionIsCurrent(
   state: ReplayCase,
   proposal: AgentProposal,
   revision: AgentProposalRevision,
+  poseAt: Readonly<{ branchId: string; timeMs: number }>,
 ): void {
   for (const change of revision.changes) {
     const actor = requireActor(state, change.actorId);
@@ -866,20 +1242,112 @@ function assertProposalRevisionIsCurrent(
         { proposalId: proposal.id, changeId: change.id, actorId: actor.id },
       );
     }
-    if (change.kind !== "trajectory-set") continue;
-    assertBranchEditable(state, change.branchId);
-    const trajectory = state.trajectories.find((candidate) => candidate.id === change.trajectoryId);
-    if (change.createsTrajectory) {
-      if (trajectory) {
+    if (change.kind === "actor-pose") {
+      if (!change.branchId || change.targetTimeMs === undefined) {
         fail(
           "VERSION_CONFLICT",
-          `Cannot accept ${proposal.title}; trajectory ${change.trajectoryId} now exists`,
-          { proposalId: proposal.id, changeId: change.id, trajectoryId: change.trajectoryId },
+          `Cannot accept ${proposal.title}; this older pose revision has no reviewed branch and playhead binding`,
+          { proposalId: proposal.id, changeId: change.id, actorId: actor.id },
+        );
+      }
+      const acceptanceTimeMs = clampTimeToRange(poseAt.timeMs, state.timeRangeMs);
+      if (change.branchId !== poseAt.branchId || change.targetTimeMs !== acceptanceTimeMs) {
+        fail(
+          "INVALID_COMMAND",
+          `Cannot accept ${proposal.title} at a different branch or playhead than the reviewed pose`,
+          {
+            proposalId: proposal.id,
+            changeId: change.id,
+            reviewedBranchId: change.branchId,
+            activeBranchId: poseAt.branchId,
+            reviewedTimeMs: change.targetTimeMs,
+            activeTimeMs: acceptanceTimeMs,
+          },
+        );
+      }
+      const branch = assertBranchEditable(state, change.branchId);
+      const matchingTrajectories = trajectoriesForActorBranch(state, actor.id, branch.id);
+      if (matchingTrajectories.length > 1) {
+        fail(
+          "VERSION_CONFLICT",
+          `Cannot accept ${proposal.title}; ${actor.label} now has multiple trajectories in branch ${branch.id}`,
+          {
+            proposalId: proposal.id,
+            changeId: change.id,
+            trajectoryIds: matchingTrajectories.map((trajectory) => trajectory.id),
+          },
+        );
+      }
+      const trajectory = matchingTrajectories[0];
+      if (!change.baseTrajectory) {
+        if (trajectory) {
+          fail(
+            "VERSION_CONFLICT",
+            `Cannot accept ${proposal.title}; ${actor.label} gained a trajectory after review began`,
+            { proposalId: proposal.id, changeId: change.id, trajectoryId: trajectory.id },
+          );
+        }
+        continue;
+      }
+      if (trajectory?.id !== change.baseTrajectory.trajectoryId) {
+        fail(
+          "VERSION_CONFLICT",
+          `Cannot accept ${proposal.title}; its reviewed trajectory baseline is no longer available`,
+          {
+            proposalId: proposal.id,
+            changeId: change.id,
+            trajectoryId: change.baseTrajectory.trajectoryId,
+          },
+        );
+      }
+      ensureUnlocked(trajectory, "trajectory");
+      if (
+        trajectory.visible !== change.baseTrajectory.visible ||
+        !keyframesEqual(trajectory.keyframes, change.baseTrajectory.keyframes)
+      ) {
+        fail(
+          "VERSION_CONFLICT",
+          `Cannot accept ${proposal.title}; trajectory ${trajectory.id} changed after review began`,
+          { proposalId: proposal.id, changeId: change.id, trajectoryId: trajectory.id },
         );
       }
       continue;
     }
-    if (!trajectory || !change.baseTrajectory) {
+    const branch = assertBranchEditable(state, change.branchId);
+    const matchingTrajectories = trajectoriesForActorBranch(state, actor.id, branch.id);
+    if (matchingTrajectories.length > 1) {
+      fail(
+        "VERSION_CONFLICT",
+        `Cannot accept ${proposal.title}; ${actor.label} now has multiple trajectories in branch ${branch.id}`,
+        {
+          proposalId: proposal.id,
+          changeId: change.id,
+          trajectoryIds: matchingTrajectories.map((candidate) => candidate.id),
+        },
+      );
+    }
+    const actorBranchTrajectory = matchingTrajectories[0];
+    const trajectory = state.trajectories.find((candidate) => candidate.id === change.trajectoryId);
+    if (change.createsTrajectory) {
+      const conflictingTrajectory = actorBranchTrajectory ?? trajectory;
+      if (conflictingTrajectory) {
+        fail(
+          "VERSION_CONFLICT",
+          `Cannot accept ${proposal.title}; ${actor.label} gained trajectory ${conflictingTrajectory.id} in branch ${branch.id} after review began`,
+          {
+            proposalId: proposal.id,
+            changeId: change.id,
+            trajectoryId: conflictingTrajectory.id,
+          },
+        );
+      }
+      continue;
+    }
+    if (
+      !trajectory ||
+      !change.baseTrajectory ||
+      actorBranchTrajectory?.id !== change.trajectoryId
+    ) {
       fail(
         "VERSION_CONFLICT",
         `Cannot accept ${proposal.title}; its trajectory baseline is no longer available`,
@@ -918,16 +1386,33 @@ function applyProposalAccept(
   if (!revision) fail("INVALID_STATE", `Agent proposal ${proposal.id} has no revision`);
 
   // Validate every baseline and lock before applying any target mutation.
-  assertProposalRevisionIsCurrent(state, proposal, revision);
+  assertProposalRevisionIsCurrent(state, proposal, revision, command.poseAt);
+  const appliedAffectedIds: string[] = [];
   for (const change of revision.changes) {
     if (change.kind === "actor-pose") {
-      const actor = requireActor(state, change.actorId);
-      actor.pose = structuredClone(change.proposedPose);
-      actor.lastEditedBy = "human";
-      actor.lastEditedAt = context.now;
+      if (!change.branchId || change.targetTimeMs === undefined) {
+        fail(
+          "INVALID_STATE",
+          `Accepted pose revision ${change.id} is missing its reviewed branch and playhead binding`,
+        );
+      }
+      const outcome = applyActorPose(
+        state,
+        {
+          type: "actor.update-pose",
+          actor: "human",
+          origin: "ui",
+          ...(command.requestId ? { requestId: command.requestId } : {}),
+          actorId: change.actorId,
+          pose: structuredClone(change.proposedPose),
+          poseAt: { branchId: change.branchId, timeMs: change.targetTimeMs },
+        },
+        context,
+      );
+      appliedAffectedIds.push(...outcome.affectedIds);
       continue;
     }
-    applyTrajectorySet(
+    const outcome = applyTrajectorySet(
       state,
       {
         type: "trajectory.set",
@@ -942,6 +1427,7 @@ function applyProposalAccept(
       },
       context,
     );
+    appliedAffectedIds.push(...outcome.affectedIds);
   }
   proposal.status = "accepted";
   proposal.updatedAt = context.now;
@@ -956,7 +1442,7 @@ function applyProposalAccept(
   };
   return {
     nextState: state,
-    affectedIds: proposalAffectedIds(proposal),
+    affectedIds: unique([...proposalAffectedIds(proposal), ...appliedAffectedIds]),
     summary: `Human accepted agent proposal: ${proposal.title}.`,
     undoable: true,
   };
@@ -1024,6 +1510,24 @@ function applyTimelineUpsert(
     ? state.timelineEvents.find((candidate) => candidate.id === command.eventId)
     : undefined;
   const eventId = event?.id ?? reserveId(state, context, "event", command.eventId);
+  const previousLinkedClaimIds = event
+    ? unique([
+        ...event.linkedClaimIds,
+        ...state.claims
+          .filter((claim) => claim.linkedEventIds.includes(eventId))
+          .map((claim) => claim.id),
+      ])
+    : [];
+  const previousLinkedEvidenceIds = event
+    ? unique([
+        ...event.linkedEvidenceIds,
+        ...state.evidence
+          .filter((asset) => asset.linkedEventIds.includes(eventId))
+          .map((asset) => asset.id),
+      ])
+    : [];
+  const linkedClaimIds = unique(command.linkedClaimIds ?? previousLinkedClaimIds);
+  const linkedEvidenceIds = unique(command.linkedEvidenceIds ?? previousLinkedEvidenceIds);
   if (event) {
     ensureUnlocked(event, "timeline-event");
     if (event.certainty === "confirmed" && command.actor !== "human") {
@@ -1039,8 +1543,8 @@ function applyTimelineUpsert(
     event.title = command.title;
     event.certainty = command.certainty;
     event.linkedActorIds = unique(command.linkedActorIds);
-    event.linkedClaimIds = unique(command.linkedClaimIds ?? []);
-    event.linkedEvidenceIds = unique(command.linkedEvidenceIds ?? []);
+    event.linkedClaimIds = linkedClaimIds;
+    event.linkedEvidenceIds = linkedEvidenceIds;
     if (command.location) event.location = structuredClone(command.location);
     else delete event.location;
     event.changeHistory.push(changeRecord(context, command, "Updated timeline event."));
@@ -1053,25 +1557,45 @@ function applyTimelineUpsert(
       title: command.title,
       certainty: command.certainty,
       linkedActorIds: unique(command.linkedActorIds),
-      linkedClaimIds: unique(command.linkedClaimIds ?? []),
-      linkedEvidenceIds: unique(command.linkedEvidenceIds ?? []),
+      linkedClaimIds,
+      linkedEvidenceIds,
       ...(command.location ? { location: structuredClone(command.location) } : {}),
       locked: false,
       createdBy: command.actor,
       changeHistory: [changeRecord(context, command, "Created timeline event.")],
     };
     state.timelineEvents.push(event);
-    branch.eventIds.push(event.id);
   }
-  for (const evidenceId of event.linkedEvidenceIds) {
-    const asset = requireEvidence(state, evidenceId);
-    asset.linkedEventIds = unique([...asset.linkedEventIds, event.id]);
-    asset.linkedBranchIds = unique([...asset.linkedBranchIds, branch.id]);
+  ensureBranchOwnedIndex(state, branch.id, "eventIds", event.id);
+  for (const claim of state.claims) {
+    const nextLinkedEventIds = event.linkedClaimIds.includes(claim.id)
+      ? unique([...claim.linkedEventIds, event.id])
+      : claim.linkedEventIds.filter((id) => id !== event.id);
+    if (!sameIdSet(claim.linkedEventIds, nextLinkedEventIds)) {
+      ensureUnlocked(claim, "claim");
+      invalidatePriorClaimConfirmation(claim, context, command);
+      claim.linkedEventIds = nextLinkedEventIds;
+    }
+  }
+  for (const asset of state.evidence) {
+    if (event.linkedEvidenceIds.includes(asset.id)) {
+      asset.linkedEventIds = unique([...asset.linkedEventIds, event.id]);
+      asset.linkedBranchIds = unique([...asset.linkedBranchIds, branch.id]);
+    } else {
+      asset.linkedEventIds = asset.linkedEventIds.filter((id) => id !== event.id);
+    }
   }
   appendBranchChange(branch, context, command, `Updated timeline event ${event.title}.`);
   return {
     nextState: state,
-    affectedIds: [event.id, branch.id],
+    affectedIds: unique([
+      event.id,
+      branch.id,
+      ...previousLinkedClaimIds,
+      ...previousLinkedEvidenceIds,
+      ...event.linkedClaimIds,
+      ...event.linkedEvidenceIds,
+    ]),
     summary: `Updated timeline event: ${event.title}.`,
     undoable: true,
   };
@@ -1092,6 +1616,28 @@ function applyDamageMark(
     ? actor.damageMarkers.find((candidate) => candidate.id === command.markerId)
     : undefined;
   const markerId = marker?.id ?? reserveId(state, context, "damage", command.markerId);
+  const previousLinkedClaimIds = marker ? [...marker.linkedClaimIds] : [];
+  const previousLinkedEvidenceIds = marker ? [...marker.linkedEvidenceIds] : [];
+  const linkedClaimIds = unique(command.linkedClaimIds ?? []);
+  const linkedEvidenceIds = unique(command.linkedEvidenceIds ?? []);
+  linkedClaimIds.forEach((claimId) => requireClaim(state, claimId));
+  linkedEvidenceIds.forEach((evidenceId) => requireEvidence(state, evidenceId));
+  const changedClaims = state.claims.filter(
+    (claim) => linkedClaimIds.includes(claim.id) !== claim.linkedSceneObjectIds.includes(markerId),
+  );
+  changedClaims.forEach((claim) => {
+    ensureUnlocked(claim, "claim");
+    if (claim.status === "confirmed" && command.actor !== "human") {
+      fail(
+        "HUMAN_CONFIRMATION_REQUIRED",
+        "An agent cannot change damage links on a human-confirmed claim",
+      );
+    }
+  });
+  const changedEvidence = state.evidence.filter(
+    (asset) =>
+      linkedEvidenceIds.includes(asset.id) !== asset.linkedSceneObjectIds.includes(markerId),
+  );
   if (marker) {
     if (marker.status === "confirmed" && command.actor !== "human") {
       fail(
@@ -1102,8 +1648,6 @@ function applyDamageMark(
     marker.region = command.region;
     marker.description = command.description;
     marker.status = command.status;
-    marker.linkedClaimIds = unique(command.linkedClaimIds ?? []);
-    marker.linkedEvidenceIds = unique(command.linkedEvidenceIds ?? []);
   } else {
     marker = {
       id: markerId,
@@ -1111,20 +1655,31 @@ function applyDamageMark(
       region: command.region,
       description: command.description,
       status: command.status,
-      linkedClaimIds: unique(command.linkedClaimIds ?? []),
-      linkedEvidenceIds: unique(command.linkedEvidenceIds ?? []),
+      linkedClaimIds: [],
+      linkedEvidenceIds: [],
       createdBy: command.actor,
     };
     actor.damageMarkers.push(marker);
   }
-  for (const evidenceId of marker.linkedEvidenceIds) {
-    const asset = requireEvidence(state, evidenceId);
-    asset.linkedSceneObjectIds = unique([...asset.linkedSceneObjectIds, marker.id]);
-    asset.linkedClaimIds = unique([...asset.linkedClaimIds, ...marker.linkedClaimIds]);
+  for (const claim of changedClaims) {
+    invalidatePriorClaimConfirmation(claim, context, command);
+    setDamageClaimRelation(marker, claim, linkedClaimIds.includes(claim.id));
   }
+  for (const asset of changedEvidence) {
+    setDamageEvidenceRelation(marker, asset, linkedEvidenceIds.includes(asset.id));
+  }
+  marker.linkedClaimIds = linkedClaimIds;
+  marker.linkedEvidenceIds = linkedEvidenceIds;
   return {
     nextState: state,
-    affectedIds: [actor.id, marker.id],
+    affectedIds: unique([
+      actor.id,
+      marker.id,
+      ...previousLinkedClaimIds,
+      ...previousLinkedEvidenceIds,
+      ...linkedClaimIds,
+      ...linkedEvidenceIds,
+    ]),
     summary: `Marked ${command.region} damage on ${actor.label}.`,
     undoable: true,
   };
@@ -1137,10 +1692,20 @@ function applyClaimAdd(
 ): MutationOutcome {
   assertNotConfirmedByAgent(command, command.status);
   if (command.status === "confirmed") requireNeutralReportText(command.statement);
+  if (!command.branchId && command.sharedAcrossBranches === false) {
+    fail("INVALID_COMMAND", "A non-shared claim requires an owning branchId");
+  }
   assertReferences(state, command.linkedEvidenceIds ?? [], "evidence");
   assertReferences(state, command.linkedEventIds ?? [], "event");
   assertReferences(state, command.linkedSceneObjectIds ?? [], "scene");
   assertReferences(state, command.sourceIds ?? [], "source");
+  const submittedSourceIds = unique(command.sourceIds ?? []);
+  const sourceIds = resolveObservationSourceIds(
+    state,
+    command,
+    command.sourceType,
+    submittedSourceIds,
+  );
   const branch = command.branchId ? assertBranchEditable(state, command.branchId) : undefined;
   if (branch && command.sharedAcrossBranches)
     fail("INVALID_COMMAND", "A branch-specific claim cannot be shared across all branches");
@@ -1152,7 +1717,7 @@ function applyClaimAdd(
     ...(command.subjectId ? { subjectId: command.subjectId } : {}),
     status: command.status,
     sourceType: command.sourceType,
-    sourceIds: unique(command.sourceIds ?? []),
+    sourceIds,
     linkedEvidenceIds: unique(command.linkedEvidenceIds ?? []),
     linkedEventIds: unique(command.linkedEventIds ?? []),
     linkedSceneObjectIds: unique(command.linkedSceneObjectIds ?? []),
@@ -1172,9 +1737,17 @@ function applyClaimAdd(
       ),
     ],
   };
+  const damageLinkChanges = damageClaimLinkChanges(
+    state,
+    [],
+    created.linkedSceneObjectIds,
+    command,
+  );
+  const linkedEvents = created.linkedEventIds.map((eventId) => requireEvent(state, eventId));
+  linkedEvents.forEach((event) => ensureUnlocked(event, "timeline-event"));
   state.claims.push(created);
   if (branch) {
-    branch.claimIds.push(created.id);
+    branch.claimIds = unique([...branch.claimIds, created.id]);
     appendBranchChange(branch, context, command, "Added a branch-specific claim.");
   } else {
     state.branches.forEach((candidate) => {
@@ -1185,9 +1758,23 @@ function applyClaimAdd(
     const asset = requireEvidence(state, evidenceId);
     asset.linkedClaimIds = unique([...asset.linkedClaimIds, created.id]);
   }
+  for (const event of linkedEvents) {
+    event.linkedClaimIds = unique([...event.linkedClaimIds, created.id]);
+  }
+  for (const change of damageLinkChanges) {
+    setDamageClaimRelation(change.marker, created, change.linked);
+  }
   return {
     nextState: state,
-    affectedIds: [created.id, ...(branch ? [branch.id] : [])],
+    affectedIds: unique([
+      created.id,
+      ...created.sourceIds,
+      ...created.linkedEvidenceIds,
+      ...created.linkedEventIds,
+      ...created.linkedSceneObjectIds,
+      ...damageLinkChanges.map(({ actor }) => actor.id),
+      ...(branch ? [branch.id] : []),
+    ]),
     summary: "Added an observation.",
     undoable: true,
   };
@@ -1207,6 +1794,32 @@ function applyClaimUpdate(
   assertReferences(state, command.linkedEventIds ?? [], "event");
   assertReferences(state, command.linkedSceneObjectIds ?? [], "scene");
   assertReferences(state, command.sourceIds ?? [], "source");
+  const nextSourceType = command.sourceType ?? claim.sourceType;
+  const nextSourceIds =
+    command.sourceType !== undefined || command.sourceIds !== undefined
+      ? resolveObservationSourceIds(
+          state,
+          command,
+          nextSourceType,
+          command.sourceIds ?? claim.sourceIds,
+        )
+      : claim.sourceIds;
+  const previousLinkedEventIds = [...claim.linkedEventIds];
+  const previousLinkedSceneObjectIds = [...claim.linkedSceneObjectIds];
+  const nextLinkedEventIds = unique(command.linkedEventIds ?? claim.linkedEventIds);
+  const nextLinkedSceneObjectIds = unique(
+    command.linkedSceneObjectIds ?? claim.linkedSceneObjectIds,
+  );
+  const damageLinkChanges = damageClaimLinkChanges(
+    state,
+    previousLinkedSceneObjectIds,
+    nextLinkedSceneObjectIds,
+    command,
+  );
+  const changedBacklinkEvents = state.timelineEvents.filter(
+    (event) => nextLinkedEventIds.includes(event.id) !== event.linkedClaimIds.includes(claim.id),
+  );
+  changedBacklinkEvents.forEach((event) => ensureUnlocked(event, "timeline-event"));
   if (claimContentOrProvenanceChanged(claim, command)) {
     invalidatePriorClaimConfirmation(claim, context, command);
   }
@@ -1217,12 +1830,13 @@ function applyClaimUpdate(
     delete claim.confirmedAt;
   }
   if (command.sourceType !== undefined) claim.sourceType = command.sourceType;
-  if (command.sourceIds !== undefined) claim.sourceIds = unique(command.sourceIds);
+  if (command.sourceType !== undefined || command.sourceIds !== undefined)
+    claim.sourceIds = nextSourceIds;
   if (command.linkedEvidenceIds !== undefined)
     claim.linkedEvidenceIds = unique(command.linkedEvidenceIds);
-  if (command.linkedEventIds !== undefined) claim.linkedEventIds = unique(command.linkedEventIds);
+  if (command.linkedEventIds !== undefined) claim.linkedEventIds = nextLinkedEventIds;
   if (command.linkedSceneObjectIds !== undefined)
-    claim.linkedSceneObjectIds = unique(command.linkedSceneObjectIds);
+    claim.linkedSceneObjectIds = nextLinkedSceneObjectIds;
   if (claim.status === "confirmed" && containsLiabilityConclusion(claim.statement)) {
     fail(
       "FORBIDDEN_ACTION",
@@ -1237,9 +1851,25 @@ function applyClaimUpdate(
   for (const evidenceId of claim.linkedEvidenceIds) {
     requireEvidence(state, evidenceId).linkedClaimIds.push(claim.id);
   }
+  for (const event of changedBacklinkEvents) {
+    event.linkedClaimIds = claim.linkedEventIds.includes(event.id)
+      ? unique([...event.linkedClaimIds, claim.id])
+      : event.linkedClaimIds.filter((claimId) => claimId !== claim.id);
+  }
+  for (const change of damageLinkChanges) {
+    setDamageClaimRelation(change.marker, claim, change.linked);
+  }
   return {
     nextState: state,
-    affectedIds: [claim.id],
+    affectedIds: unique([
+      claim.id,
+      ...previousLinkedEventIds,
+      ...claim.linkedEventIds,
+      ...previousLinkedSceneObjectIds,
+      ...claim.linkedSceneObjectIds,
+      ...damageLinkChanges.map(({ actor }) => actor.id),
+      ...changedBacklinkEvents.map((event) => event.id),
+    ]),
     summary: "Updated an observation.",
     undoable: true,
   };
@@ -1261,6 +1891,15 @@ function applyClaimConfirm(
     fail(
       "HUMAN_CONFIRMATION_REQUIRED",
       "A branch-specific hypothesis cannot be converted directly into a confirmed fact",
+    );
+  }
+  if (
+    (claim.sourceType === "photo" || claim.sourceType === "document") &&
+    compatibleAgentObservationSourceIds(state, claim.sourceType, claim.sourceIds).length === 0
+  ) {
+    fail(
+      "HUMAN_CONFIRMATION_REQUIRED",
+      `Attach ${agentObservationSourceRequirement(claim.sourceType)} before confirming this observation.`,
     );
   }
   requireNeutralReportText(claim.statement);
@@ -1347,13 +1986,18 @@ function applyEvidenceAdd(
     nextState: state,
     affectedIds: [asset.id],
     summary: `Added evidence: ${asset.name}.`,
-    undoable: true,
+    undoable: false,
+    // Local evidence bytes are persisted outside ordinary command history.
+    // Removal must go through evidence.delete so metadata and bytes share the
+    // durable purge transaction instead of leaving an invisible orphan.
+    historyBarrier: true,
   };
 }
 
 function applyEvidenceUpdate(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "evidence.update" }>,
+  context: CommandExecutionContext,
 ): MutationOutcome {
   const asset = requireEvidence(state, command.evidenceId);
   if (asset.deleted) fail("NOT_FOUND", `Evidence ${command.evidenceId} has been deleted`);
@@ -1366,7 +2010,29 @@ function applyEvidenceUpdate(
     else asset.notes = command.notes;
   }
   if (command.tags !== undefined) asset.tags = unique(command.tags);
+  const affectedClaimIds: string[] = [];
   if (command.annotations !== undefined) {
+    const previousAnnotations = new Map(
+      asset.annotations.map((annotation) => [annotation.id, annotation] as const),
+    );
+    const nextAnnotations = new Map(
+      command.annotations.map((annotation) => [annotation.id, annotation] as const),
+    );
+    const changedAnnotationIds = new Set(
+      asset.annotations.flatMap((annotation) => {
+        const next = nextAnnotations.get(annotation.id);
+        return !next || JSON.stringify(annotation) !== JSON.stringify(next) ? [annotation.id] : [];
+      }),
+    );
+    for (const annotation of command.annotations) {
+      if (!previousAnnotations.has(annotation.id)) changedAnnotationIds.add(annotation.id);
+    }
+    for (const link of asset.annotationLinks) {
+      if (link.targetType !== "claim" || !changedAnnotationIds.has(link.annotationId)) continue;
+      const claim = requireClaim(state, link.targetId);
+      affectedClaimIds.push(claim.id);
+      invalidatePriorClaimConfirmation(claim, context, command);
+    }
     asset.annotations = structuredClone(command.annotations);
     const retainedAnnotationIds = new Set(asset.annotations.map((annotation) => annotation.id));
     asset.annotationLinks = asset.annotationLinks.filter((link) =>
@@ -1375,7 +2041,11 @@ function applyEvidenceUpdate(
   }
   return {
     nextState: state,
-    affectedIds: [asset.id, ...asset.annotations.map((annotation) => annotation.id)],
+    affectedIds: unique([
+      asset.id,
+      ...asset.annotations.map((annotation) => annotation.id),
+      ...affectedClaimIds,
+    ]),
     summary: `Updated evidence details: ${asset.name}.`,
     undoable: true,
   };
@@ -1431,15 +2101,10 @@ function applyEvidenceLink(
     asset.linkedSceneObjectIds = unique([...asset.linkedSceneObjectIds, trajectory.id]);
     asset.linkedBranchIds = unique([...asset.linkedBranchIds, trajectory.branchId]);
   } else if (command.targetType === "damage") {
-    const actor = state.actors.find((candidate) =>
-      candidate.damageMarkers.some((marker) => marker.id === command.targetId),
-    );
-    const marker = actor?.damageMarkers.find((candidate) => candidate.id === command.targetId);
-    if (!actor || !marker) fail("NOT_FOUND", `Damage marker ${command.targetId} does not exist`);
-    ensureUnlocked(actor, "actor");
-    marker.linkedEvidenceIds = unique([...marker.linkedEvidenceIds, asset.id]);
-    asset.linkedSceneObjectIds = unique([...asset.linkedSceneObjectIds, marker.id]);
-    asset.linkedClaimIds = unique([...asset.linkedClaimIds, ...marker.linkedClaimIds]);
+    const owner = requireDamageMarkerOwner(state, command.targetId);
+    assertDamageMarkerLinkEditable(owner, command);
+    setDamageEvidenceRelation(owner.marker, asset, true);
+    affectedIds.push(owner.actor.id);
   } else if (command.targetType === "hypothesis") {
     const branch = assertBranchEditable(state, command.targetId);
     asset.linkedBranchIds = unique([...asset.linkedBranchIds, branch.id]);
@@ -1494,6 +2159,179 @@ function applyEvidenceLink(
   };
 }
 
+function branchStillUsesEvidence(
+  state: ReplayCase,
+  asset: EvidenceAsset,
+  branchId: string,
+): boolean {
+  if (
+    asset.linkedEventIds.some(
+      (eventId) =>
+        state.timelineEvents.find((event) => event.id === eventId)?.branchId === branchId,
+    )
+  )
+    return true;
+  if (
+    asset.linkedSceneObjectIds.some(
+      (sceneId) =>
+        state.trajectories.find((trajectory) => trajectory.id === sceneId)?.branchId === branchId,
+    )
+  )
+    return true;
+  const branch = state.branches.find((candidate) => candidate.id === branchId);
+  return Boolean(
+    branch?.assumptions.some(
+      (assumption) =>
+        assumption.supportingEvidenceIds.includes(asset.id) ||
+        assumption.conflictingEvidenceIds.includes(asset.id),
+    ),
+  );
+}
+
+function applyEvidenceUnlink(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "evidence.unlink" }>,
+  context: CommandExecutionContext,
+): MutationOutcome {
+  requireHumanUi(
+    command,
+    "FORBIDDEN_ACTION",
+    "Only a human can remove an evidence relationship through the interface",
+  );
+  const asset = requireEvidence(state, command.evidenceId);
+  const annotation = command.annotationId
+    ? asset.annotations.find((candidate) => candidate.id === command.annotationId)
+    : undefined;
+  if (command.annotationId && !annotation) {
+    fail(
+      "NOT_FOUND",
+      `Annotation ${command.annotationId} does not exist on evidence ${command.evidenceId}`,
+    );
+  }
+  const matchingAnnotationLinks = asset.annotationLinks.filter(
+    (candidate) =>
+      candidate.targetType === command.targetType &&
+      candidate.targetId === command.targetId &&
+      (!command.annotationId || candidate.annotationId === command.annotationId),
+  );
+  let removed = matchingAnnotationLinks.length > 0;
+  const removeBaseRelation = command.annotationId === undefined;
+  const affectedIds = [asset.id, ...(annotation ? [annotation.id] : []), command.targetId];
+
+  if (command.targetType === "claim") {
+    const claim = requireClaim(state, command.targetId);
+    ensureUnlocked(claim, "claim");
+    const removesBase =
+      removeBaseRelation &&
+      (claim.linkedEvidenceIds.includes(asset.id) ||
+        claim.sourceIds.includes(asset.id) ||
+        asset.linkedClaimIds.includes(claim.id));
+    if (removesBase || removed) invalidatePriorClaimConfirmation(claim, context, command);
+    if (removeBaseRelation) {
+      claim.linkedEvidenceIds = claim.linkedEvidenceIds.filter((id) => id !== asset.id);
+      claim.sourceIds = claim.sourceIds.filter((id) => id !== asset.id);
+      asset.linkedClaimIds = asset.linkedClaimIds.filter((id) => id !== claim.id);
+    }
+    removed ||= removesBase;
+  } else if (command.targetType === "timeline-event") {
+    const event = requireEvent(state, command.targetId);
+    ensureUnlocked(event, "timeline-event");
+    const removesBase =
+      removeBaseRelation &&
+      (event.linkedEvidenceIds.includes(asset.id) || asset.linkedEventIds.includes(event.id));
+    if (removeBaseRelation) {
+      event.linkedEvidenceIds = event.linkedEvidenceIds.filter((id) => id !== asset.id);
+      asset.linkedEventIds = asset.linkedEventIds.filter((id) => id !== event.id);
+      if (!branchStillUsesEvidence(state, asset, event.branchId)) {
+        asset.linkedBranchIds = asset.linkedBranchIds.filter((id) => id !== event.branchId);
+      }
+    }
+    removed ||= removesBase;
+  } else if (command.targetType === "actor") {
+    const actor = requireActor(state, command.targetId);
+    ensureUnlocked(actor, "actor");
+    const removesBase = removeBaseRelation && asset.linkedSceneObjectIds.includes(actor.id);
+    if (removeBaseRelation) {
+      asset.linkedSceneObjectIds = asset.linkedSceneObjectIds.filter((id) => id !== actor.id);
+    }
+    removed ||= removesBase;
+  } else if (command.targetType === "trajectory") {
+    const trajectory = requireTrajectory(state, command.targetId);
+    ensureUnlocked(trajectory, "trajectory");
+    const removesBase = removeBaseRelation && asset.linkedSceneObjectIds.includes(trajectory.id);
+    if (removeBaseRelation) {
+      asset.linkedSceneObjectIds = asset.linkedSceneObjectIds.filter((id) => id !== trajectory.id);
+      if (!branchStillUsesEvidence(state, asset, trajectory.branchId)) {
+        asset.linkedBranchIds = asset.linkedBranchIds.filter((id) => id !== trajectory.branchId);
+      }
+    }
+    removed ||= removesBase;
+  } else if (command.targetType === "damage") {
+    const owner = requireDamageMarkerOwner(state, command.targetId);
+    assertDamageMarkerLinkEditable(owner, command);
+    const removesBase =
+      removeBaseRelation &&
+      (owner.marker.linkedEvidenceIds.includes(asset.id) ||
+        asset.linkedSceneObjectIds.includes(owner.marker.id));
+    if (removeBaseRelation) setDamageEvidenceRelation(owner.marker, asset, false);
+    affectedIds.push(owner.actor.id);
+    removed ||= removesBase;
+  } else if (command.targetType === "hypothesis") {
+    const branch = assertBranchEditable(state, command.targetId);
+    const removesBase = removeBaseRelation && asset.linkedBranchIds.includes(branch.id);
+    if (removeBaseRelation) {
+      asset.linkedBranchIds = asset.linkedBranchIds.filter((id) => id !== branch.id);
+    }
+    removed ||= removesBase;
+  } else {
+    const owner = state.branches.find((branch) =>
+      branch.assumptions.some((assumption) => assumption.id === command.targetId),
+    );
+    if (!owner) fail("NOT_FOUND", `Assumption ${command.targetId} does not exist`);
+    const branch = assertBranchEditable(state, owner.id);
+    const assumption = branch.assumptions.find((candidate) => candidate.id === command.targetId);
+    if (!assumption) fail("NOT_FOUND", `Assumption ${command.targetId} does not exist`);
+    const removesBase = removeBaseRelation && assumption.supportingEvidenceIds.includes(asset.id);
+    if (removeBaseRelation) {
+      assumption.supportingEvidenceIds = assumption.supportingEvidenceIds.filter(
+        (id) => id !== asset.id,
+      );
+      assumption.updatedAt = context.now;
+      if (!branchStillUsesEvidence(state, asset, branch.id)) {
+        asset.linkedBranchIds = asset.linkedBranchIds.filter((id) => id !== branch.id);
+      }
+      if (removesBase) {
+        affectedIds.push(branch.id);
+        appendBranchChange(
+          branch,
+          context,
+          command,
+          `Removed supporting evidence from assumption ${assumption.id}.`,
+        );
+      }
+    }
+    removed ||= removesBase;
+  }
+
+  if (!removed) {
+    fail(
+      "NOT_FOUND",
+      `Evidence ${asset.id} is not linked to ${command.targetType} ${command.targetId}${command.annotationId ? ` through annotation ${command.annotationId}` : ""}`,
+    );
+  }
+  asset.annotationLinks = asset.annotationLinks.filter(
+    (candidate) => !matchingAnnotationLinks.includes(candidate),
+  );
+  return {
+    nextState: state,
+    affectedIds: unique(affectedIds),
+    summary: annotation
+      ? `Removed annotation ${annotation.id} link from evidence ${asset.name}.`
+      : `Removed evidence link from ${asset.name}.`,
+    undoable: true,
+  };
+}
+
 function applyEvidenceDelete(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "evidence.delete" }>,
@@ -1538,7 +2376,9 @@ function applyEvidenceDelete(
   });
   state.actors.forEach((actor) => {
     actor.damageMarkers.forEach((marker) => {
-      marker.linkedEvidenceIds = marker.linkedEvidenceIds.filter((id) => id !== asset.id);
+      if (marker.linkedEvidenceIds.includes(asset.id)) {
+        setDamageEvidenceRelation(marker, asset, false);
+      }
     });
   });
   state.branches.forEach((branch) => {
@@ -1583,6 +2423,7 @@ function applyEvidenceDelete(
     affectedIds,
     summary: "Human deleted evidence and scrubbed its active metadata.",
     undoable: false,
+    historyBarrier: true,
   };
 }
 
@@ -1623,7 +2464,12 @@ function applyQuestionAdd(
   state.questions = rankOpenQuestions([...state.questions, question]);
   return {
     nextState: state,
-    affectedIds: [question.id],
+    affectedIds: unique([
+      question.id,
+      ...question.relatedClaimIds,
+      ...question.relatedSceneObjectIds,
+      ...question.relatedBranchIds,
+    ]),
     summary: `Added open question: ${question.question}`,
     undoable: true,
   };
@@ -1676,10 +2522,20 @@ function applyQuestionUpdate(
         changeRecord(context, command, "Converted a human answer into a reported observation."),
       ],
     };
+    const damageLinkChanges = damageClaimLinkChanges(
+      state,
+      [],
+      observation.linkedSceneObjectIds,
+      command,
+    );
     state.claims.push(observation);
     state.branches.forEach((branch) => {
       branch.sharedClaimIds = unique([...branch.sharedClaimIds, observation.id]);
     });
+    for (const change of damageLinkChanges) {
+      setDamageClaimRelation(change.marker, observation, change.linked);
+      affectedIds.push(change.actor.id, change.marker.id);
+    }
     question.relatedClaimIds = unique([...question.relatedClaimIds, observation.id]);
     affectedIds.push(observation.id);
   }
@@ -1719,6 +2575,9 @@ function cloneBranchContents(
       changeHistory: [changeRecord(context, command, `Forked from trajectory ${source.id}.`)],
     };
   });
+  const claimIdMap = new Map(
+    parent.claimIds.map((claimId) => [claimId, context.makeId("claim")] as const),
+  );
   const eventIdMap = new Map<string, string>();
   const events = parent.eventIds.map((eventId) => {
     const source = requireEvent(state, eventId);
@@ -1728,13 +2587,15 @@ function cloneBranchContents(
       ...structuredClone(source),
       id: clonedId,
       branchId,
+      linkedClaimIds: source.linkedClaimIds.map((id) => claimIdMap.get(id) ?? id),
       createdBy: command.actor,
       changeHistory: [changeRecord(context, command, `Forked from event ${source.id}.`)],
     };
   });
   const claims: Claim[] = parent.claimIds.map((claimId) => {
     const source = requireClaim(state, claimId);
-    const clonedId = context.makeId("claim");
+    const clonedId = claimIdMap.get(source.id);
+    if (!clonedId) fail("INVALID_STATE", `Could not allocate a clone for claim ${source.id}`);
     const cloned: Claim = {
       ...structuredClone(source),
       id: clonedId,
@@ -1769,6 +2630,23 @@ function applyHypothesisFork(
   const parent = assertBranchEditable(state, command.parentBranchId);
   const branchId = reserveId(state, context, "branch", command.branchId);
   const cloned = cloneBranchContents(state, parent, branchId, command, context);
+  const clonedClaimIds = new Set(cloned.claims.map((claim) => claim.id));
+  const clonedEventIds = new Set(cloned.events.map((event) => event.id));
+  for (const event of cloned.events) {
+    for (const claimId of event.linkedClaimIds) {
+      if (!clonedClaimIds.has(claimId)) ensureUnlocked(requireClaim(state, claimId), "claim");
+    }
+  }
+  for (const claim of cloned.claims) {
+    for (const eventId of claim.linkedEventIds) {
+      if (!clonedEventIds.has(eventId))
+        ensureUnlocked(requireEvent(state, eventId), "timeline-event");
+    }
+  }
+  const clonedDamageClaimChanges = cloned.claims.map((claim) => ({
+    claim,
+    changes: damageClaimLinkChanges(state, [], claim.linkedSceneObjectIds, command),
+  }));
   for (const assumption of command.assumptions ?? []) {
     assertReferences(state, assumption.supportingEvidenceIds ?? [], "evidence");
     assertReferences(state, assumption.conflictingEvidenceIds ?? [], "evidence");
@@ -1805,6 +2683,25 @@ function applyHypothesisFork(
   state.branches.push(branch);
   state.activeBranchId = branch.id;
 
+  for (const { claim, changes } of clonedDamageClaimChanges) {
+    for (const change of changes) {
+      setDamageClaimRelation(change.marker, claim, change.linked);
+    }
+  }
+
+  for (const event of cloned.events) {
+    for (const claimId of event.linkedClaimIds) {
+      const claim = requireClaim(state, claimId);
+      claim.linkedEventIds = unique([...claim.linkedEventIds, event.id]);
+    }
+  }
+  for (const claim of cloned.claims) {
+    for (const eventId of claim.linkedEventIds) {
+      const event = requireEvent(state, eventId);
+      event.linkedClaimIds = unique([...event.linkedClaimIds, claim.id]);
+    }
+  }
+
   const relevantEvidence = new Set([
     ...cloned.events.flatMap((event) => event.linkedEvidenceIds),
     ...cloned.claims.flatMap((claim) => claim.linkedEvidenceIds),
@@ -1826,13 +2723,18 @@ function applyHypothesisFork(
   }
   return {
     nextState: state,
-    affectedIds: [
+    affectedIds: unique([
       branch.id,
       ...branch.trajectoryIds,
       ...branch.eventIds,
       ...branch.claimIds,
       ...branch.assumptions.map((assumption) => assumption.id),
-    ],
+      ...cloned.events.flatMap((event) => event.linkedClaimIds),
+      ...cloned.claims.flatMap((claim) => claim.linkedEventIds),
+      ...clonedDamageClaimChanges.flatMap(({ changes }) =>
+        changes.flatMap(({ actor, marker }) => [actor.id, marker.id]),
+      ),
+    ]),
     summary: `Created hypothesis: ${branch.name}.`,
     undoable: true,
   };
@@ -2041,6 +2943,121 @@ function applyReportReviewNote(
   };
 }
 
+function applyCompletenessAttest(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "completeness.attest" }>,
+  context: CommandExecutionContext,
+): MutationOutcome {
+  requireHumanUi(
+    command,
+    "HUMAN_CONFIRMATION_REQUIRED",
+    "Completeness records require an explicit human interface action",
+  );
+  const subject = command.attestation;
+  let summary: string;
+  const affectedIds = [state.id];
+  if (subject.kind === "no-evidence-supplied") {
+    if (state.evidence.some((asset) => !asset.deleted)) {
+      fail(
+        "INVALID_COMMAND",
+        "Available evidence is already indexed; a no-evidence record would be contradictory",
+      );
+    }
+    summary = "Human recorded that no evidence was supplied for this local case.";
+  } else if (subject.kind === "actor-damage") {
+    const actor = requireActor(state, subject.actorId);
+    if (actor.damageMarkers.length > 0) {
+      fail(
+        "INVALID_COMMAND",
+        `${actor.label} already has recorded damage; an unknown or not-assessed record would be contradictory`,
+      );
+    }
+    affectedIds.push(actor.id);
+    summary =
+      subject.outcome === "unknown"
+        ? `Human recorded that ${actor.label}’s damage location is unknown.`
+        : `Human recorded that damage was not assessed for ${actor.label}.`;
+  } else {
+    if (
+      state.questions.some(
+        (question) => question.status === "open" || question.status === "deferred",
+      )
+    ) {
+      fail(
+        "INVALID_COMMAND",
+        "Open or deferred questions are already the explicit uncertainty record for this case",
+      );
+    }
+    summary = "Human completed the uncertainty review and recorded that none remain open.";
+  }
+
+  const existing = state.completenessAttestations.find(
+    (attestation) =>
+      completenessAttestationKey(attestation) === completenessAttestationKey(subject),
+  );
+  if (
+    existing &&
+    isCompletenessAttestationCurrent(state, existing) &&
+    (subject.kind !== "actor-damage" ||
+      (existing.kind === "actor-damage" && existing.outcome === subject.outcome))
+  ) {
+    fail("INVALID_COMMAND", "This completeness record is already current.");
+  }
+
+  const attestationId = reserveId(state, context, "completeness-attestation");
+  state.completenessAttestations = state.completenessAttestations.filter(
+    (attestation) =>
+      completenessAttestationKey(attestation) !== completenessAttestationKey(subject),
+  );
+  const base = {
+    id: attestationId,
+    attestedBy: "human" as const,
+    origin: "ui" as const,
+    attestedAt: context.now,
+    basisFingerprint: completenessBasisFingerprint(state, subject),
+    humanAttestationTrusted: true,
+  };
+  state.completenessAttestations.push(
+    subject.kind === "actor-damage" ? { ...base, ...subject } : { ...base, kind: subject.kind },
+  );
+  return {
+    nextState: state,
+    affectedIds: unique([...affectedIds, attestationId, ...(existing ? [existing.id] : [])]),
+    summary,
+    undoable: true,
+  };
+}
+
+function applyCompletenessWithdraw(
+  state: ReplayCase,
+  command: Extract<ReplayMutationCommand, { type: "completeness.withdraw" }>,
+): MutationOutcome {
+  requireHumanUi(
+    command,
+    "HUMAN_CONFIRMATION_REQUIRED",
+    "Only a human using the interface may withdraw a completeness record",
+  );
+  const index = state.completenessAttestations.findIndex(
+    (attestation) => attestation.id === command.attestationId,
+  );
+  if (index < 0) {
+    fail("NOT_FOUND", `Completeness attestation ${command.attestationId} does not exist`);
+  }
+  const attestation = state.completenessAttestations[index];
+  if (!attestation) fail("INVALID_STATE", "Completeness attestation index is invalid");
+  state.completenessAttestations.splice(index, 1);
+  return {
+    nextState: state,
+    affectedIds: unique([
+      attestation.id,
+      state.id,
+      ...(attestation.kind === "actor-damage" ? [attestation.actorId] : []),
+    ]),
+    summary: "Human withdrew a completeness record for fresh review.",
+    undoable: true,
+  };
+}
+
 function applyReportFinalize(
   state: ReplayCase,
   command: Extract<ReplayMutationCommand, { type: "report.finalize" }>,
@@ -2057,6 +3074,48 @@ function applyReportFinalize(
     "HUMAN_FINALIZATION_REQUIRED",
     "Finalization requires the visible human review form",
   );
+  const reviewed = command.reviewedPreview;
+  if (reviewed.caseId !== state.id || reviewed.caseVersion !== state.caseVersion) {
+    fail(
+      "REPORT_PREVIEW_STALE",
+      "The reviewed report preview is stale. Build and review a fresh preview before finalizing.",
+      {
+        reviewedCaseId: reviewed.caseId,
+        reviewedCaseVersion: reviewed.caseVersion,
+        currentCaseId: state.id,
+        currentCaseVersion: state.caseVersion,
+      },
+    );
+  }
+  const preview = buildReportPreview(state, {
+    generatedAt: reviewed.generatedAt,
+    branchIds: reviewed.branchIds,
+    includeHypotheses: reviewed.includeHypotheses,
+  });
+  const binding = preview.reviewBinding;
+  if (!binding) {
+    fail(
+      "REPORT_PREVIEW_STALE",
+      "The current report preview could not be bound for review. Build it again before finalizing.",
+    );
+  }
+  if (
+    binding.fingerprint !== reviewed.fingerprint ||
+    binding.includeHypotheses !== reviewed.includeHypotheses ||
+    binding.branchIds.length !== reviewed.branchIds.length ||
+    binding.branchIds.some((branchId, index) => branchId !== reviewed.branchIds[index])
+  ) {
+    fail(
+      "REPORT_PREVIEW_STALE",
+      "The visible report preview no longer matches current case content or branch scope. Build and review a fresh preview before finalizing.",
+      {
+        reviewedFingerprint: reviewed.fingerprint,
+        currentFingerprint: binding.fingerprint,
+        reviewedBranchIds: reviewed.branchIds,
+        currentBranchIds: binding.branchIds,
+      },
+    );
+  }
   const blockingIssues = state.consistencyIssues.filter((item) => item.severity === "error");
   if (blockingIssues.length > 0) {
     fail(
@@ -2067,18 +3126,17 @@ function applyReportFinalize(
       },
     );
   }
-  const originalVersion = state.caseVersion;
-  state.caseVersion = context.nextVersion;
-  const preview = buildReportPreview(state, {
-    generatedAt: context.now,
-    ...(command.includeHypotheses !== undefined
-      ? { includeHypotheses: command.includeHypotheses }
-      : {}),
-  });
-  state.caseVersion = originalVersion;
   if (preview.missingRequirements.length > 0) {
     fail("REPORT_REQUIREMENTS_MISSING", "The report preview is missing required information", {
       missingRequirements: preview.missingRequirements,
+    });
+  }
+  const reportErrors = validateCurrentReportPreview(state, preview).filter(
+    (issue) => issue.severity === "error",
+  );
+  if (reportErrors.length > 0) {
+    fail("REPORT_REQUIREMENTS_MISSING", "The report contains unsupported or invalid citations", {
+      issueIds: reportErrors.map((issue) => issue.id),
     });
   }
   const snapshotId = reserveId(state, context, "report-snapshot");
@@ -2088,8 +3146,11 @@ function applyReportFinalize(
   );
   if (humanReviewStatement) {
     humanReviewStatement.text =
-      "A human reviewed the unresolved questions, acknowledged the method and limitations, reviewed the confirmed facts, and manually finalized this snapshot.";
+      "A human reviewed the unresolved questions, acknowledged the method and limitations, reviewed the confirmed facts and every included unconfirmed or hypothesis statement, and manually finalized this snapshot.";
   }
+  const finalizedPreviewContent = structuredClone(preview);
+  delete finalizedPreviewContent.reviewBinding;
+  preview.reviewBinding = createReportPreviewReviewBinding(finalizedPreviewContent, binding);
   state.reportSnapshots.push({
     id: snapshotId,
     caseVersion: context.nextVersion,
@@ -2100,55 +3161,17 @@ function applyReportFinalize(
     }),
     includedEvidenceIds: preview.includedEvidenceIds,
     unresolvedQuestionIds: preview.unresolvedQuestionIds,
-    branchIds: state.branches
-      .filter((branch) => branch.status === "active")
-      .map((branch) => branch.id),
+    branchIds: binding.branchIds,
     humanAcknowledged: true,
     immutable: true,
     preview,
   });
-  const reportErrors = validateConsistency(state, { scope: "report" }).filter(
-    (issue) => issue.severity === "error",
-  );
-  if (reportErrors.length > 0) {
-    fail("REPORT_REQUIREMENTS_MISSING", "The report contains unsupported or invalid citations", {
-      issueIds: reportErrors.map((issue) => issue.id),
-    });
-  }
-  state.workspaceMode = "report";
-  state.selectedItem = { type: "report", id: snapshotId };
   return {
     nextState: state,
     affectedIds: [snapshotId],
     summary: "Human finalized an immutable factual report snapshot.",
     undoable: false,
     historyBarrier: true,
-  };
-}
-
-function applyWorkspaceFocus(
-  state: ReplayCase,
-  command: Extract<ReplayMutationCommand, { type: "workspace.focus" }>,
-): MutationOutcome {
-  const known: Record<typeof command.itemType, Set<string>> = {
-    actor: new Set(state.actors.map((item) => item.id)),
-    trajectory: new Set(state.trajectories.map((item) => item.id)),
-    "timeline-event": new Set(state.timelineEvents.map((item) => item.id)),
-    claim: new Set(state.claims.map((item) => item.id)),
-    evidence: new Set(state.evidence.filter((item) => !item.deleted).map((item) => item.id)),
-    question: new Set(state.questions.map((item) => item.id)),
-    hypothesis: new Set(state.branches.map((item) => item.id)),
-    report: new Set([state.id, "report-preview", ...state.reportSnapshots.map((item) => item.id)]),
-  };
-  if (!known[command.itemType].has(command.itemId))
-    fail("NOT_FOUND", `Workspace item ${command.itemId} does not exist`);
-  state.workspaceMode = command.workspaceMode;
-  state.selectedItem = { type: command.itemType, id: command.itemId };
-  return {
-    nextState: state,
-    affectedIds: [command.itemId],
-    summary: `Focused ${command.itemType} ${command.itemId}.`,
-    undoable: false,
   };
 }
 
@@ -2190,9 +3213,11 @@ export function applyReplayMutation(
     case "evidence.add":
       return applyEvidenceAdd(state, command, context);
     case "evidence.update":
-      return applyEvidenceUpdate(state, command);
+      return applyEvidenceUpdate(state, command, context);
     case "evidence.link":
       return applyEvidenceLink(state, command, context);
+    case "evidence.unlink":
+      return applyEvidenceUnlink(state, command, context);
     case "evidence.delete":
       return applyEvidenceDelete(state, command, context);
     case "question.add":
@@ -2217,10 +3242,12 @@ export function applyReplayMutation(
       return applyReportAddNote(state, command, context);
     case "report.review-note":
       return applyReportReviewNote(state, command);
+    case "completeness.attest":
+      return applyCompletenessAttest(state, command, context);
+    case "completeness.withdraw":
+      return applyCompletenessWithdraw(state, command);
     case "report.finalize":
       return applyReportFinalize(state, command, context);
-    case "workspace.focus":
-      return applyWorkspaceFocus(state, command);
     case "case.validate":
       return {
         nextState: state,

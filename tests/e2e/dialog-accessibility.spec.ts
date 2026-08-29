@@ -16,6 +16,7 @@ test.describe("Dialog keyboard accessibility", () => {
     const closeEvent = eventDialog.getByRole("button", { name: "Close event editor" });
     const submitEvent = eventDialog.getByRole("button", { name: "Add at 0:00.0" });
     await expect(eventTitle).toBeFocused();
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
 
     await closeEvent.focus();
     await closeEvent.press("Shift+Tab");
@@ -25,6 +26,7 @@ test.describe("Dialog keyboard accessibility", () => {
     await page.keyboard.press("Escape");
     await expect(eventDialog).toHaveCount(0);
     await expect(addEvent).toBeFocused();
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
 
     const siteTools = page.locator("button.webmcp-status");
     await siteTools.focus();
@@ -33,6 +35,8 @@ test.describe("Dialog keyboard accessibility", () => {
     const closeGuide = guideDialog.getByRole("button", { name: "Close REPLAY guide" });
     const lastGuideButton = guideDialog.getByRole("button").last();
     await expect(closeGuide).toBeFocused();
+    await expect(page.locator("html")).toHaveCSS("overflow", "hidden");
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
     await closeGuide.press("Shift+Tab");
     await expect(lastGuideButton).toBeFocused();
     await lastGuideButton.press("Tab");
@@ -40,6 +44,16 @@ test.describe("Dialog keyboard accessibility", () => {
     await page.keyboard.press("Escape");
     await expect(guideDialog).toHaveCount(0);
     await expect(siteTools).toBeFocused();
+    await expect(page.locator("html")).not.toHaveCSS("overflow", "hidden");
+    await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+    await expect
+      .poll(() =>
+        page.evaluate(() => ({
+          documentElement: document.documentElement.style.overflow,
+          body: document.body.style.overflow,
+        })),
+      )
+      .toEqual({ documentElement: "", body: "" });
 
     const { dialog: webMcpDialog, invoker } = await openWebMCPInspector(page);
     const closeWebMcp = webMcpDialog.getByRole("button", { name: "Close WebMCP inspector" });
@@ -86,12 +100,16 @@ test.describe("Dialog keyboard accessibility", () => {
     const reviewButton = page.getByRole("button", { name: "Review and finalize" });
     await reviewButton.click();
     let reviewDialog = page.getByRole("dialog", { name: "Review before finalizing" });
+    const reviewTitle = reviewDialog.getByRole("heading", { name: "Review before finalizing" });
     const unresolved = reviewDialog.getByLabel("I reviewed unresolved questions.");
-    await expect(unresolved).toBeFocused();
+    await expect(reviewTitle).toBeFocused();
 
     await unresolved.check();
     await reviewDialog.getByLabel("I acknowledge the method and limitations.").check();
     await reviewDialog.getByLabel("I reviewed every confirmed fact.").check();
+    await reviewDialog
+      .getByLabel("I reviewed every included unconfirmed and hypothesis statement.")
+      .check();
     await reviewDialog.getByRole("button", { name: "Continue to confirmation" }).click();
 
     const confirmation = page.getByRole("alertdialog", {
@@ -108,7 +126,9 @@ test.describe("Dialog keyboard accessibility", () => {
     reviewDialog = page.getByRole("dialog", { name: "Review before finalizing" });
     await expect(reviewDialog).toBeVisible();
     await expect(reviewDialog.getByLabel("I reviewed unresolved questions.")).toBeChecked();
-    await expect(reviewDialog.getByLabel("I reviewed unresolved questions.")).toBeFocused();
+    await expect(
+      reviewDialog.getByRole("heading", { name: "Review before finalizing" }),
+    ).toBeFocused();
 
     await page.keyboard.press("Escape");
     await expect(reviewDialog).toHaveCount(0);

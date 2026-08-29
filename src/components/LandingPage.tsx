@@ -11,21 +11,32 @@ import {
   Route,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEMO_SCENARIO_METADATA, type DemoScenarioId } from "../domain/demoScenarios";
 import { BrandMark } from "./BrandMark";
 import { ReplayGuide, type GuideSectionId } from "./ReplayGuide";
+import { useDialogFocus } from "./useDialogFocus";
 
 interface LandingPageProps {
   webMcpSupported: boolean;
-  recentCaseTitle?: string;
+  localCases?: LandingLocalCase[];
   onOpenDemo: () => void;
   onOpenGuidedDemo: () => void;
   onStartBlank: () => void;
   onOpenCollaboration: () => void;
   onOpenScenario?: (id: DemoScenarioId) => void;
-  onResumeCase?: () => void;
+  onOpenLocalCase?: (caseId: string) => void;
+  onDeleteLocalCase?: (caseId: string) => Promise<void>;
+}
+
+export interface LandingLocalCase {
+  id: string;
+  title: string;
+  updatedAt: string;
+  caseVersion: number;
+  isDemo: boolean;
 }
 
 const steps = [
@@ -49,20 +60,85 @@ const steps = [
   },
 ];
 
+const localCaseTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+function formatLocalCaseTime(value: string): string {
+  return localCaseTimeFormatter.format(new Date(value));
+}
+
+const SOURCE_REPOSITORY_URL = "https://github.com/artem-musii/replay-sol";
+const MIT_LICENSE_URL = `${SOURCE_REPOSITORY_URL}/blob/main/LICENSE`;
+
 export function LandingPage({
   webMcpSupported,
-  recentCaseTitle,
+  localCases = [],
   onOpenDemo,
   onOpenGuidedDemo,
   onStartBlank,
   onOpenCollaboration,
   onOpenScenario,
-  onResumeCase,
+  onOpenLocalCase,
+  onDeleteLocalCase,
 }: LandingPageProps) {
   const [guideSection, setGuideSection] = useState<GuideSectionId>();
+  const [deleteCandidate, setDeleteCandidate] = useState<LandingLocalCase>();
+  const [deletingCaseId, setDeletingCaseId] = useState<string>();
+  const [deleteError, setDeleteError] = useState(false);
+  const [deleteAnnouncement, setDeleteAnnouncement] = useState<string>();
+  const deleteInFlightRef = useRef(false);
+  const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const deleteDialogRef = useDialogFocus<HTMLElement>({
+    active: Boolean(deleteCandidate),
+    initialFocusRef: deleteCancelButtonRef,
+    onEscape: () => {
+      if (deleteInFlightRef.current) return;
+      setDeleteCandidate(undefined);
+      setDeleteError(false);
+    },
+  });
   const isSharedGitHubPagesOrigin = window.location.hostname.endsWith(".github.io");
+
+  useEffect(() => {
+    if (!deleteAnnouncement) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("local-case-delete-status")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [deleteAnnouncement]);
+
+  async function confirmLocalCaseDeletion(): Promise<void> {
+    if (!deleteCandidate || !onDeleteLocalCase || deleteInFlightRef.current) return;
+    deleteInFlightRef.current = true;
+    setDeletingCaseId(deleteCandidate.id);
+    setDeleteError(false);
+    try {
+      await onDeleteLocalCase(deleteCandidate.id);
+      setDeleteAnnouncement(`Deleted ${deleteCandidate.title} from this browser.`);
+      setDeleteCandidate(undefined);
+    } catch {
+      setDeleteError(true);
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeletingCaseId(undefined);
+    }
+  }
+
+  function requestLocalCaseDeletion(localCase: LandingLocalCase): void {
+    if (deleteInFlightRef.current) return;
+    setDeleteAnnouncement(undefined);
+    setDeleteError(false);
+    setDeleteCandidate(localCase);
+  }
+
   return (
-    <main className="landing">
+    <main className="landing" id="top">
       <nav className="landing-nav" aria-label="Primary navigation">
         <a href="#top" className="landing-nav__brand">
           <BrandMark />
@@ -92,19 +168,19 @@ export function LandingPage({
           </p>
           <h1>A shared black box for incidents that did not have one.</h1>
           <p className="landing-hero__lede">
-            Reconstruct a minor road incident with an AI agent while preserving the difference
-            between evidence, memory, uncertainty, and inference.
+            Reconstruct a minor road incident with an AI agent working through WebMCP Site Tools,
+            while preserving the difference between evidence, memory, uncertainty, and inference.
           </p>
           <div className="landing-hero__actions">
             <button className="button button--primary button--large" onClick={onOpenDemo}>
-              Open a clean demo <ArrowRight size={17} aria-hidden="true" />
+              Open Roundabout demo <ArrowRight size={17} aria-hidden="true" />
             </button>
             <button className="button button--secondary button--large" onClick={onStartBlank}>
               Start a blank case
             </button>
           </div>
           <button className="guided-demo-link" onClick={onOpenGuidedDemo}>
-            <BookOpen size={15} aria-hidden="true" /> Guided demo · about 4 minutes
+            <BookOpen size={15} aria-hidden="true" /> Take the 6-step guided tour
           </button>
           <ul className="landing-hero__assurances" aria-label="Product assurances">
             <li>
@@ -117,18 +193,13 @@ export function LandingPage({
               <ShieldCheck size={14} /> Human-approved reports
             </li>
           </ul>
-          {recentCaseTitle && onResumeCase && (
-            <button className="resume-case" onClick={onResumeCase}>
-              <span>Continue local case</span>
-              <strong>{recentCaseTitle}</strong>
-              <ArrowRight size={15} aria-hidden="true" />
-            </button>
-          )}
         </div>
         <figure className="landing-hero__visual">
           <div className="landing-hero__frame">
             <img
               src={`${import.meta.env.BASE_URL}assets/generated/replay-hero.webp`}
+              srcSet={`${import.meta.env.BASE_URL}assets/generated/replay-hero-640.webp 640w, ${import.meta.env.BASE_URL}assets/generated/replay-hero-1200.webp 1200w, ${import.meta.env.BASE_URL}assets/generated/replay-hero.webp 1672w`}
+              sizes="(max-width: 540px) calc(100vw - 62px), (max-width: 800px) calc(100vw + 100px), 60vw"
               width="1672"
               height="941"
               alt="Editorial top-down illustration of a roundabout reconstruction with two vehicles, trajectories, evidence photographs, a timeline, and provenance nodes."
@@ -141,6 +212,70 @@ export function LandingPage({
           </div>
         </figure>
       </section>
+
+      {deleteAnnouncement && (
+        <p
+          className="local-case-delete-status"
+          id="local-case-delete-status"
+          role="status"
+          tabIndex={-1}
+        >
+          <CheckCircle2 size={17} aria-hidden="true" />
+          {deleteAnnouncement}
+        </p>
+      )}
+
+      {localCases.length > 0 && onOpenLocalCase && (
+        <section className="local-case-library" aria-labelledby="local-cases-title">
+          <header className="local-case-library__heading">
+            <div>
+              <p className="section-kicker">This browser</p>
+              <h2 id="local-cases-title">Your local cases</h2>
+            </div>
+            <p>
+              Reopen any retained case. Site Tools may share structured case fields with the
+              connected agent; uploaded image bytes stay in this browser.
+            </p>
+          </header>
+          <ul aria-label="Local cases">
+            {localCases.map((localCase, index) => (
+              <li key={localCase.id}>
+                <div className="local-case-item">
+                  <button
+                    className="local-case-row"
+                    aria-label={`Open local case: ${localCase.title} (${String(index + 1)} of ${String(localCases.length)})`}
+                    onClick={() => onOpenLocalCase(localCase.id)}
+                  >
+                    <span className="local-case-row__kind">
+                      {localCase.isDemo ? "Demo run" : "Local case"}
+                      {index === 0 && <small>Most recent</small>}
+                    </span>
+                    <strong>{localCase.title}</strong>
+                    <span className="local-case-row__details">
+                      <span>v{localCase.caseVersion}</span>
+                      <time dateTime={localCase.updatedAt}>
+                        Updated {formatLocalCaseTime(localCase.updatedAt)}
+                      </time>
+                    </span>
+                    <ArrowRight size={17} aria-hidden="true" />
+                  </button>
+                  {onDeleteLocalCase && (
+                    <button
+                      className="local-case-row__delete"
+                      type="button"
+                      aria-label={`Delete local case: ${localCase.title}`}
+                      title={`Delete ${localCase.title} from this browser`}
+                      onClick={() => requestLocalCaseDeletion(localCase)}
+                    >
+                      <Trash2 size={17} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="landing-thesis" aria-labelledby="thesis-title">
         <p className="section-kicker">One inspectable account</p>
@@ -172,16 +307,16 @@ export function LandingPage({
               <h2 id="scenario-lab-title">Test the model on roads that behave differently.</h2>
             </div>
             <p>
-              Four synthetic cases cover calibrated contact, braking, crossing movement, and an
-              attributable record contradiction. WebMCP reports what conflicts without deciding why
-              it conflicts.
+              Four synthetic cases cover calibrated contact, high-speed braking, crossing movement,
+              and an attributable record contradiction. WebMCP reports what conflicts without
+              deciding why it conflicts.
             </p>
           </header>
           <div className="scenario-lab__grid">
             {DEMO_SCENARIO_METADATA.map((scenario) => (
               <article
                 key={scenario.id}
-                className={`scenario-card${scenario.adversarial ? " is-adversarial" : ""}`}
+                className={`scenario-card${scenario.adversarial ? " is-adversarial" : ""}${scenario.highSpeed ? " is-high-speed" : ""}`}
               >
                 <div className="scenario-card__meta">
                   <span>
@@ -192,7 +327,11 @@ export function LandingPage({
                     ) : (
                       <Route size={14} aria-hidden="true" />
                     )}
-                    {scenario.adversarial ? "Contradiction test" : "Plausibility case"}
+                    {scenario.adversarial
+                      ? "Contradiction test"
+                      : scenario.highSpeed
+                        ? "High-speed review"
+                        : "Plausibility case"}
                   </span>
                   <small>{scenario.sceneType.replaceAll("-", " ")}</small>
                 </div>
@@ -203,7 +342,7 @@ export function LandingPage({
                   <button
                     className="text-button"
                     onClick={() => onOpenScenario(scenario.id)}
-                    aria-label={`Open ${scenario.title}`}
+                    aria-label={`Open case: ${scenario.title}`}
                   >
                     Open case <ArrowRight size={14} aria-hidden="true" />
                   </button>
@@ -299,10 +438,10 @@ export function LandingPage({
       <section className="landing-closing">
         <div>
           <p className="section-kicker">A complete case is already waiting</p>
-          <h2>See the human-agent loop in under three minutes.</h2>
+          <h2>Explore a complete case in under three minutes.</h2>
         </div>
         <button className="button button--primary button--large" onClick={onOpenDemo}>
-          Open a fresh Roundabout incident — 17:42 <ArrowRight size={17} />
+          Open fresh Roundabout demo <ArrowRight size={17} />
         </button>
       </section>
 
@@ -311,7 +450,29 @@ export function LandingPage({
         <p>
           Evidence-bound incident documentation. Local-first, open source, and human-controlled.
         </p>
-        <span>REPLAY · 2026</span>
+        <span className="landing-footer__meta">
+          <span>REPLAY · 2026</span>
+          <a href={SOURCE_REPOSITORY_URL} target="_blank" rel="noreferrer">
+            Source
+          </a>
+          <a href={MIT_LICENSE_URL} target="_blank" rel="noreferrer">
+            MIT License
+          </a>
+          <a
+            href={`${import.meta.env.BASE_URL}licenses/inter-OFL-1.1.txt`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Inter font license
+          </a>
+          <a
+            href={`${import.meta.env.BASE_URL}licenses/noto-sans-Apache-2.0.txt`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Noto Sans license
+          </a>
+        </span>
       </footer>
       {guideSection && (
         <ReplayGuide
@@ -322,6 +483,62 @@ export function LandingPage({
           onClose={() => setGuideSection(undefined)}
           onOpenGuidedDemo={onOpenGuidedDemo}
         />
+      )}
+      {deleteCandidate && (
+        <div className="dialog-backdrop" role="presentation">
+          <section
+            ref={deleteDialogRef}
+            className="dialog confirm-dialog local-case-delete-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="local-case-delete-title"
+            aria-describedby="local-case-delete-description local-case-delete-boundary"
+            aria-busy={deletingCaseId === deleteCandidate.id}
+            tabIndex={-1}
+          >
+            <div className="dialog-icon is-destructive">
+              <Trash2 size={20} aria-hidden="true" />
+            </div>
+            <h2 id="local-case-delete-title">Delete “{deleteCandidate.title}”?</h2>
+            <p id="local-case-delete-description">
+              This permanently removes the saved case and its locally stored evidence from this
+              browser. Exported files are not affected, and previously shared information cannot be
+              retracted by REPLAY.
+            </p>
+            <p className="local-case-delete-dialog__boundary" id="local-case-delete-boundary">
+              Site Tools cannot request or confirm this deletion. It only runs from this visible
+              human control.
+            </p>
+            {deleteError && (
+              <p className="local-case-delete-dialog__error" role="alert">
+                REPLAY could not finish removing this case. It remains listed so you can retry.
+                Check that browser storage is available.
+              </p>
+            )}
+            <footer>
+              <button
+                ref={deleteCancelButtonRef}
+                className="button button--quiet"
+                type="button"
+                disabled={deletingCaseId === deleteCandidate.id}
+                onClick={() => {
+                  setDeleteCandidate(undefined);
+                  setDeleteError(false);
+                }}
+              >
+                Keep case
+              </button>
+              <button
+                className="button button--danger"
+                type="button"
+                disabled={deletingCaseId === deleteCandidate.id}
+                onClick={() => void confirmLocalCaseDeletion()}
+              >
+                {deletingCaseId === deleteCandidate.id ? "Deleting…" : "Delete local case"}
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
     </main>
   );

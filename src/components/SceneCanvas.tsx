@@ -1,4 +1,5 @@
 import {
+  CarFront,
   CircleAlert,
   Crosshair,
   Focus,
@@ -13,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { interpolateTrajectory, sampleTrajectory } from "../domain/interpolation";
+import { clampTimeToRange, interpolateTrajectory, sampleTrajectory } from "../domain/interpolation";
 import {
   analyzeVehicleFootprintRelation,
   createSceneMetricCalibration,
@@ -23,12 +24,13 @@ import {
 } from "../domain/physics";
 import {
   getRoadTemplate,
-  normalizedToView,
   SCENE_VIEW_HEIGHT,
   SCENE_VIEW_WIDTH,
   snapPointToRoadLane,
-  viewToNormalized,
 } from "../domain/roadTemplates";
+import { createSceneCoordinateMapper, formatSceneCoordinate } from "../domain/sceneCoordinates";
+import { getAcceptedProposalGeometryTrust } from "../domain/proposalProvenance";
+import { resolveProposalReviewRequest, type ProposalReviewTarget } from "../domain/proposalReview";
 import type {
   ActorPose,
   DamageRegion,
@@ -41,6 +43,14 @@ import type {
   Trajectory,
 } from "../domain/models";
 
+type ImpactActorPair = [string, string];
+
+interface ImpactPlacementContext {
+  branchId: string;
+  timeMs: number;
+  actorIds: ImpactActorPair;
+}
+
 interface SceneCanvasProps {
   replayCase: ReplayCase;
   currentTimeMs: number;
@@ -48,14 +58,15 @@ interface SceneCanvasProps {
   selectedKeyframeId?: string;
   comparisonBranchIds?: string[];
   activeAgentIds?: string[];
+  proposalReviewTarget?: ProposalReviewTarget;
   onSelect: (type: "actor" | "trajectory" | "timeline-event", id: string) => void;
   onSelectKeyframe: (trajectoryId: string, keyframeId: string) => void;
   onEditStart: () => void;
   onMoveActor: (actorId: string, pose: ActorPose) => void;
   onMoveKeyframe: (trajectoryId: string, keyframeId: string, x: number, y: number) => void;
   onCreateTrajectory: (actorId: string) => void;
-  onMarkDamage: (actorId: string, region: DamageRegion, description: string) => void;
-  onMarkImpact: (location: { x: number; y: number }) => void;
+  onMarkDamage: (actorId: string, region: DamageRegion, description: string) => boolean;
+  onMarkImpact: (location: { x: number; y: number }, context: ImpactPlacementContext) => boolean;
   onToggleActorLock: (actorId: string) => void;
   onToggleTrajectoryLock: (trajectoryId: string) => void;
   onToggleEventLock: (eventId: string) => void;
@@ -153,12 +164,24 @@ function polygonPoints(points: readonly Point[]): string {
   return points.map((point) => `${point.x},${point.y}`).join(" ");
 }
 
-function toView(x: number, y: number) {
-  return normalizedToView({ x, y });
-}
-
-function toNormalized(x: number, y: number) {
-  return viewToNormalized({ x, y });
+function roadPolygonMatchesBounds(
+  points: readonly Point[],
+  bounds: ReplayCase["environment"]["bounds"],
+): boolean {
+  if (points.length !== 4) return false;
+  const tolerance = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 1e-9;
+  const corners = [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+  ];
+  return corners.every((corner) =>
+    points.some(
+      (point) =>
+        Math.abs(point.x - corner.x) <= tolerance && Math.abs(point.y - corner.y) <= tolerance,
+    ),
+  );
 }
 
 function formatSceneSeconds(timeMs: number): string {
@@ -179,6 +202,45 @@ function actorBadge(label: string): string {
   return initials || "V";
 }
 
+function exactImpactActorPair(event: TimelineEvent): ImpactActorPair | undefined {
+  const actorIds = [...new Set(event.linkedActorIds)];
+  const first = actorIds[0];
+  const second = actorIds[1];
+  return actorIds.length === 2 && first && second ? [first, second] : undefined;
+}
+
+function impactActorPairMatches(event: TimelineEvent, actorIds: ImpactActorPair): boolean {
+  const pair = exactImpactActorPair(event);
+  return Boolean(pair && pair.includes(actorIds[0]) && pair.includes(actorIds[1]));
+}
+
+function defaultImpactActorPair(actors: readonly SceneActor[]): ImpactActorPair | undefined {
+  const first = actors[0];
+  const second = actors[1];
+  return first && second ? [first.id, second.id] : undefined;
+}
+
+function actorLabelForId(actors: readonly SceneActor[], actorId: string): string {
+  return actors.find((actor) => actor.id === actorId)?.label ?? actorId;
+}
+
+function listActorLabels(labels: readonly string[]): string {
+  if (labels.length === 0) return "unidentified vehicles";
+  if (labels.length === 1) return labels[0] ?? "unidentified vehicle";
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+}
+
+function impactActorDescription(
+  actorIds: readonly string[],
+  actors: readonly SceneActor[],
+): string {
+  const labels = [...new Set(actorIds)].map((actorId) => actorLabelForId(actors, actorId));
+  return labels.length === 2
+    ? `between ${listActorLabels(labels)}`
+    : `involving ${listActorLabels(labels)}`;
+}
+
 function contactReadout(
   state: ContactDisplayState,
   pair: CurrentPairGeometry | undefined,
@@ -191,7 +253,7 @@ function contactReadout(
     const certainty = pair.matchingImpact?.certainty ?? "unknown";
     return {
       title: "Impact event geometry · footprints meet",
-      detail: `${labels} · event status: ${certainty} · modeled penetration ${pair.relation.penetrationDepthM.toFixed(2)} m at ${time}`,
+      detail: `${labels} · event status: ${certainty} · footprint overlap depth ${pair.relation.penetrationDepthM.toFixed(2)} m at ${time}`,
     };
   }
   if (state === "excessive" && pair) {
@@ -239,6 +301,7 @@ export function SceneCanvas({
   selectedKeyframeId,
   comparisonBranchIds = [],
   activeAgentIds = [],
+  proposalReviewTarget,
   onSelect,
   onSelectKeyframe,
   onEditStart,
@@ -261,11 +324,34 @@ export function SceneCanvas({
   const [snapToLane, setSnapToLane] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
   const [showPaths, setShowPaths] = useState(true);
-  const [placingImpact, setPlacingImpact] = useState(false);
-  const [damageEditorOpen, setDamageEditorOpen] = useState(false);
+  const [impactPlacementContext, setImpactPlacementContext] = useState<ImpactPlacementContext>();
+  const placingImpact = impactPlacementContext?.branchId === replayCase.activeBranchId;
+  const [damageActorId, setDamageActorId] = useState<string>();
   const [damageRegion, setDamageRegion] = useState<DamageRegion>("unknown");
   const [damageDescription, setDamageDescription] = useState("");
   const roadTemplate = getRoadTemplate(replayCase.environment.sceneType);
+  const physicalModelFormStateKey = JSON.stringify([
+    replayCase.environment.sceneType,
+    replayCase.environment.calibration.widthMeters,
+    replayCase.environment.calibration.heightMeters,
+    replayCase.environment.calibration.uncertaintyMeters,
+    replayCase.environment.calibration.source,
+    replayCase.environment.postedSpeedLimitKph ?? null,
+    replayCase.environment.roadCondition,
+    replayCase.environment.trafficSide,
+  ]);
+  const sceneBounds = replayCase.environment.bounds;
+  const sceneCoordinates = useMemo(
+    () => createSceneCoordinateMapper(sceneBounds, VIEW_WIDTH, VIEW_HEIGHT),
+    [sceneBounds],
+  );
+  const configuredRoadBoundary = useMemo(() => {
+    if (roadPolygonMatchesBounds(replayCase.environment.roadPolygon, sceneBounds)) return undefined;
+    return polygonPoints(
+      replayCase.environment.roadPolygon.map((point) => sceneCoordinates.toView(point)),
+    );
+  }, [replayCase.environment.roadPolygon, sceneBounds, sceneCoordinates]);
+  const toView = (x: number, y: number): Point => sceneCoordinates.toView({ x, y });
   const pixelsPerMeterX = VIEW_WIDTH / replayCase.environment.calibration.widthMeters;
   const pixelsPerMeterY = VIEW_HEIGHT / replayCase.environment.calibration.heightMeters;
 
@@ -275,41 +361,96 @@ export function SceneCanvas({
   const displayedTrajectories = replayCase.trajectories.filter(
     (trajectory) => displayedBranchIds.has(trajectory.branchId) && trajectory.visible,
   );
-  const acceptedProposalActorIds = new Set<string>();
-  const acceptedProposalTrajectoryIds = new Set<string>();
-  for (const proposal of replayCase.proposals) {
-    if (proposal.status !== "accepted" || !proposal.decision) continue;
-    const revision = proposal.revisions.find(
-      (candidate) => candidate.id === proposal.decision?.revisionId,
-    );
-    if (!revision) continue;
-    for (const change of revision.changes) {
-      const actor = replayCase.actors.find((candidate) => candidate.id === change.actorId);
-      if (actor?.lastEditedAt === proposal.decision.decidedAt) {
-        acceptedProposalActorIds.add(actor.id);
-      }
-      if (change.kind === "trajectory-set") {
-        const trajectory = replayCase.trajectories.find(
-          (candidate) => candidate.id === change.trajectoryId,
-        );
-        if (trajectory?.changeHistory.at(-1)?.createdAt === proposal.decision.decidedAt) {
-          acceptedProposalTrajectoryIds.add(trajectory.id);
-        }
-      }
-    }
-  }
+  const acceptedProposalGeometryTrust = getAcceptedProposalGeometryTrust(replayCase);
   const hasAgentAuthoredPath = displayedTrajectories.some(
     (trajectory) =>
-      trajectory.createdBy === "agent" || trajectory.changeHistory.at(-1)?.author === "agent",
+      !acceptedProposalGeometryTrust.trajectoryIds.has(trajectory.id) &&
+      (trajectory.createdBy === "agent" || trajectory.changeHistory.at(-1)?.author === "agent"),
   );
   const hasAcceptedAgentGeometry =
-    acceptedProposalActorIds.size > 0 || acceptedProposalTrajectoryIds.size > 0;
+    [...acceptedProposalGeometryTrust.actorIds.values()].includes("local-human-attested") ||
+    [...acceptedProposalGeometryTrust.trajectoryIds.values()].includes("local-human-attested");
+  const hasUnverifiedImportedGeometry =
+    [...acceptedProposalGeometryTrust.actorIds.values()].includes("unverified-import") ||
+    [...acceptedProposalGeometryTrust.trajectoryIds.values()].includes("unverified-import");
   const hasDirectAgentActorGeometry = replayCase.actors.some(
-    (actor) => actor.lastEditedBy === "agent",
+    (actor) =>
+      !acceptedProposalGeometryTrust.actorIds.has(actor.id) && actor.lastEditedBy === "agent",
   );
   const pendingProposalChanges = replayCase.proposals
     .filter((proposal) => proposal.status === "pending")
     .flatMap((proposal) => proposal.revisions.at(-1)?.changes ?? []);
+  const displayedPendingProposalChanges = pendingProposalChanges.filter(
+    (change) => change.branchId === replayCase.activeBranchId,
+  );
+  const unverifiedPendingChangeIds = new Set(
+    replayCase.proposals
+      .filter((proposal) => proposal.status === "pending")
+      .flatMap((proposal) => {
+        const revision = proposal.revisions.at(-1);
+        return revision && !revision.authorshipTrusted
+          ? revision.changes.map((change) => change.id)
+          : [];
+      }),
+  );
+  const hasTrustedPendingProposal = displayedPendingProposalChanges.some(
+    (change) => !unverifiedPendingChangeIds.has(change.id),
+  );
+  const hasUnverifiedPendingProposal = displayedPendingProposalChanges.some((change) =>
+    unverifiedPendingChangeIds.has(change.id),
+  );
+  const resolvedProposalReview = proposalReviewTarget
+    ? resolveProposalReviewRequest(proposalReviewTarget, {
+        activeBranchId: replayCase.activeBranchId,
+        timeRangeMs: replayCase.timeRangeMs,
+      })
+    : undefined;
+  const activeProposalReviewTarget =
+    resolvedProposalReview?.ok === true &&
+    resolvedProposalReview.target.reviewTimeMs === proposalReviewTarget?.reviewTimeMs
+      ? resolvedProposalReview.target
+      : undefined;
+  const reviewedProposal = activeProposalReviewTarget
+    ? replayCase.proposals.find(
+        (proposal) =>
+          proposal.id === activeProposalReviewTarget.proposalId && proposal.status === "pending",
+      )
+    : undefined;
+  const reviewedRevision = reviewedProposal?.revisions.at(-1);
+  const reviewedChange =
+    activeProposalReviewTarget && reviewedRevision?.id === activeProposalReviewTarget.revisionId
+      ? reviewedRevision.changes.find(
+          (change) =>
+            change.id === activeProposalReviewTarget.changeId &&
+            change.branchId === activeProposalReviewTarget.branchId,
+        )
+      : undefined;
+  const reviewedTrajectoryPoint =
+    reviewedChange?.kind === "trajectory-set" &&
+    activeProposalReviewTarget?.keyframeId &&
+    currentTimeMs === activeProposalReviewTarget.reviewTimeMs
+      ? {
+          change: reviewedChange,
+          target: activeProposalReviewTarget,
+          proposedKeyframe: reviewedChange.proposedTrajectory.keyframes.find(
+            (keyframe) => keyframe.id === activeProposalReviewTarget.keyframeId,
+          ),
+          baseKeyframe: reviewedChange.baseTrajectory?.keyframes.find(
+            (keyframe) => keyframe.id === activeProposalReviewTarget.keyframeId,
+          ),
+          actor: replayCase.actors.find((actor) => actor.id === reviewedChange.actorId),
+        }
+      : undefined;
+
+  const activeTrajectoryByActorId = useMemo(() => {
+    const byActorId = new Map<string, Trajectory>();
+    for (const trajectory of replayCase.trajectories) {
+      if (trajectory.branchId === replayCase.activeBranchId && !byActorId.has(trajectory.actorId)) {
+        byActorId.set(trajectory.actorId, trajectory);
+      }
+    }
+    return byActorId;
+  }, [replayCase.activeBranchId, replayCase.trajectories]);
 
   const actorPoses = useMemo(() => {
     return Object.fromEntries(
@@ -321,9 +462,7 @@ export function SceneCanvas({
         ) {
           return [actor.id, drag.previewPose];
         }
-        const trajectory = replayCase.trajectories.find(
-          (item) => item.actorId === actor.id && item.branchId === replayCase.activeBranchId,
-        );
+        const trajectory = activeTrajectoryByActorId.get(actor.id);
         return [
           actor.id,
           trajectory?.keyframes.length
@@ -332,11 +471,9 @@ export function SceneCanvas({
         ];
       }),
     ) as Record<string, ActorPose>;
-  }, [currentTimeMs, drag, replayCase.activeBranchId, replayCase.actors, replayCase.trajectories]);
+  }, [activeTrajectoryByActorId, currentTimeMs, drag, replayCase.actors]);
 
-  const impact = replayCase.timelineEvents.find(
-    (event) => event.branchId === replayCase.activeBranchId && event.type === "impact",
-  );
+  const damageActor = replayCase.actors.find((actor) => actor.id === damageActorId);
   const activeImpacts = useMemo(
     () =>
       replayCase.timelineEvents.filter(
@@ -344,6 +481,37 @@ export function SceneCanvas({
       ),
     [replayCase.activeBranchId, replayCase.timelineEvents],
   );
+  const matchingImpactByActorPair = useMemo(() => {
+    const byPair = new Map<string, TimelineEvent>();
+    for (const event of activeImpacts) {
+      if (Math.abs(event.timeMs - currentTimeMs) > IMPACT_ALIGNMENT_WINDOW_MS) continue;
+      const pair = exactImpactActorPair(event);
+      if (!pair) continue;
+      const [firstId, secondId] = pair;
+      const forwardKey = `${firstId}\u0000${secondId}`;
+      const reverseKey = `${secondId}\u0000${firstId}`;
+      if (!byPair.has(forwardKey)) byPair.set(forwardKey, event);
+      if (!byPair.has(reverseKey)) byPair.set(reverseKey, event);
+    }
+    return byPair;
+  }, [activeImpacts, currentTimeMs]);
+  const onlyActiveImpact = activeImpacts.length === 1 ? activeImpacts[0] : undefined;
+  const legacyImpactForCorrection =
+    onlyActiveImpact && new Set(onlyActiveImpact.linkedActorIds).size > 2
+      ? onlyActiveImpact
+      : undefined;
+  const placementImpact = impactPlacementContext
+    ? (activeImpacts.find((event) =>
+        impactActorPairMatches(event, impactPlacementContext.actorIds),
+      ) ?? legacyImpactForCorrection)
+    : undefined;
+  const impactPlacementPairLabel = impactPlacementContext
+    ? listActorLabels(
+        impactPlacementContext.actorIds.map((actorId) =>
+          actorLabelForId(replayCase.actors, actorId),
+        ),
+      )
+    : undefined;
   const currentPairGeometry = useMemo<CurrentPairGeometry[]>(() => {
     const calibration = createSceneMetricCalibration({
       sceneBounds: replayCase.environment.bounds,
@@ -368,12 +536,7 @@ export function SceneCanvas({
           { pose: secondPose, dimensions: second.dimensions },
           calibration,
         );
-        const matchingImpact = activeImpacts.find(
-          (event) =>
-            Math.abs(event.timeMs - currentTimeMs) <= IMPACT_ALIGNMENT_WINDOW_MS &&
-            event.linkedActorIds.includes(first.id) &&
-            event.linkedActorIds.includes(second.id),
-        );
+        const matchingImpact = matchingImpactByActorPair.get(`${first.id}\u0000${second.id}`);
         const penetrationToleranceM = matchingImpact
           ? impactPenetrationToleranceMeters(first.dimensions, second.dimensions)
           : CONTACT_VISUAL_TOLERANCE_M;
@@ -400,7 +563,7 @@ export function SceneCanvas({
       }
     }
     return relations;
-  }, [activeImpacts, actorPoses, currentTimeMs, replayCase.actors, replayCase.environment]);
+  }, [actorPoses, matchingImpactByActorPair, replayCase.actors, replayCase.environment]);
   const pairStatePriority: Record<CurrentPairGeometry["state"], number> = {
     clear: 0,
     touching: 1,
@@ -452,11 +615,11 @@ export function SceneCanvas({
       return;
     }
     if (focusedImpactIdRef.current === nearbyImpactId) return;
-    const point = toView(nearbyImpactX, nearbyImpactY);
+    const point = sceneCoordinates.toView({ x: nearbyImpactX, y: nearbyImpactY });
     focusedImpactIdRef.current = nearbyImpactId;
     setZoom((current) => Math.max(current, 2.2));
     setPan({ x: VIEW_WIDTH / 2 - point.x, y: VIEW_HEIGHT / 2 - point.y });
-  }, [nearbyImpactId, nearbyImpactX, nearbyImpactY, shouldFocusImpact]);
+  }, [nearbyImpactId, nearbyImpactX, nearbyImpactY, sceneCoordinates, shouldFocusImpact]);
   const contactStateByActor = new Map<string, CurrentPairGeometry["state"]>();
   const labelDirectionByActor = new Map<string, -1 | 1>();
   for (const pair of currentPairGeometry) {
@@ -664,13 +827,20 @@ export function SceneCanvas({
       });
       return;
     }
-    const normalized = toNormalized(
-      pointer.x - (activeDrag.offsetX ?? 0),
-      pointer.y - (activeDrag.offsetY ?? 0),
+    const boundedPosition = sceneCoordinates.clamp(
+      sceneCoordinates.fromView({
+        x: pointer.x - (activeDrag.offsetX ?? 0),
+        y: pointer.y - (activeDrag.offsetY ?? 0),
+      }),
     );
     const position = snapToLane
-      ? snapPointToRoadLane(replayCase.environment.sceneType, normalized)
-      : normalized;
+      ? sceneCoordinates.fromTemplate(
+          snapPointToRoadLane(
+            replayCase.environment.sceneType,
+            sceneCoordinates.toTemplate(boundedPosition),
+          ),
+        )
+      : boundedPosition;
     if (activeDrag.kind === "actor") {
       const actor = replayCase.actors.find((item) => item.id === activeDrag.id);
       if (!actor) return;
@@ -728,35 +898,78 @@ export function SceneCanvas({
       onSelect("actor", actor.id);
       return;
     }
-    const step = event.shiftKey ? 2 : 0.5;
     const pose = actorPoses[actor.id] ?? actor.pose;
     const next = { ...pose };
-    if (event.key === "ArrowLeft") next.x -= step;
-    else if (event.key === "ArrowRight") next.x += step;
-    else if (event.key === "ArrowUp") next.y -= step;
-    else if (event.key === "ArrowDown") next.y += step;
+    if (event.key === "ArrowLeft") next.x -= sceneCoordinates.keyboardStep("x", event.shiftKey);
+    else if (event.key === "ArrowRight")
+      next.x += sceneCoordinates.keyboardStep("x", event.shiftKey);
+    else if (event.key === "ArrowUp") next.y -= sceneCoordinates.keyboardStep("y", event.shiftKey);
+    else if (event.key === "ArrowDown")
+      next.y += sceneCoordinates.keyboardStep("y", event.shiftKey);
     else if (event.key === "[" || event.key === ",") next.rotationDeg -= event.shiftKey ? 15 : 3;
     else if (event.key === "]" || event.key === ".") next.rotationDeg += event.shiftKey ? 15 : 3;
     else return;
     event.preventDefault();
     if (isActorEditLocked(actor)) return;
-    next.x = Math.max(0, Math.min(100, next.x));
-    next.y = Math.max(0, Math.min(100, next.y));
+    const bounded = sceneCoordinates.clamp(next);
+    next.x = bounded.x;
+    next.y = bounded.y;
     next.rotationDeg = ((next.rotationDeg % 360) + 360) % 360;
     onMoveActor(actor.id, next);
   }
 
+  function beginImpactPlacement(): void {
+    if (placingImpact) {
+      setImpactPlacementContext(undefined);
+      return;
+    }
+    const selectedImpactPair =
+      selectedEvent?.type === "impact" && selectedEvent.branchId === replayCase.activeBranchId
+        ? exactImpactActorPair(selectedEvent)
+        : undefined;
+    const actorIds = selectedImpactPair ?? defaultImpactActorPair(replayCase.actors);
+    if (!actorIds) return;
+    onEditStart();
+    setImpactPlacementContext({
+      branchId: replayCase.activeBranchId,
+      timeMs: currentTimeMs,
+      actorIds,
+    });
+  }
+
+  function selectNextVehicle(): void {
+    if (replayCase.actors.length === 0) return;
+    const currentIndex = replayCase.actors.findIndex((actor) => actor.id === selectedActor?.id);
+    const nextActor = replayCase.actors[(currentIndex + 1) % replayCase.actors.length];
+    if (nextActor) onSelect("actor", nextActor.id);
+  }
+
+  function updateImpactPlacementActor(index: 0 | 1, actorId: string): void {
+    if (!replayCase.actors.some((actor) => actor.id === actorId)) return;
+    setImpactPlacementContext((current) => {
+      if (!current) return current;
+      const [firstId, secondId] = current.actorIds;
+      const actorIds: ImpactActorPair =
+        index === 0
+          ? actorId === secondId
+            ? [secondId, firstId]
+            : [actorId, secondId]
+          : actorId === firstId
+            ? [secondId, firstId]
+            : [firstId, actorId];
+      return { ...current, actorIds };
+    });
+  }
+
   function placeImpactByCoordinates(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    if (!impactPlacementContext || !placingImpact) return;
     const data = new FormData(event.currentTarget);
     const x = Number(data.get("impact-x"));
     const y = Number(data.get("impact-y"));
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    onMarkImpact({
-      x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, y)),
-    });
-    setPlacingImpact(false);
+    const marked = onMarkImpact(sceneCoordinates.clamp({ x, y }), impactPlacementContext);
+    if (marked) setImpactPlacementContext(undefined);
   }
 
   const viewBox = `${-pan.x + (VIEW_WIDTH - VIEW_WIDTH / zoom) / 2} ${-pan.y + (VIEW_HEIGHT - VIEW_HEIGHT / zoom) / 2} ${VIEW_WIDTH / zoom} ${VIEW_HEIGHT / zoom}`;
@@ -776,171 +989,219 @@ export function SceneCanvas({
       <div className="scene-toolbar">
         <div className="scene-toolbar__group">
           <button
+            type="button"
             className={`tool-button ${showPaths ? "is-active" : ""}`}
             onClick={() => setShowPaths((value) => !value)}
             aria-pressed={showPaths}
-            title="Show trajectories"
+            aria-label={`Paths — ${showPaths ? "hide" : "show"} trajectories`}
+            title={showPaths ? "Hide trajectories" : "Show trajectories"}
           >
-            <Route size={15} /> <span>Paths</span>
+            <Route size={15} aria-hidden="true" /> <span>Paths</span>
           </button>
           <button
+            type="button"
             className={`tool-button ${snapToLane ? "is-active" : ""}`}
             onClick={() => setSnapToLane((value) => !value)}
             aria-pressed={snapToLane}
             title="While dragging, snap nearby positions to the nearest template lane centre. Heading is unchanged."
             aria-label="Lane snap while dragging. Moves nearby positions to the nearest template lane centre; it does not simulate steering."
           >
-            <Crosshair size={15} /> <span>Lane snap</span>
+            <Crosshair size={15} aria-hidden="true" /> <span>Lane snap</span>
           </button>
           <button
+            type="button"
             className={`tool-button ${placingImpact ? "is-active" : ""}`}
-            onClick={() => setPlacingImpact((value) => !value)}
+            onClick={beginImpactPlacement}
+            disabled={replayCase.actors.length < 2}
             aria-pressed={placingImpact}
-            aria-label={placingImpact ? "Cancel impact placement" : "Mark impact"}
-            title="Place the approximate impact on the scene"
+            aria-label={
+              placingImpact && impactPlacementPairLabel
+                ? `Cancel impact placement between ${impactPlacementPairLabel}`
+                : "Mark impact"
+            }
+            title={
+              replayCase.actors.length < 2
+                ? "Add a second vehicle before marking contact"
+                : "Place the approximate impact on the scene"
+            }
           >
-            <CircleAlert size={15} /> <span>Mark impact</span>
+            <CircleAlert size={15} aria-hidden="true" /> <span>Mark impact</span>
           </button>
           <button
+            type="button"
+            className="tool-button scene-select-next"
+            onClick={selectNextVehicle}
+            disabled={replayCase.actors.length === 0 || placingImpact}
+            aria-label={`Select next vehicle. ${selectedActor ? `${selectedActor.label} is selected` : "No vehicle selected"}. Useful when vehicles overlap.`}
+            title="Select the next vehicle, including vehicles hidden under an overlap"
+          >
+            <CarFront size={15} aria-hidden="true" />
+            <span>{selectedActor?.label ?? "Vehicle"}</span>
+          </button>
+          <button
+            type="button"
             className={`tool-button ${showGrid ? "is-active" : ""}`}
             onClick={() => setShowGrid((value) => !value)}
             aria-pressed={showGrid}
+            aria-label={showGrid ? "Hide placement grid" : "Show placement grid"}
             title="Show placement grid"
           >
-            <Grid3X3 size={15} />
+            <Grid3X3 size={15} aria-hidden="true" />
           </button>
           <details className="scene-calibration-popover">
-            <summary className="tool-button" title="Review physical scene settings">
-              <Ruler size={15} /> <span>Physical model</span>
+            <summary
+              className="tool-button"
+              title="Review scene measurements, sources, and road context"
+            >
+              <Ruler size={15} aria-hidden="true" /> <span>Scene calibration</span>
             </summary>
             <form
+              key={physicalModelFormStateKey}
               onSubmit={(event) => {
                 event.preventDefault();
                 const data = new FormData(event.currentTarget);
                 const widthMeters = Number(data.get("scene-width"));
                 const heightMeters = Number(data.get("scene-height"));
                 const uncertaintyMeters = Number(data.get("scene-uncertainty"));
-                const postedSpeedLimitKph = Number(data.get("speed-limit"));
+                const speedLimitValue = data.get("speed-limit");
+                if (speedLimitValue !== null && typeof speedLimitValue !== "string") return;
+                const speedLimitInput = speedLimitValue?.trim() ?? "";
+                const postedSpeedLimitKph =
+                  speedLimitInput === "" ? undefined : Number(speedLimitInput);
                 if (
-                  ![widthMeters, heightMeters, uncertaintyMeters, postedSpeedLimitKph].every(
-                    Number.isFinite,
-                  )
+                  ![widthMeters, heightMeters, uncertaintyMeters].every(Number.isFinite) ||
+                  (postedSpeedLimitKph !== undefined && !Number.isFinite(postedSpeedLimitKph))
                 ) {
                   return;
                 }
-                onUpdateEnvironment({
-                  ...replayCase.environment,
-                  roadCondition: data.get(
-                    "road-condition",
-                  ) as ReplayCase["environment"]["roadCondition"],
-                  trafficSide: data.get("traffic-side") as ReplayCase["environment"]["trafficSide"],
-                  calibration: {
-                    widthMeters,
-                    heightMeters,
-                    uncertaintyMeters,
-                    source: data.get(
-                      "calibration-source",
-                    ) as ReplayCase["environment"]["calibration"]["source"],
-                  },
-                  postedSpeedLimitKph,
-                });
+                const nextEnvironment = structuredClone(replayCase.environment);
+                nextEnvironment.roadCondition = data.get(
+                  "road-condition",
+                ) as ReplayCase["environment"]["roadCondition"];
+                nextEnvironment.trafficSide = data.get(
+                  "traffic-side",
+                ) as ReplayCase["environment"]["trafficSide"];
+                nextEnvironment.calibration = {
+                  widthMeters,
+                  heightMeters,
+                  uncertaintyMeters,
+                  source: data.get(
+                    "calibration-source",
+                  ) as ReplayCase["environment"]["calibration"]["source"],
+                };
+                if (postedSpeedLimitKph === undefined) {
+                  delete nextEnvironment.postedSpeedLimitKph;
+                } else {
+                  nextEnvironment.postedSpeedLimitKph = postedSpeedLimitKph;
+                }
+                onUpdateEnvironment(nextEnvironment);
                 event.currentTarget.closest("details")?.removeAttribute("open");
               }}
             >
               <header>
-                <strong>Physical scene settings</strong>
+                <strong>Scene measurements and context</strong>
                 <small>Values and sources remain inspectable in the case.</small>
               </header>
-              <div className="scene-calibration-popover__grid">
+              <div className="scene-calibration-popover__content">
+                <div className="scene-calibration-popover__grid">
+                  <label>
+                    <span>Width m</span>
+                    <input
+                      name="scene-width"
+                      type="number"
+                      min="10"
+                      max="5000"
+                      step="0.1"
+                      defaultValue={replayCase.environment.calibration.widthMeters}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Height m</span>
+                    <input
+                      name="scene-height"
+                      type="number"
+                      min="10"
+                      max="5000"
+                      step="0.1"
+                      defaultValue={replayCase.environment.calibration.heightMeters}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Uncertainty ±m</span>
+                    <input
+                      name="scene-uncertainty"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      defaultValue={replayCase.environment.calibration.uncertaintyMeters}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Posted limit km/h (optional)</span>
+                    <input
+                      name="speed-limit"
+                      type="number"
+                      min="1"
+                      max="300"
+                      step="1"
+                      defaultValue={replayCase.environment.postedSpeedLimitKph ?? ""}
+                      placeholder={`Unknown · review default ${String(roadTemplate.defaultSpeedLimitKph)}`}
+                      aria-describedby="speed-limit-source-hint"
+                    />
+                  </label>
+                </div>
+                <p id="speed-limit-source-hint">
+                  Leave the posted limit blank unless a source establishes it. Motion review then
+                  uses the {roadTemplate.defaultSpeedLimitKph} km/h template default without
+                  recording that value as a posted limit.
+                </p>
                 <label>
-                  <span>Width m</span>
-                  <input
-                    name="scene-width"
-                    type="number"
-                    min="10"
-                    max="5000"
-                    step="0.1"
-                    defaultValue={replayCase.environment.calibration.widthMeters}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>Height m</span>
-                  <input
-                    name="scene-height"
-                    type="number"
-                    min="10"
-                    max="5000"
-                    step="0.1"
-                    defaultValue={replayCase.environment.calibration.heightMeters}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>Uncertainty ±m</span>
-                  <input
-                    name="scene-uncertainty"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    defaultValue={replayCase.environment.calibration.uncertaintyMeters}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>Speed limit km/h</span>
-                  <input
-                    name="speed-limit"
-                    type="number"
-                    min="1"
-                    max="300"
-                    step="1"
-                    defaultValue={
-                      replayCase.environment.postedSpeedLimitKph ??
-                      roadTemplate.defaultSpeedLimitKph
-                    }
-                    required
-                  />
-                </label>
-              </div>
-              <label>
-                <span>Calibration source</span>
-                <select
-                  name="calibration-source"
-                  defaultValue={replayCase.environment.calibration.source}
-                >
-                  <option value="measured">Measured scene</option>
-                  <option value="survey">Survey or measured plan</option>
-                  <option value="map">Scaled map or aerial image</option>
-                  <option value="template">Road template</option>
-                  <option value="estimated">Human estimate</option>
-                  <option value="unknown">Unknown</option>
-                </select>
-              </label>
-              <div className="scene-calibration-popover__grid">
-                <label>
-                  <span>Road condition</span>
-                  <select name="road-condition" defaultValue={replayCase.environment.roadCondition}>
-                    <option value="dry">Dry</option>
-                    <option value="wet">Wet</option>
+                  <span>Calibration source</span>
+                  <select
+                    name="calibration-source"
+                    defaultValue={replayCase.environment.calibration.source}
+                  >
+                    <option value="measured">Measured scene</option>
+                    <option value="survey">Survey or measured plan</option>
+                    <option value="map">Scaled map or aerial image</option>
+                    <option value="template">Road template</option>
+                    <option value="estimated">Human estimate</option>
                     <option value="unknown">Unknown</option>
                   </select>
                 </label>
-                <label>
-                  <span>Traffic side</span>
-                  <select name="traffic-side" defaultValue={replayCase.environment.trafficSide}>
-                    <option value="right">Right</option>
-                    <option value="left">Left</option>
-                    <option value="unknown">Unknown</option>
-                  </select>
-                </label>
+                <div className="scene-calibration-popover__grid">
+                  <label>
+                    <span>Road condition</span>
+                    <select
+                      name="road-condition"
+                      defaultValue={replayCase.environment.roadCondition}
+                    >
+                      <option value="dry">Dry</option>
+                      <option value="wet">Wet</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Traffic side</span>
+                    <select name="traffic-side" defaultValue={replayCase.environment.trafficSide}>
+                      <option value="right">Right</option>
+                      <option value="left">Left</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </label>
+                </div>
+                <p>
+                  Motion and contact checks use these values. Template or estimated calibration is
+                  never presented as survey-grade evidence.
+                </p>
               </div>
-              <p>
-                Motion and contact checks use these values. Template or estimated calibration is
-                never presented as survey-grade evidence.
-              </p>
-              <button className="button button--primary">Apply physical settings</button>
+              <footer>
+                <button className="button button--primary">Apply scene settings</button>
+              </footer>
             </form>
           </details>
         </div>
@@ -956,29 +1217,35 @@ export function SceneCanvas({
         </div>
         <div className="scene-toolbar__group">
           <button
+            type="button"
             className="tool-button tool-button--icon"
             onClick={() => setZoom((value) => Math.max(0.7, value - 0.15))}
+            aria-label="Zoom out"
             title="Zoom out"
           >
-            <Minus size={15} />
+            <Minus size={15} aria-hidden="true" />
           </button>
           <span className="zoom-value">{Math.round(zoom * 100)}%</span>
           <button
+            type="button"
             className="tool-button tool-button--icon"
             onClick={() => setZoom((value) => Math.min(2.2, value + 0.15))}
+            aria-label="Zoom in"
             title="Zoom in"
           >
-            <Plus size={15} />
+            <Plus size={15} aria-hidden="true" />
           </button>
           <button
+            type="button"
             className="tool-button tool-button--icon"
             onClick={() => {
               setZoom(1);
               setPan({ x: 0, y: 0 });
             }}
+            aria-label="Fit scene"
             title="Fit scene"
           >
-            <Focus size={15} />
+            <Focus size={15} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -990,8 +1257,8 @@ export function SceneCanvas({
           ref={svgRef}
           className={`scene-svg${placingImpact ? " is-placing-impact" : ""}`}
           viewBox={viewBox}
-          role="application"
-          aria-label="Editable road scene. Use Tab to select a vehicle, arrow keys to move it, and bracket keys to rotate it."
+          role="group"
+          aria-label={`Editable road scene. Scene coordinates span X ${formatSceneCoordinate(sceneCoordinates.bounds.minX)} through ${formatSceneCoordinate(sceneCoordinates.bounds.maxX)} and Y ${formatSceneCoordinate(sceneCoordinates.bounds.minY)} through ${formatSceneCoordinate(sceneCoordinates.bounds.maxY)}. Use Tab to select a vehicle, arrow keys to move it, and bracket keys to rotate it.`}
           onPointerMove={onPointerMove}
           onPointerUp={commitDrag}
           onPointerCancel={(event) => {
@@ -1018,8 +1285,11 @@ export function SceneCanvas({
           onClick={(event) => {
             if (!placingImpact) return;
             const point = clientToSvg(event.clientX, event.clientY);
-            onMarkImpact(toNormalized(point.x, point.y));
-            setPlacingImpact(false);
+            const marked = onMarkImpact(
+              sceneCoordinates.clamp(sceneCoordinates.fromView(point)),
+              impactPlacementContext,
+            );
+            if (marked) setImpactPlacementContext(undefined);
           }}
         >
           <defs>
@@ -1066,7 +1336,12 @@ export function SceneCanvas({
             height={VIEW_HEIGHT}
             rx="10"
           />
-          <RoadTemplate sceneType={replayCase.environment.sceneType} />
+          <RoadTemplate
+            sceneType={replayCase.environment.sceneType}
+            {...(replayCase.environment.postedSpeedLimitKph !== undefined
+              ? { postedSpeedLimitKph: replayCase.environment.postedSpeedLimitKph }
+              : {})}
+          />
           {replayCase.environment.roadCondition === "wet" && (
             <rect
               className="scene-pan-target"
@@ -1084,10 +1359,24 @@ export function SceneCanvas({
               className="placement-grid"
             />
           )}
+          {configuredRoadBoundary && (
+            <polygon
+              className="configured-road-boundary"
+              data-testid="configured-road-boundary"
+              points={configuredRoadBoundary}
+              aria-hidden="true"
+            />
+          )}
 
-          {pendingProposalChanges.map((change) => {
+          {displayedPendingProposalChanges.map((change) => {
             const actor = replayCase.actors.find((candidate) => candidate.id === change.actorId);
             if (change.kind === "actor-pose") {
+              if (
+                change.targetTimeMs !== undefined &&
+                currentTimeMs !== clampTimeToRange(change.targetTimeMs, replayCase.timeRangeMs)
+              ) {
+                return null;
+              }
               const point = toView(change.proposedPose.x, change.proposedPose.y);
               const dimensions = actor?.dimensions ?? { width: 1.8, length: 4.3 };
               const geometry = vehicleViewGeometry(
@@ -1099,13 +1388,16 @@ export function SceneCanvas({
               return (
                 <g
                   key={change.id}
-                  className="proposal-scene-actor"
+                  className={`proposal-scene-actor${unverifiedPendingChangeIds.has(change.id) ? " is-unverified-import" : ""}`}
                   transform={`translate(${point.x} ${point.y})`}
                   aria-hidden="true"
                 >
                   <polygon points={polygonPoints(geometry.corners)} />
                   <text x="0" y={geometry.halfLengthPixels + 22} textAnchor="middle">
                     Proposed {actor?.label ?? "vehicle"}
+                    {change.targetTimeMs === undefined
+                      ? ""
+                      : ` at ${formatSceneSeconds(change.targetTimeMs)} s`}
                   </text>
                 </g>
               );
@@ -1117,7 +1409,11 @@ export function SceneCanvas({
               })
               .join(" ");
             return (
-              <g key={change.id} className="proposal-scene-path" aria-hidden="true">
+              <g
+                key={change.id}
+                className={`proposal-scene-path${unverifiedPendingChangeIds.has(change.id) ? " is-unverified-import" : ""}`}
+                aria-hidden="true"
+              >
                 <path d={path} />
                 {change.proposedTrajectory.keyframes.map((frame) => {
                   const point = toView(frame.x, frame.y);
@@ -1162,21 +1458,31 @@ export function SceneCanvas({
                 (actor) => actor.id === trajectory.actorId,
               );
               const pathLocked = trajectory.locked || Boolean(owningActor?.locked);
+              const acceptedProposalTrust = acceptedProposalGeometryTrust.trajectoryIds.get(
+                trajectory.id,
+              );
               const agentAuthored =
-                trajectory.createdBy === "agent" ||
+                (!acceptedProposalTrust && trajectory.createdBy === "agent") ||
                 trajectory.changeHistory.at(-1)?.author === "agent";
-              const acceptedAgentProposal = acceptedProposalTrajectoryIds.has(trajectory.id);
+              const provenanceLabel =
+                acceptedProposalTrust === "local-human-attested"
+                  ? "human-accepted agent proposal "
+                  : acceptedProposalTrust === "unverified-import"
+                    ? "unverified imported proposal "
+                    : agentAuthored
+                      ? "agent-authored "
+                      : "";
               return (
                 <g
                   key={trajectory.id}
-                  className={`trajectory trajectory--branch-${branchIndex % 3}${selected ? " is-selected" : ""}${active ? " is-active" : " is-overlay"}${agentAuthored ? " is-agent-authored" : ""}${acceptedAgentProposal ? " is-accepted-agent-proposal" : ""}`}
+                  className={`trajectory trajectory--branch-${branchIndex % 3}${selected ? " is-selected" : ""}${active ? " is-active" : " is-overlay"}${agentAuthored ? " is-agent-authored" : ""}${acceptedProposalTrust === "local-human-attested" ? " is-accepted-agent-proposal" : ""}${acceptedProposalTrust === "unverified-import" ? " is-unverified-imported-proposal" : ""}`}
                 >
                   <path
                     className="trajectory__hit"
                     d={path}
                     tabIndex={placingImpact ? -1 : 0}
                     role="button"
-                    aria-label={`Select ${agentAuthored ? "agent-authored " : acceptedAgentProposal ? "human-accepted agent proposal " : ""}path for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"}`}
+                    aria-label={`Select ${provenanceLabel}path for ${replayCase.actors.find((actor) => actor.id === trajectory.actorId)?.label ?? "vehicle"}`}
                     aria-pressed={selected}
                     onClick={() => {
                       if (!placingImpact) onSelect("trajectory", trajectory.id);
@@ -1217,7 +1523,6 @@ export function SceneCanvas({
                             }}
                             onKeyDown={(event) => {
                               if (placingImpact) return;
-                              const step = event.shiftKey ? 2 : 0.5;
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
                                 onSelectKeyframe(trajectory.id, frame.id);
@@ -1225,18 +1530,19 @@ export function SceneCanvas({
                               }
                               let x = frame.x;
                               let y = frame.y;
-                              if (event.key === "ArrowLeft") x -= step;
-                              else if (event.key === "ArrowRight") x += step;
-                              else if (event.key === "ArrowUp") y -= step;
-                              else if (event.key === "ArrowDown") y += step;
+                              if (event.key === "ArrowLeft")
+                                x -= sceneCoordinates.keyboardStep("x", event.shiftKey);
+                              else if (event.key === "ArrowRight")
+                                x += sceneCoordinates.keyboardStep("x", event.shiftKey);
+                              else if (event.key === "ArrowUp")
+                                y -= sceneCoordinates.keyboardStep("y", event.shiftKey);
+                              else if (event.key === "ArrowDown")
+                                y += sceneCoordinates.keyboardStep("y", event.shiftKey);
                               else return;
                               event.preventDefault();
                               if (!pathLocked) {
                                 onSelectKeyframe(trajectory.id, frame.id);
-                                const bounded = {
-                                  x: Math.max(0, Math.min(100, x)),
-                                  y: Math.max(0, Math.min(100, y)),
-                                };
+                                const bounded = sceneCoordinates.clamp({ x, y });
                                 onMoveKeyframe(trajectory.id, frame.id, bounded.x, bounded.y);
                               }
                             }}
@@ -1295,6 +1601,8 @@ export function SceneCanvas({
                       (replayCase.environment.bounds.maxY - replayCase.environment.bounds.minY)) *
                     replayCase.environment.calibration.heightMeters
                   }
+                  sceneX={pose.x}
+                  sceneY={pose.y}
                   pixelsPerMeterX={pixelsPerMeterX}
                   pixelsPerMeterY={pixelsPerMeterY}
                   rotation={pose.rotationDeg}
@@ -1302,13 +1610,15 @@ export function SceneCanvas({
                   editLocked={isActorEditLocked(actor)}
                   agentActive={activeAgentIds.includes(actor.id)}
                   authorship={
-                    actor.lastEditedBy === "agent"
-                      ? "agent"
-                      : acceptedProposalActorIds.has(actor.id)
-                        ? "accepted-proposal"
-                        : actor.lastEditedBy === "human"
-                          ? "human"
-                          : "legacy"
+                    acceptedProposalGeometryTrust.actorIds.get(actor.id) === "local-human-attested"
+                      ? "accepted-proposal"
+                      : acceptedProposalGeometryTrust.actorIds.get(actor.id) === "unverified-import"
+                        ? "unverified-proposal"
+                        : actor.lastEditedBy === "agent"
+                          ? "agent"
+                          : actor.lastEditedBy === "human"
+                            ? "human"
+                            : "legacy"
                   }
                   contactState={contactStateByActor.get(actor.id) ?? "clear"}
                   labelDirection={labelDirectionByActor.get(actor.id) ?? 1}
@@ -1323,19 +1633,130 @@ export function SceneCanvas({
               );
             })}
 
-          {activeImpacts.map((impactEvent) =>
-            impactEvent.location ? (
+          {reviewedTrajectoryPoint && (
+            <g
+              className={`proposal-scene-review${unverifiedPendingChangeIds.has(reviewedTrajectoryPoint.change.id) ? " is-unverified-import" : ""}`}
+              aria-hidden="true"
+              data-testid="proposal-scene-review"
+            >
+              {reviewedTrajectoryPoint.baseKeyframe && reviewedTrajectoryPoint.proposedKeyframe && (
+                <line
+                  x1={
+                    toView(
+                      reviewedTrajectoryPoint.baseKeyframe.x,
+                      reviewedTrajectoryPoint.baseKeyframe.y,
+                    ).x
+                  }
+                  y1={
+                    toView(
+                      reviewedTrajectoryPoint.baseKeyframe.x,
+                      reviewedTrajectoryPoint.baseKeyframe.y,
+                    ).y
+                  }
+                  x2={
+                    toView(
+                      reviewedTrajectoryPoint.proposedKeyframe.x,
+                      reviewedTrajectoryPoint.proposedKeyframe.y,
+                    ).x
+                  }
+                  y2={
+                    toView(
+                      reviewedTrajectoryPoint.proposedKeyframe.x,
+                      reviewedTrajectoryPoint.proposedKeyframe.y,
+                    ).y
+                  }
+                />
+              )}
+              {reviewedTrajectoryPoint.baseKeyframe &&
+                (() => {
+                  const point = toView(
+                    reviewedTrajectoryPoint.baseKeyframe.x,
+                    reviewedTrajectoryPoint.baseKeyframe.y,
+                  );
+                  return (
+                    <circle
+                      className="proposal-scene-review__base"
+                      cx={point.x}
+                      cy={point.y}
+                      r="8"
+                    />
+                  );
+                })()}
+              {reviewedTrajectoryPoint.proposedKeyframe &&
+                (() => {
+                  const point = toView(
+                    reviewedTrajectoryPoint.proposedKeyframe.x,
+                    reviewedTrajectoryPoint.proposedKeyframe.y,
+                  );
+                  const dimensions = reviewedTrajectoryPoint.actor?.dimensions ?? {
+                    width: 1.8,
+                    length: 4.3,
+                  };
+                  const geometry = vehicleViewGeometry(
+                    dimensions,
+                    reviewedTrajectoryPoint.proposedKeyframe.rotationDeg,
+                    pixelsPerMeterX,
+                    pixelsPerMeterY,
+                  );
+                  return (
+                    <g
+                      className="proposal-scene-actor proposal-scene-actor--review"
+                      transform={`translate(${point.x} ${point.y})`}
+                    >
+                      <circle className="proposal-scene-review__point" r="10" />
+                      <polygon points={polygonPoints(geometry.corners)} />
+                      <text x="0" y={geometry.halfLengthPixels + 22} textAnchor="middle">
+                        Proposed {reviewedTrajectoryPoint.actor?.label ?? "vehicle"} ·{" "}
+                        {reviewedTrajectoryPoint.target.reviewTimeMs !==
+                        Math.round(reviewedTrajectoryPoint.target.proposalTimeMs)
+                          ? `point ${formatSceneSeconds(reviewedTrajectoryPoint.target.proposalTimeMs)} s · viewed ${formatSceneSeconds(reviewedTrajectoryPoint.target.reviewTimeMs)} s`
+                          : `${formatSceneSeconds(reviewedTrajectoryPoint.target.reviewTimeMs)} s`}
+                      </text>
+                    </g>
+                  );
+                })()}
+              {!reviewedTrajectoryPoint.proposedKeyframe &&
+                reviewedTrajectoryPoint.baseKeyframe &&
+                (() => {
+                  const point = toView(
+                    reviewedTrajectoryPoint.baseKeyframe.x,
+                    reviewedTrajectoryPoint.baseKeyframe.y,
+                  );
+                  return (
+                    <path
+                      className="proposal-scene-review__removed"
+                      d={`M${String(point.x - 8)},${String(point.y - 8)}L${String(point.x + 8)},${String(point.y + 8)}M${String(point.x + 8)},${String(point.y - 8)}L${String(point.x - 8)},${String(point.y + 8)}`}
+                    />
+                  );
+                })()}
+            </g>
+          )}
+
+          {activeImpacts.map((impactEvent) => {
+            if (!impactEvent.location) return null;
+            const point = toView(impactEvent.location.x, impactEvent.location.y);
+            const linkedActorLabels = [...new Set(impactEvent.linkedActorIds)].map((actorId) =>
+              actorLabelForId(replayCase.actors, actorId),
+            );
+            return (
               <ImpactMarker
                 key={impactEvent.id}
                 event={impactEvent}
+                x={point.x}
+                y={point.y}
                 selected={selectedId === impactEvent.id}
                 showLabel={selectedId === impactEvent.id && contactDisplayState === "clear"}
                 zoom={zoom}
                 placementMode={placingImpact}
+                actorDescription={impactActorDescription(
+                  impactEvent.linkedActorIds,
+                  replayCase.actors,
+                )}
+                compactActorLabel={linkedActorLabels.map(actorBadge).join("/")}
                 onSelect={() => onSelect("timeline-event", impactEvent.id)}
               />
-            ) : null,
-          )}
+            );
+          })}
 
           {currentPairGeometry
             .filter(
@@ -1363,6 +1784,7 @@ export function SceneCanvas({
         <div
           className={`scene-contact-readout is-${contactDisplayState}${selectedId ? " has-selection-actions" : ""}`}
           data-contact-state={contactDisplayState}
+          role="group"
           aria-label={`${contactReadoutContent.title}. ${contactReadoutContent.detail}. Geometry only; not proof of physical contact.`}
         >
           <i aria-hidden="true" />
@@ -1375,18 +1797,28 @@ export function SceneCanvas({
           {contactReadoutContent.title}
         </span>
 
-        <div className="scene-legend" aria-label="Scene legend">
+        <div className="scene-legend" role="group" aria-label="Scene legend">
           <span>
             <i className="legend-line legend-line--solid" /> Current branch
           </span>
+          {configuredRoadBoundary && (
+            <span>
+              <i className="legend-line legend-line--road-boundary" /> Configured road boundary
+            </span>
+          )}
           {comparisonBranchIds.length > 0 && (
             <span>
               <i className="legend-line legend-line--dashed" /> Compared branch
             </span>
           )}
-          {pendingProposalChanges.length > 0 && (
+          {hasTrustedPendingProposal && (
             <span>
               <i className="legend-line legend-line--proposal" /> Agent proposal
+            </span>
+          )}
+          {hasUnverifiedPendingProposal && (
+            <span>
+              <i className="legend-line legend-line--unverified" /> Unverified imported proposal
             </span>
           )}
           {hasAgentAuthoredPath && (
@@ -1404,6 +1836,12 @@ export function SceneCanvas({
               <i className="legend-line legend-line--accepted" /> Human-accepted agent proposal
             </span>
           )}
+          {hasUnverifiedImportedGeometry && (
+            <span>
+              <i className="legend-line legend-line--unverified" /> Unverified imported proposal
+              geometry
+            </span>
+          )}
           <span>
             <i className="legend-dot legend-dot--impact" /> Approx. impact
           </span>
@@ -1414,22 +1852,61 @@ export function SceneCanvas({
         {placingImpact && (
           <div className="scene-placement-prompt">
             <p role="status">
-              <Crosshair size={14} /> Click the scene or enter exact coordinates. The marker remains
-              uncertain until evidence supports it.
+              <Crosshair size={14} /> Contact: {impactPlacementPairLabel}. Click the scene or enter
+              exact coordinates. The marker remains uncertain until evidence supports it.
             </p>
             <form
-              aria-label="Place approximate impact by coordinates"
+              key={JSON.stringify([
+                impactPlacementContext.branchId,
+                impactPlacementContext.timeMs,
+                ...impactPlacementContext.actorIds,
+                placementImpact?.id ?? null,
+                placementImpact?.location?.x ?? sceneCoordinates.center.x,
+                placementImpact?.location?.y ?? sceneCoordinates.center.y,
+              ])}
+              aria-label={`Place approximate impact by coordinates for ${impactPlacementPairLabel ?? "the selected vehicles"}`}
               onSubmit={placeImpactByCoordinates}
             >
+              {replayCase.actors.length > 2 && (
+                <fieldset className="scene-impact-pair">
+                  <legend>Vehicles involved</legend>
+                  <label>
+                    <span>First vehicle</span>
+                    <select
+                      value={impactPlacementContext.actorIds[0]}
+                      onChange={(event) => updateImpactPlacementActor(0, event.target.value)}
+                    >
+                      {replayCase.actors.map((actor) => (
+                        <option key={actor.id} value={actor.id}>
+                          {actor.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Second vehicle</span>
+                    <select
+                      value={impactPlacementContext.actorIds[1]}
+                      onChange={(event) => updateImpactPlacementActor(1, event.target.value)}
+                    >
+                      {replayCase.actors.map((actor) => (
+                        <option key={actor.id} value={actor.id}>
+                          {actor.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </fieldset>
+              )}
               <label>
                 <span>X</span>
                 <input
                   name="impact-x"
                   type="number"
-                  min="0"
-                  max="100"
-                  step="0.1"
-                  defaultValue={impact?.location?.x ?? 50}
+                  min={sceneCoordinates.bounds.minX}
+                  max={sceneCoordinates.bounds.maxX}
+                  step="any"
+                  defaultValue={placementImpact?.location?.x ?? sceneCoordinates.center.x}
                   required
                 />
               </label>
@@ -1438,15 +1915,24 @@ export function SceneCanvas({
                 <input
                   name="impact-y"
                   type="number"
-                  min="0"
-                  max="100"
-                  step="0.1"
-                  defaultValue={impact?.location?.y ?? 50}
+                  min={sceneCoordinates.bounds.minY}
+                  max={sceneCoordinates.bounds.maxY}
+                  step="any"
+                  defaultValue={placementImpact?.location?.y ?? sceneCoordinates.center.y}
                   required
                 />
               </label>
-              <button className="button button--primary">Place</button>
-              <button type="button" className="text-button" onClick={() => setPlacingImpact(false)}>
+              <button
+                className="button button--primary"
+                aria-label={`Place contact between ${impactPlacementPairLabel ?? "the selected vehicles"}`}
+              >
+                Place
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setImpactPlacementContext(undefined)}
+              >
                 Cancel
               </button>
             </form>
@@ -1468,7 +1954,14 @@ export function SceneCanvas({
                   ? "Edit path"
                   : "Create path"}
               </button>
-              <button className="tool-button" onClick={() => setDamageEditorOpen(true)}>
+              <button
+                className="tool-button"
+                onClick={() => {
+                  setDamageActorId(selectedActor.id);
+                  setDamageRegion("unknown");
+                  setDamageDescription("");
+                }}
+              >
                 <CircleAlert size={14} /> Mark damage
               </button>
               <button className="tool-button" onClick={() => onToggleActorLock(selectedActor.id)}>
@@ -1507,25 +2000,26 @@ export function SceneCanvas({
         </div>
       )}
 
-      {damageEditorOpen && selectedActor && (
+      {damageActor && (
         <form
           className="scene-popover"
           onSubmit={(event) => {
             event.preventDefault();
             if (!damageDescription.trim()) return;
-            onMarkDamage(selectedActor.id, damageRegion, damageDescription.trim());
+            const marked = onMarkDamage(damageActor.id, damageRegion, damageDescription.trim());
+            if (!marked) return;
             setDamageDescription("");
-            setDamageEditorOpen(false);
+            setDamageActorId(undefined);
           }}
         >
           <header>
             <div>
               <small>Vehicle observation</small>
-              <strong>Mark damage on {selectedActor.label}</strong>
+              <strong>Mark damage on {damageActor.label}</strong>
             </div>
             <button
               type="button"
-              onClick={() => setDamageEditorOpen(false)}
+              onClick={() => setDamageActorId(undefined)}
               aria-label="Close damage editor"
             >
               <X size={15} />
@@ -1568,12 +2062,20 @@ export function SceneCanvas({
   );
 }
 
-function RoadTemplate({ sceneType }: { sceneType: RoadSceneType }) {
+function RoadTemplate({
+  sceneType,
+  postedSpeedLimitKph,
+}: {
+  sceneType: RoadSceneType;
+  postedSpeedLimitKph?: number;
+}) {
   if (sceneType === "roundabout") return <RoundaboutTemplate />;
   if (sceneType === "intersection") return <IntersectionTemplate />;
   if (sceneType === "t-junction") return <TJunctionTemplate />;
   if (sceneType === "straight-road") return <StraightRoadTemplate />;
-  return <ParkingAreaTemplate />;
+  return (
+    <ParkingAreaTemplate {...(postedSpeedLimitKph !== undefined ? { postedSpeedLimitKph } : {})} />
+  );
 }
 
 function RoundaboutTemplate() {
@@ -1675,7 +2177,7 @@ function StraightRoadTemplate() {
   );
 }
 
-function ParkingAreaTemplate() {
+function ParkingAreaTemplate({ postedSpeedLimitKph }: { postedSpeedLimitKph?: number }) {
   const bayColumns = Array.from({ length: 10 }, (_, index) => 85 + index * 83);
   return (
     <g className="road-template parking-template" aria-hidden="true">
@@ -1689,9 +2191,11 @@ function ParkingAreaTemplate() {
         </g>
       ))}
       <path className="direction-arrow" d="M235 325l28 25-28 25M765 375l-28-25 28-25" />
-      <text x="82" y="342" className="parking-speed-label">
-        15
-      </text>
+      {postedSpeedLimitKph !== undefined && (
+        <text x="82" y="342" className="parking-speed-label">
+          {postedSpeedLimitKph}
+        </text>
+      )}
     </g>
   );
 }
@@ -1702,13 +2206,15 @@ interface VehicleProps {
   y: number;
   worldX: number;
   worldY: number;
+  sceneX: number;
+  sceneY: number;
   pixelsPerMeterX: number;
   pixelsPerMeterY: number;
   rotation: number;
   selected: boolean;
   editLocked: boolean;
   agentActive: boolean;
-  authorship: "human" | "agent" | "accepted-proposal" | "legacy";
+  authorship: "human" | "agent" | "accepted-proposal" | "unverified-proposal" | "legacy";
   contactState: CurrentPairGeometry["state"];
   labelDirection: -1 | 1;
   placementMode: boolean;
@@ -1724,6 +2230,8 @@ function Vehicle({
   y,
   worldX,
   worldY,
+  sceneX,
+  sceneY,
   pixelsPerMeterX,
   pixelsPerMeterY,
   rotation,
@@ -1787,11 +2295,11 @@ function Vehicle({
   const lockPoint = geometry.corners[1];
   return (
     <g
-      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}${authorship === "agent" ? " is-agent-authored" : ""}${authorship === "accepted-proposal" ? " is-accepted-agent-proposal" : ""}${contactState !== "clear" ? ` has-contact-state is-contact-${contactState}` : ""}`}
+      className={`scene-vehicle${selected ? " is-selected" : ""}${editLocked ? " is-locked" : ""}${agentActive ? " is-agent-active" : ""}${authorship === "agent" ? " is-agent-authored" : ""}${authorship === "accepted-proposal" ? " is-accepted-agent-proposal" : ""}${authorship === "unverified-proposal" ? " is-unverified-imported-proposal" : ""}${contactState !== "clear" ? ` has-contact-state is-contact-${contactState}` : ""}`}
       transform={`translate(${x} ${y})`}
       tabIndex={0}
       role="button"
-      aria-label={`${actor.label}, position ${worldX.toFixed(1)} metres east and ${worldY.toFixed(1)} metres south of the calibrated scene origin, ${actor.dimensions.length.toFixed(2)} by ${actor.dimensions.width.toFixed(2)} metres, orientation ${Math.round(rotation)} degrees${editLocked ? ", locked. Unlock the vehicle and its path to edit" : ". Use arrow keys to move and bracket keys to rotate"}.`}
+      aria-label={`${actor.label}, position ${worldX.toFixed(1)} metres east and ${worldY.toFixed(1)} metres south of the calibrated scene origin, scene coordinate X ${formatSceneCoordinate(sceneX)} and Y ${formatSceneCoordinate(sceneY)}, ${actor.dimensions.length.toFixed(2)} by ${actor.dimensions.width.toFixed(2)} metres, orientation ${Math.round(rotation)} degrees${authorship === "accepted-proposal" ? ", geometry from a human-accepted agent proposal" : authorship === "unverified-proposal" ? ", geometry from an unverified imported proposal" : authorship === "agent" ? ", agent-authored geometry" : ""}${editLocked ? ", locked. Unlock the vehicle and its path to edit" : ". Use arrow keys to move and bracket keys to rotate"}.`}
       aria-pressed={selected}
       onPointerDown={onPointerDown}
       onClick={(event) => {
@@ -1802,6 +2310,11 @@ function Vehicle({
       onKeyDown={onKeyDown}
     >
       <title>{actor.label}</title>
+      <polygon
+        className="vehicle-hit"
+        points={polygonPoints(geometry.corners)}
+        aria-hidden="true"
+      />
       <polygon className="vehicle-selection" points={polygonPoints(geometry.corners)} />
       {selected && !editLocked && (
         <g className="vehicle-rotation-control" aria-hidden="true">
@@ -1815,7 +2328,7 @@ function Vehicle({
             className="vehicle-rotation-control__hit"
             cx={rotationHandle.x}
             cy={rotationHandle.y}
-            r="34"
+            r="22"
             onPointerDown={onRotatePointerDown}
           />
           <circle
@@ -1861,14 +2374,20 @@ function Vehicle({
           {actor.label}
         </text>
       )}
-      {(authorship === "agent" || authorship === "accepted-proposal") && (
+      {(authorship === "agent" ||
+        authorship === "accepted-proposal" ||
+        authorship === "unverified-proposal") && (
         <text
           className="vehicle-authorship-badge"
           x={authorshipPoint.x + geometry.forwardUnit.x * 11}
           y={authorshipPoint.y + geometry.forwardUnit.y * 11}
           textAnchor="middle"
         >
-          {authorship === "agent" ? "AGENT" : "HUMAN ACCEPTED"}
+          {authorship === "agent"
+            ? "AGENT"
+            : authorship === "accepted-proposal"
+              ? "HUMAN ACCEPTED"
+              : "UNVERIFIED"}
         </text>
       )}
       {damage.map((marker) => (
@@ -1931,28 +2450,35 @@ function ContactGeometryMarker({
 
 function ImpactMarker({
   event,
+  x,
+  y,
   selected,
   showLabel,
   zoom,
   placementMode,
+  actorDescription,
+  compactActorLabel,
   onSelect,
 }: {
   event: TimelineEvent;
+  x: number;
+  y: number;
   selected: boolean;
   showLabel: boolean;
   zoom: number;
   placementMode: boolean;
+  actorDescription: string;
+  compactActorLabel: string;
   onSelect: () => void;
 }) {
   if (!event.location) return null;
-  const point = toView(event.location.x, event.location.y);
   return (
     <g
       className={`impact-marker certainty--${event.certainty}${selected ? " is-selected" : ""}`}
-      transform={`translate(${point.x} ${point.y}) scale(${1 / zoom})`}
+      transform={`translate(${x} ${y}) scale(${1 / zoom})`}
       tabIndex={placementMode ? -1 : 0}
       role="button"
-      aria-label={`Approximate impact at ${formatSceneSeconds(event.timeMs)} seconds, ${event.certainty}`}
+      aria-label={`Approximate impact at ${formatSceneSeconds(event.timeMs)} seconds, ${event.certainty}, ${actorDescription}, scene coordinate X ${formatSceneCoordinate(event.location.x)} and Y ${formatSceneCoordinate(event.location.y)}`}
       onClick={() => {
         if (!placementMode) onSelect();
       }}
@@ -1967,9 +2493,11 @@ function ImpactMarker({
       <circle r="22" />
       <circle r="9" />
       <path d="M-28 0h56M0-28v56" />
+      <path className="impact-marker__hit" d="M0 0h0.01" aria-hidden="true" />
       {showLabel && (
         <text x="30" y="-13">
           Impact · {formatSceneSeconds(event.timeMs)}s
+          {compactActorLabel ? ` · ${compactActorLabel}` : ""}
         </text>
       )}
     </g>

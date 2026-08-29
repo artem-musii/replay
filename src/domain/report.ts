@@ -1,5 +1,17 @@
-import type { Claim, ReplayCase, ReportPreview, ReportSection, ReportStatement } from "./models";
-import { evidenceBoundText } from "./languageSafety";
+import type {
+  Claim,
+  ReplayCase,
+  ReportPreview,
+  ReportPreviewReviewBinding,
+  ReportSection,
+  ReportStatement,
+} from "./models";
+import { evidenceBoundText, truncateXmlSafeText } from "./languageSafety";
+import {
+  findCurrentCompletenessAttestation,
+  isCompletenessAttestationCurrent,
+} from "./completeness";
+import { canonicalSerialize, sha256Hex } from "./fingerprint";
 
 export const REPORT_DISCLAIMER =
   "REPLAY helps organize and visualize a factual account. Its consistency checks are informational and are not a forensic or legal determination. Geometry and motion checks use the recorded calibration, vehicle dimensions, timed poses, and declared advisory envelopes. This report is not forensic analysis or legal advice, a vehicle-dynamics reconstruction, lie detection, or a finding of fault or liability.";
@@ -8,6 +20,34 @@ export interface BuildReportOptions {
   generatedAt?: string;
   includeHypotheses?: boolean;
   branchIds?: string[];
+}
+
+export function createReportPreviewReviewBinding(
+  preview: Omit<ReportPreview, "reviewBinding">,
+  scope: Pick<ReportPreviewReviewBinding, "branchIds" | "includeHypotheses">,
+): ReportPreviewReviewBinding {
+  const branchIds = [...new Set(scope.branchIds)].sort();
+  const canonical = canonicalSerialize({
+    preview,
+    branchIds,
+    includeHypotheses: scope.includeHypotheses,
+  });
+  return {
+    algorithm: "SHA-256",
+    fingerprint: `sha256-${sha256Hex(canonical)}`,
+    branchIds,
+    includeHypotheses: scope.includeHypotheses,
+  };
+}
+
+export function reportPreviewHasValidReviewBinding(preview: ReportPreview): boolean {
+  const binding = preview.reviewBinding;
+  if (!binding) return false;
+  const unboundPreview = structuredClone(preview);
+  delete unboundPreview.reviewBinding;
+  return (
+    binding.fingerprint === createReportPreviewReviewBinding(unboundPreview, binding).fingerprint
+  );
 }
 
 function stableHash(value: string): string {
@@ -21,7 +61,7 @@ function stableHash(value: string): string {
 
 function reportStatementId(kind: string, sourceId: string): string {
   const raw = `report-${kind}-${sourceId}`;
-  return raw.length <= 128 ? raw : `${raw.slice(0, 118)}-${stableHash(raw)}`;
+  return raw.length <= 128 ? raw : `${truncateXmlSafeText(raw, 118)}-${stableHash(raw)}`;
 }
 
 function statement(
@@ -34,7 +74,7 @@ function statement(
 ): ReportStatement {
   return {
     id,
-    text: text.slice(0, 10_000),
+    text: truncateXmlSafeText(text, 10_000),
     certainty,
     citations: {
       claimIds: [...new Set(claimIds)].sort(),
@@ -85,6 +125,9 @@ export function validWorkspaceCitationPaths(replayCase: ReplayCase): Set<string>
     "case.environment",
     "system.report-generator",
     "system.human-review",
+    ...replayCase.completenessAttestations
+      .filter((attestation) => isCompletenessAttestationCurrent(replayCase, attestation))
+      .map((attestation) => `completenessAttestations.${attestation.id}`),
     ...replayCase.actors.flatMap((actor) => [
       `actors.${actor.id}`,
       ...actor.damageMarkers.map((marker) => `actors.${actor.id}.damageMarkers.${marker.id}`),
@@ -114,6 +157,12 @@ export function buildReportPreview(
     (branch) => requestedBranches.includes(branch.id) && branch.status === "active",
   );
   const activeEvidence = replayCase.evidence.filter((asset) => !asset.deleted);
+  const noEvidenceAttestation = findCurrentCompletenessAttestation(replayCase, {
+    kind: "no-evidence-supplied",
+  });
+  const uncertaintyReviewAttestation = findCurrentCompletenessAttestation(replayCase, {
+    kind: "uncertainty-review-completed",
+  });
   const claimsById = new Map(replayCase.claims.map((claim) => [claim.id, claim]));
   const confirmedClaims = replayCase.claims.filter(isAllowedConfirmedClaim);
   const unconfirmedClaims = replayCase.claims.filter(isUnconfirmedFactualClaim);
@@ -133,7 +182,7 @@ export function buildReportPreview(
   if (!replayCase.incidentDate) missingRequirements.push("Incident date or approximate date");
   if (replayCase.actors.length < 2) missingRequirements.push("Both involved vehicles");
   if (replayCase.timelineEvents.length === 0) missingRequirements.push("Timeline events");
-  if (activeEvidence.length === 0)
+  if (activeEvidence.length === 0 && !noEvidenceAttestation)
     missingRequirements.push("Evidence index or explicit no-evidence record");
   if (confirmedClaims.length === 0)
     missingRequirements.push("At least one human-confirmed observation");
@@ -238,14 +287,10 @@ export function buildReportPreview(
     .map((event) => {
       const citedClaims = event.linkedClaimIds.filter((id) => claimsById.has(id));
       const citedEvidence = linkedAvailableEvidence(replayCase, event.linkedEvidenceIds);
-      const confirmed = citedClaims.some((id) => {
-        const claim = claimsById.get(id);
-        return claim ? isAllowedConfirmedClaim(claim) : false;
-      });
       return statement(
         reportStatementId("event", event.id),
         `T+${(event.timeMs / 1_000).toFixed(1)} s — ${evidenceBoundText(event.title)}.`,
-        confirmed
+        event.certainty === "confirmed"
           ? "confirmed"
           : event.certainty === "agent-hypothesis"
             ? "hypothesis"
@@ -263,7 +308,7 @@ export function buildReportPreview(
     section("scene-diagram", "Scene diagram", [
       statement(
         "report-scene-diagram",
-        `The accompanying ${replayCase.environment.sceneType} diagram is a structured visualization of the active reconstruction and should be read with its certainty and branch labels.`,
+        `The case includes a structured ${replayCase.environment.sceneType} scene reconstruction. Export its scene review snapshot separately and read it with its certainty and branch labels.`,
         "system",
         [],
         [],
@@ -276,8 +321,8 @@ export function buildReportPreview(
     section(
       "damage-summary",
       "Vehicle damage summary",
-      replayCase.actors.flatMap((actor) =>
-        actor.damageMarkers.map((marker) =>
+      replayCase.actors.flatMap((actor) => {
+        const recordedMarkers = actor.damageMarkers.map((marker) =>
           statement(
             reportStatementId("damage", marker.id),
             `${evidenceBoundText(actor.label)}: ${marker.region} — ${evidenceBoundText(marker.description)} [${marker.status}].`,
@@ -290,8 +335,27 @@ export function buildReportPreview(
             linkedAvailableEvidence(replayCase, marker.linkedEvidenceIds),
             [`actors.${actor.id}.damageMarkers.${marker.id}`],
           ),
-        ),
-      ),
+        );
+        if (recordedMarkers.length > 0) return recordedMarkers;
+        const attestation = findCurrentCompletenessAttestation(replayCase, {
+          kind: "actor-damage",
+          actorId: actor.id,
+          outcome: "unknown",
+        });
+        if (attestation?.kind !== "actor-damage") return [];
+        return [
+          statement(
+            reportStatementId("damage-attestation", attestation.id),
+            attestation.outcome === "unknown"
+              ? `${evidenceBoundText(actor.label)}: a human recorded that the damage location is unknown. This completeness record is not evidence that damage did or did not occur.`
+              : `${evidenceBoundText(actor.label)}: a human recorded that damage was not assessed. This completeness record is not evidence that no damage occurred.`,
+            "attested",
+            [],
+            [],
+            [`completenessAttestations.${attestation.id}`],
+          ),
+        ];
+      }),
     ),
   );
 
@@ -299,15 +363,28 @@ export function buildReportPreview(
     section(
       "evidence-index",
       "Evidence index",
-      activeEvidence.map((asset) =>
-        statement(
-          reportStatementId("evidence", asset.id),
-          `${evidenceBoundText(asset.name)} (${asset.mimeType}${asset.syntheticDemoAsset ? "; synthetic demo evidence" : ""}).`,
-          "reported",
-          [],
-          [asset.id],
-        ),
-      ),
+      activeEvidence.length > 0
+        ? activeEvidence.map((asset) =>
+            statement(
+              reportStatementId("evidence", asset.id),
+              `${evidenceBoundText(asset.name)} (${asset.mimeType}${asset.syntheticDemoAsset ? "; synthetic demo evidence" : ""}).`,
+              "reported",
+              [],
+              [asset.id],
+            ),
+          )
+        : noEvidenceAttestation
+          ? [
+              statement(
+                reportStatementId("evidence-attestation", noEvidenceAttestation.id),
+                "A human recorded that no evidence was supplied for this local case. This completeness record does not establish that evidence does not exist.",
+                "attested",
+                [],
+                [],
+                [`completenessAttestations.${noEvidenceAttestation.id}`],
+              ),
+            ]
+          : [],
     ),
   );
 
@@ -318,16 +395,29 @@ export function buildReportPreview(
     section(
       "unresolved-questions",
       "Unresolved questions",
-      unresolvedQuestions.map((question) =>
-        statement(
-          reportStatementId("question", question.id),
-          `${evidenceBoundText(question.question)} (${question.status}; ${question.importance}).`,
-          "system",
-          question.relatedClaimIds.filter((id) => claimsById.has(id)),
-          [],
-          [`questions.${question.id}`],
-        ),
-      ),
+      unresolvedQuestions.length > 0
+        ? unresolvedQuestions.map((question) =>
+            statement(
+              reportStatementId("question", question.id),
+              `${evidenceBoundText(question.question)} (${question.status}; ${question.importance}).`,
+              "system",
+              question.relatedClaimIds.filter((id) => claimsById.has(id)),
+              [],
+              [`questions.${question.id}`],
+            ),
+          )
+        : uncertaintyReviewAttestation
+          ? [
+              statement(
+                reportStatementId("uncertainty-attestation", uncertaintyReviewAttestation.id),
+                "A human completed the uncertainty review and recorded that no unresolved details remain at this case revision. This completeness record does not make unknown information certain.",
+                "attested",
+                [],
+                [],
+                [`completenessAttestations.${uncertaintyReviewAttestation.id}`],
+              ),
+            ]
+          : [],
     ),
   );
 
@@ -339,7 +429,7 @@ export function buildReportPreview(
         statement(
           reportStatementId("branch-label", branch.id),
           `Hypothesis — ${evidenceBoundText(branch.name)}: ${evidenceBoundText(branch.description)}`,
-          "system",
+          "hypothesis",
           [],
           [],
           [`branches.${branch.id}`],
@@ -415,7 +505,7 @@ export function buildReportPreview(
     section("human-review", "Human review acknowledgement", [
       statement(
         "report-human-review",
-        "This preview is not finalized. A human must review unresolved questions, acknowledge the limitations, confirm review of confirmed facts, and manually finalize the factual report.",
+        "This preview is not finalized. A human must review unresolved questions, acknowledge the limitations, review confirmed facts and every included unconfirmed or hypothesis statement, and manually finalize the factual report.",
         "system",
         [],
         [],
@@ -426,10 +516,15 @@ export function buildReportPreview(
 
   for (const reportSection of sections) {
     for (const reportStatement of reportSection.statements) {
+      const hasClaimOrEvidenceCitation =
+        reportStatement.citations.claimIds.length > 0 ||
+        reportStatement.citations.evidenceIds.length > 0;
+      const hasWorkspaceCitation = reportStatement.citations.workspacePaths.length > 0;
       if (
-        reportStatement.certainty !== "system" &&
-        reportStatement.citations.claimIds.length === 0 &&
-        reportStatement.citations.evidenceIds.length === 0
+        (reportStatement.certainty === "confirmed" && !hasClaimOrEvidenceCitation) ||
+        (reportStatement.certainty !== "confirmed" &&
+          !hasClaimOrEvidenceCitation &&
+          !hasWorkspaceCitation)
       ) {
         missingRequirements.push(`Claim or evidence provenance for ${reportStatement.id}`);
       }
@@ -447,17 +542,27 @@ export function buildReportPreview(
     ),
   ].sort();
 
-  return {
+  const preview: Omit<ReportPreview, "reviewBinding"> = {
     caseId: replayCase.id,
     caseVersion: replayCase.caseVersion,
     generatedAt,
-    title: `Factual incident report — ${evidenceBoundText(replayCase.title)}`.slice(0, 500),
+    title: truncateXmlSafeText(
+      `Factual incident report — ${evidenceBoundText(replayCase.title)}`,
+      500,
+    ),
     sections,
     includedClaimIds,
     includedEvidenceIds,
     unresolvedQuestionIds: unresolvedQuestions.map((question) => question.id),
     missingRequirements: [...new Set(missingRequirements)].sort(),
     disclaimer: REPORT_DISCLAIMER,
+  };
+  return {
+    ...preview,
+    reviewBinding: createReportPreviewReviewBinding(preview, {
+      branchIds: branches.map((branch) => branch.id),
+      includeHypotheses: options.includeHypotheses !== false,
+    }),
   };
 }
 

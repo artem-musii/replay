@@ -1,7 +1,19 @@
-import { Braces, Check, ChevronDown, CircleOff, Copy, Play, Shield, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import {
+  Braces,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  CircleOff,
+  Copy,
+  Play,
+  RotateCw,
+  Shield,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { WebMCPDebugState, WebMCPToolName } from "../webmcp";
+import { copyTextToClipboard } from "./clipboard";
 import { useDialogFocus } from "./useDialogFocus";
 
 interface WebMCPDebugPanelProps {
@@ -12,6 +24,7 @@ interface WebMCPDebugPanelProps {
     input: Record<string, unknown>,
     signal: AbortSignal,
   ) => Promise<unknown>;
+  onRetryRegistrations: () => Promise<void>;
 }
 
 const samples: Partial<Record<WebMCPToolName, Record<string, unknown>>> = {
@@ -21,14 +34,33 @@ const samples: Partial<Record<WebMCPToolName, Record<string, unknown>>> = {
   validate_case_consistency: { scope: "all" },
 };
 
-export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPanelProps) {
+const VISIBLE_UI_ONLY_TOOLS: ReadonlySet<WebMCPToolName> = new Set([
+  "focus_workspace_item",
+  "compare_hypotheses",
+  "build_report_preview",
+]);
+
+function sideEffectLabel(name: WebMCPToolName, readOnly: boolean): string {
+  if (readOnly) return "Read only";
+  return VISIBLE_UI_ONLY_TOOLS.has(name) ? "Changes visible UI/session" : "Changes case";
+}
+
+export function WebMCPDebugPanel({
+  state,
+  onClose,
+  onSimulate,
+  onRetryRegistrations,
+}: WebMCPDebugPanelProps) {
   const initial = state.registeredToolNames[0] ?? "get_case_summary";
   const [selected, setSelected] = useState<WebMCPToolName>(initial);
   const [input, setInput] = useState(() => JSON.stringify(samples[initial] ?? {}, null, 2));
   const [result, setResult] = useState<unknown>();
   const [error, setError] = useState<string>();
   const [running, setRunning] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [retryingRegistrations, setRetryingRegistrations] = useState(false);
+  const [registrationRetryError, setRegistrationRetryError] = useState<string>();
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const copyResetTimerRef = useRef<number | undefined>(undefined);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialogFocus<HTMLElement>({
     initialFocusRef: closeButtonRef,
@@ -38,6 +70,45 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
     () => state.tools.find((tool) => tool.name === selected),
     [selected, state.tools],
   );
+  const failedToolCount = state.tools.filter((tool) => tool.registrationState === "error").length;
+
+  useEffect(
+    () => () => {
+      if (copyResetTimerRef.current !== undefined) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  async function copyInput(): Promise<void> {
+    if (copyResetTimerRef.current !== undefined) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+    try {
+      await copyTextToClipboard(input);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
+    copyResetTimerRef.current = window.setTimeout(() => setCopyStatus("idle"), 1_600);
+  }
+
+  async function retryRegistrations(): Promise<void> {
+    setRegistrationRetryError(undefined);
+    setRetryingRegistrations(true);
+    try {
+      await onRetryRegistrations();
+    } catch (retryError) {
+      setRegistrationRetryError(
+        retryError instanceof Error
+          ? retryError.message
+          : "The browser did not provide a registration failure reason.",
+      );
+    } finally {
+      setRetryingRegistrations(false);
+    }
+  }
 
   async function run(): Promise<void> {
     setError(undefined);
@@ -92,18 +163,50 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
             <X size={18} />
           </button>
         </header>
-        <div className={`debug-support is-${state.supported ? "supported" : "fallback"}`}>
-          {state.supported ? <Check size={15} /> : <CircleOff size={15} />}
-          <div>
+        <div
+          className={`debug-support is-${failedToolCount > 0 ? "error" : state.supported ? "supported" : "fallback"}`}
+          role="status"
+          aria-live="polite"
+        >
+          {failedToolCount > 0 ? (
+            <CircleAlert size={15} aria-hidden="true" />
+          ) : state.supported ? (
+            <Check size={15} aria-hidden="true" />
+          ) : (
+            <CircleOff size={15} aria-hidden="true" />
+          )}
+          <div className="debug-support__copy">
             <strong>
-              {state.supported ? "Browser Site Tools available" : "Manual browser mode"}
+              {failedToolCount > 0
+                ? "Site Tool registration needs attention"
+                : state.supported
+                  ? "Browser Site Tools available"
+                  : "Manual browser mode"}
             </strong>
             <span>
-              {state.supported
-                ? `${state.registeredToolNames.length} tools registered for ${state.lifecycleMode} mode.`
-                : "document.modelContext is unavailable. Every manual workspace feature remains available."}
+              {failedToolCount > 0
+                ? `${failedToolCount} ${failedToolCount === 1 ? "tool is" : "tools are"} unavailable. Retry after the browser or page has recovered.`
+                : state.supported
+                  ? `${state.registeredToolNames.length} tools registered for ${state.lifecycleMode} mode.`
+                  : "document.modelContext is unavailable. Every manual workspace feature remains available."}
             </span>
+            {registrationRetryError && (
+              <span className="debug-support__retry-error" role="alert">
+                {registrationRetryError}
+              </span>
+            )}
           </div>
+          {failedToolCount > 0 && (
+            <button
+              type="button"
+              className="button button--secondary"
+              disabled={retryingRegistrations}
+              onClick={() => void retryRegistrations()}
+            >
+              <RotateCw size={14} aria-hidden="true" />
+              {retryingRegistrations ? "Retrying…" : "Retry registration"}
+            </button>
+          )}
         </div>
         <div className="debug-layout">
           <div className="debug-tool-list" role="list" aria-label="Site Tools">
@@ -144,14 +247,20 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
                 <div className="annotation-row">
                   <span>
                     <Shield size={12} />{" "}
-                    {selectedTool.annotations.readOnlyHint ? "Read only" : "Mutates case"}
+                    {sideEffectLabel(selectedTool.name, selectedTool.annotations.readOnlyHint)}
                   </span>
                   <span>
                     {selectedTool.annotations.untrustedContentHint
-                      ? "Reads untrusted case content"
-                      : "Deterministic or trusted input"}
+                      ? "May contain untrusted case content"
+                      : "No untrusted-content hint"}
                   </span>
                 </div>
+                {selectedTool.registrationError && (
+                  <div className="debug-registration-error" role="note">
+                    <strong>Registration failed</strong>
+                    <span>{selectedTool.registrationError}</span>
+                  </div>
+                )}
                 <details>
                   <summary>
                     <Braces size={13} /> Input schema
@@ -168,15 +277,13 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
                   />
                 </label>
                 <div className="debug-actions">
-                  <button
-                    className="button button--secondary"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(input);
-                      setCopied(true);
-                      window.setTimeout(() => setCopied(false), 1_200);
-                    }}
-                  >
-                    <Copy size={14} /> {copied ? "Copied" : "Copy input"}
+                  <button className="button button--secondary" onClick={() => void copyInput()}>
+                    <Copy size={14} />
+                    {copyStatus === "copied"
+                      ? "Copied"
+                      : copyStatus === "failed"
+                        ? "Copy failed"
+                        : "Copy input"}
                   </button>
                   <button
                     className="button button--primary"
@@ -190,6 +297,11 @@ export function WebMCPDebugPanel({ state, onClose, onSimulate }: WebMCPDebugPane
                     <Play size={14} /> {running ? "Running" : "Run through browser"}
                   </button>
                 </div>
+                {copyStatus === "failed" && (
+                  <p className="debug-copy-error" role="alert">
+                    Clipboard access is unavailable. Select and copy the JSON manually.
+                  </p>
+                )}
                 {!state.canSimulate && (
                   <p className="debug-hint">
                     Simulation requires a browser exposing modelContext.getTools() and

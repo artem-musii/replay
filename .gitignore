@@ -3,7 +3,13 @@ dist/
 coverage/
 playwright-report/
 test-results/
+playwright-release-report/
+test-results-release/
+.playwright-mcp/
 .DS_Store
 *.local
 *.tsbuildinfo
 design-sources/generated/
+.env
+.env.*
+!.env.example
