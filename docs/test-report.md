@@ -53,11 +53,11 @@ A fresh public browser session loaded the landing page, optional guide, WebMCP e
 - the new uncertainty explanation remaining visible; and
 - landing help remaining reachable at 320 px and 200% text beneath a retained-recovery notice.
 
-This is evidence for current application load, same-origin networking, guide/manual-WebMCP discoverability, seed-v3 scene editing, trajectory extension, uncertainty copy, and recovery-notice access to landing help. It is not a supported-model trace or full manual cross-browser, assistive-technology, upload/delete, multi-tab, persistence/reset, or export-fidelity evidence.
+This is evidence for that historical release's application load, same-origin networking, guide/manual-WebMCP discoverability, seed-v3 scene editing, trajectory extension, uncertainty copy, and recovery-notice access to landing help. It is not a supported-model trace or full manual cross-browser, assistive-technology, upload/delete, multi-tab, persistence/reset, or export-fidelity evidence.
 
 ## WebMCP evidence boundary
 
-The current live smoke verified the public WebMCP explanation and that manual mode remained available, while deterministic tests exercised the registry and command contract. A separate Codex in-app-browser smoke surfaced all 18 deployed baseline tools and the workspace's `18 registered` state without invoking one. Native execution, supported-model traces, proposal/cancellation journeys, and compatible-Chrome declarative `toolactivated`/`toolcancel` remain separate gates.
+That release's live smoke verified the public WebMCP explanation and that manual mode remained available, while deterministic tests exercised the registry and command contract. A separate Codex in-app-browser smoke surfaced all 18 deployed baseline tools and the workspace's `18 registered` state without invoking one. Native execution, supported-model traces, proposal/cancellation journeys, and compatible-Chrome declarative `toolactivated`/`toolcancel` remain separate gates.
 
 ## Public Lighthouse 13.4.1
 

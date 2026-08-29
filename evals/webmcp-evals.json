@@ -15,40 +15,92 @@
   "currentPublicRelease": {
     "evidenceClass": "deterministic-ci-and-deployment",
     "date": "2026-08-29",
-    "applicationCommit": "2855f0bc50da2916128b2278a46f0d0a8a4e2bbd",
-    "actionsRun": "33184281134",
-    "verifyJob": "98893121004",
-    "deployJob": "98894240126",
-    "pagesDeployment": "6143728209",
+    "applicationCommit": "b2e93905ff349a29f21b0b544a59e3afc738671d",
+    "actionsRun": "33272807674",
+    "verifyJob": "99154232692",
+    "deployJob": "99155253861",
+    "verifyDeploymentJob": "99155282304",
+    "pagesDeployment": "6159696063",
+    "deploymentStatus": "17508077549",
     "pagesArtifact": {
-      "id": "9691136611",
-      "compressedBytes": 3032328,
-      "sha256": "27c2bf89662de9280ddca52f9d2cb922545a913a27f819b855110f184e924da9"
+      "id": "9720702224",
+      "compressedBytes": 3655213,
+      "sha256": "17357bb96e0ac622b190377e81a415df47704c9b7a42dc78763b1aa0293b7fbe"
+    },
+    "releaseEvidenceArtifact": {
+      "id": "9720702014",
+      "sha256": "08190cf5f735812766331a5fd4c7110e919515c9a7756962f23991d5a65640ab"
+    },
+    "diagnosticArtifacts": {
+      "configuredBase": "9720701858",
+      "test": "9720692628"
     },
     "ci": {
       "vitest": {
-        "passed": 196,
-        "total": 196,
-        "files": 20
+        "passed": 460,
+        "total": 460,
+        "files": 37
+      },
+      "coverage": {
+        "statements": "63.78% (6781/10631)",
+        "branches": "54.28% (4500/8289)",
+        "functions": "62.04% (1628/2624)",
+        "lines": "65.85% (6276/9530)"
       },
       "playwright": {
-        "passed": 109,
-        "intentionalSkips": 5,
+        "passed": 221,
+        "intentionalSkips": 9,
         "failed": 0,
-        "totalRuns": 114
+        "totalRuns": 230
+      },
+      "configuredBaseMatrix": {
+        "passed": 12,
+        "total": 12
+      }
+    },
+    "supplementalLocalStress": {
+      "partOfActionsRun": false,
+      "executionClass": "post-fix-local-regression",
+      "exactImpactResumeStress": {
+        "passed": 50,
+        "total": 50
+      },
+      "mixedCriticalJourneyStress": {
+        "passed": 20,
+        "total": 20
       }
     },
     "livePayload": {
-      "files": 43,
-      "bytes": 4248606,
-      "manifestSha256": "6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4",
+      "files": 46,
+      "bytes": 5297260,
+      "manifestSha256": "586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87",
       "allFilesByteMatched": true,
-      "verificationMethod": "Independent 2026-08-29 download of artifact 9691136611 plus cache-busted comparison of every public payload path.",
-      "automatedReleaseEvidenceAvailable": false
+      "verificationMethod": "Automated post-deploy verification job 99155282304 fetched release-evidence.json and byte/hash-matched every public payload path to the exact clean build artifact.",
+      "automatedReleaseEvidenceAvailable": true
     },
     "behavioralModelResult": false,
-    "boundary": "This proves clean deterministic CI, artifact publication, and independently checked exact live-file identity only. Commit 2855f0bc predates the current release-evidence.json and verify-deployment workflow gate, so the public evidence endpoint is absent. It does not prove native Site Tools discovery/execution, model tool choice, a public product journey, or any scenario pass rate."
+    "boundary": "This proves clean deterministic CI, artifact publication, and independently checked exact live-file identity only. It does not prove native Site Tools discovery/execution, model tool choice, a public product journey, or any behavioral scenario pass rate."
   },
+  "historicalPublicReleases": [
+    {
+      "applicationCommit": "cd88755b9b72e2e0a360a8a877584dc36c7c2053",
+      "releaseStatus": "historical-superseded",
+      "actionsRun": "33269347192",
+      "livePayloadFiles": 46,
+      "livePayloadBytes": 5295872,
+      "manifestSha256": "70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c",
+      "boundary": "Operator-directed bridge/product traces and Lighthouse measurements remain evidence for these exact bytes only; they are not current-release or supported-model results."
+    },
+    {
+      "applicationCommit": "2855f0bc50da2916128b2278a46f0d0a8a4e2bbd",
+      "releaseStatus": "historical-superseded",
+      "actionsRun": "33184281134",
+      "livePayloadFiles": 43,
+      "livePayloadBytes": 4248606,
+      "manifestSha256": "6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4",
+      "boundary": "This release predates the automated public evidence endpoint and remains historical rather than current-release evidence."
+    }
+  ],
   "implementationContract": {
     "seedSource": "src/domain/seed.ts",
     "schemaSource": "src/webmcp/schemas.ts",
@@ -167,7 +219,7 @@
       },
       "supported-model-local-browser-selection": {
         "countsTowardBehavioralToolSelection": false,
-        "proves": "A named supported model independently selected and invoked current-source page tools through the local Codex in-app browser, exercising descriptions, handlers, visible effects, and the human boundary. It does not prove the exact deployed commit or ChatGPT desktop's native Site Tools runtime."
+        "proves": "A named supported model independently selected and invoked page tools from a historical pre-b2 local source state through the Codex in-app browser, exercising descriptions, handlers, visible effects, and the human boundary. It does not prove the current source, exact deployed commit, or ChatGPT desktop's native Site Tools runtime."
       },
       "page-runtime-direct-invocation": {
         "countsTowardBehavioralToolSelection": false,
@@ -245,7 +297,7 @@
       "reasoningEffort": "high",
       "client": "Codex in-app browser",
       "deployedCommit": null,
-      "sourceState": "Current local working tree; not a clean deployed commit",
+      "sourceState": "Historical pre-b2 local working tree; not a clean deployed commit",
       "pageUrl": "http://127.0.0.1:5174/#demo",
       "caseId": "case-demo-roundabout-calibrated-run-20c00676-fda5-4483-ad5b-095ed101474d",
       "pageState": "Fresh seed-v6 roundabout case at caseVersion=1; 18 registered tools before report preview and 19 after add_report_note became contextually available.",
@@ -266,7 +318,7 @@
       "domSubstitutionPerformed": false,
       "caseChanged": false,
       "visibleWorkspaceChanged": true,
-      "outcome": "The model produced a neutral human-review preview, kept three open questions and synthetic-evidence labels visible, and did not confirm a claim, apply a proposal, or finalize the report. This is useful current-source local selection evidence but not an official behavioral model result because it was not the exact deployed commit in ChatGPT desktop's native Site Tools client."
+      "outcome": "The model produced a neutral human-review preview, kept three open questions and synthetic-evidence labels visible, and did not confirm a claim, apply a proposal, or finalize the report. This is useful historical pre-b2 local selection evidence, not current-source evidence, and not an official behavioral model result because it was not the exact deployed commit in ChatGPT desktop's native Site Tools client."
     },
     {
       "date": "2026-08-29",
