@@ -2857,6 +2857,9 @@
     padding-left: 14px;
     padding-right: 14px;
   }
+  .finalization-dialog__body {
+    scrollbar-gutter: auto;
+  }
   .finalization-dialog__actions {
     align-items: stretch;
     flex-direction: column;
