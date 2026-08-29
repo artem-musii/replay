@@ -88,7 +88,7 @@ async function writeArtifact(basePath: string): Promise<void> {
   ]);
 }
 
-function verifyArtifact(basePath = "/replay-sol/") {
+function verifyArtifact(basePath = "/replay/") {
   return spawnSync(process.execPath, [verifierPath], {
     cwd: workspaceRoot,
     encoding: "utf8",
@@ -104,14 +104,14 @@ function verifyArtifact(basePath = "/replay-sol/") {
 describe("release artifact production metadata verification", () => {
   beforeEach(async () => {
     artifactRoot = await mkdtemp(path.join(os.tmpdir(), "replay-release-artifact-"));
-    await writeArtifact("/replay-sol/");
+    await writeArtifact("/replay/");
   });
 
   afterEach(async () => {
     await rm(artifactRoot, { recursive: true, force: true });
   });
 
-  it.each(["/", "/replay-sol/"])(
+  it.each(["/", "/replay/"])(
     "accepts coherent production metadata for a %s build",
     async (basePath) => {
       await writeArtifact(basePath);
@@ -226,7 +226,7 @@ describe("release artifact production metadata verification", () => {
       change: async () =>
         writeFile(
           path.join(artifactRoot, "index.html"),
-          indexHtml("/replay-sol/", { canonical: new URL("wrong/", productionUrl).href }),
+          indexHtml("/replay/", { canonical: new URL("wrong/", productionUrl).href }),
         ),
       expected: "index.html canonical URL is",
     },
@@ -235,7 +235,7 @@ describe("release artifact production metadata verification", () => {
       change: async () =>
         writeFile(
           path.join(artifactRoot, "index.html"),
-          indexHtml("/replay-sol/", { openGraphUrl: new URL("wrong/", productionUrl).href }),
+          indexHtml("/replay/", { openGraphUrl: new URL("wrong/", productionUrl).href }),
         ),
       expected: "index.html og:url is",
     },
@@ -244,7 +244,7 @@ describe("release artifact production metadata verification", () => {
       change: async () =>
         writeFile(
           path.join(artifactRoot, "index.html"),
-          indexHtml("/replay-sol/", {
+          indexHtml("/replay/", {
             openGraphImage: "https://cdn.example.invalid/replay-hero.webp",
           }),
         ),
@@ -255,7 +255,7 @@ describe("release artifact production metadata verification", () => {
       change: async () =>
         writeFile(
           path.join(artifactRoot, "index.html"),
-          indexHtml("/replay-sol/", {
+          indexHtml("/replay/", {
             openGraphImage: new URL("/outside/replay-hero.webp", productionUrl).href,
           }),
         ),

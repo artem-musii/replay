@@ -11,7 +11,7 @@ function configuredBasePath(value = "/"): string {
     segments.some((segment) => segment === "." || segment === "..")
   ) {
     throw new Error(
-      "VITE_BASE_PATH must be an absolute URL-safe path that starts and ends with '/', such as / or /replay-sol/.",
+      "VITE_BASE_PATH must be an absolute URL-safe path that starts and ends with '/', such as / or /replay/.",
     );
   }
   return normalized;

@@ -6,7 +6,7 @@ REPLAY is a challenge prototype. Security fixes target the latest `main` branch 
 
 ## Reporting a vulnerability
 
-Please use [GitHub private vulnerability reporting](https://github.com/artem-musii/replay-sol/security/advisories/new). Do not disclose an exploitable issue, private incident record, or proof-of-concept containing personal data in a public issue.
+Please use [GitHub private vulnerability reporting](https://github.com/artem-musii/replay/security/advisories/new). Do not disclose an exploitable issue, private incident record, or proof-of-concept containing personal data in a public issue.
 
 Include the affected URL or commit, reproduction steps, impact, browser, and any suggested mitigation. Maintainers will acknowledge reports when available, validate scope, and coordinate disclosure after a fix. This prototype does not promise a formal response SLA.
 

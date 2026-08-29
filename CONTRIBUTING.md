@@ -35,8 +35,8 @@ npx playwright install chromium firefox webkit
 npm run test:e2e
 npm audit --audit-level=moderate
 npm audit --omit=dev --audit-level=moderate
-VITE_BASE_PATH=/replay-sol/ npm run build
-REPLAY_EXPECT_BASE_PATH=/replay-sol/ npm run verify:artifact:clean
+VITE_BASE_PATH=/replay/ npm run build
+REPLAY_EXPECT_BASE_PATH=/replay/ npm run verify:artifact:clean
 ```
 
 The clean verifier fails unless the source tree is clean and records that state in `dist/release-evidence.json`. Use `npm run verify:artifact` only for deliberately dirty local diagnostics.

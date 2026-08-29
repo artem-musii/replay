@@ -29,11 +29,11 @@ describe("landing onboarding", () => {
     expect(screen.getByText("Site Tools compatible")).toBeVisible();
     expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
       "href",
-      "https://github.com/artem-musii/replay-sol",
+      "https://github.com/artem-musii/replay",
     );
     expect(screen.getByRole("link", { name: "MIT License" })).toHaveAttribute(
       "href",
-      "https://github.com/artem-musii/replay-sol/blob/main/LICENSE",
+      "https://github.com/artem-musii/replay/blob/main/LICENSE",
     );
     expect(
       screen.getByText(/eligible agent work can be reverted while it remains safe/),

@@ -1,8 +1,8 @@
 # REPLAY historical release test report
 
 - Release date: **2026-08-28**
-- Application commit: [`00688d8a51fb783dbf147e08ece60470b8877544`](https://github.com/artem-musii/replay-sol/commit/00688d8a51fb783dbf147e08ece60470b8877544)
-- Public application: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
+- Application commit: [`00688d8a51fb783dbf147e08ece60470b8877544`](https://github.com/artem-musii/replay/commit/00688d8a51fb783dbf147e08ece60470b8877544)
+- Public application: [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)
 
 > **Historical evidence only.** This report is permanently scoped to superseded commit `00688d8a`; use [testing.md](testing.md) and [deployment.md](deployment.md) for the current deployed release.
 
@@ -10,7 +10,7 @@ This report distinguishes deterministic source/CI evidence, public artifact veri
 
 ## Exact workflow and artifact
 
-[GitHub Actions run `33161848637`](https://github.com/artem-musii/replay-sol/actions/runs/33161848637) completed successfully for the application commit.
+[GitHub Actions run `33161848637`](https://github.com/artem-musii/replay/actions/runs/33161848637) completed successfully for the application commit.
 
 | Gate                           | Recorded result                                                                    |
 | ------------------------------ | ---------------------------------------------------------------------------------- |

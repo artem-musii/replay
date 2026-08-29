@@ -1,11 +1,11 @@
 # Deploying REPLAY
 
-Last verified public status (**2026-08-29**): application commit [`b2e93905ff349a29f21b0b544a59e3afc738671d`](https://github.com/artem-musii/replay-sol/commit/b2e93905ff349a29f21b0b544a59e3afc738671d) is deployed and byte-verified on GitHub Pages.
+Last verified public status (**2026-08-29**): application commit [`b2e93905ff349a29f21b0b544a59e3afc738671d`](https://github.com/artem-musii/replay/commit/b2e93905ff349a29f21b0b544a59e3afc738671d) is deployed and byte-verified on GitHub Pages.
 
-- Landing: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
-- Deterministic demo: [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo)
-- Repository: [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)
-- Current application: commit `b2e93905ff349a29f21b0b544a59e3afc738671d`, successful [GitHub Actions run `33272807674`](https://github.com/artem-musii/replay-sol/actions/runs/33272807674)
+- Landing: [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)
+- Deterministic demo: [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo)
+- Repository: [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)
+- Current application: commit `b2e93905ff349a29f21b0b544a59e3afc738671d`, successful [GitHub Actions run `33272807674`](https://github.com/artem-musii/replay/actions/runs/33272807674)
 
 REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API.
 
@@ -21,13 +21,13 @@ npm run build
 The deployable output is `dist/`. GitHub Pages uses the repository subpath, so its build sets the base explicitly:
 
 ```bash
-VITE_BASE_PATH=/replay-sol/ npm run build
-REPLAY_EXPECT_BASE_PATH=/replay-sol/ npm run verify:artifact:clean
+VITE_BASE_PATH=/replay/ npm run build
+REPLAY_EXPECT_BASE_PATH=/replay/ npm run verify:artifact:clean
 ```
 
 The verifier checks that local entrypoint, icon, manifest, SPA fallback, 404 return link, CSP fallback, response-policy contract, and compiled assets agree with the configured build base. Independently, it treats `package.json.homepage` as the production URL source of truth and rejects drift in the canonical URL, `og:url`, `og:image` origin/base, sitemap locations, or the robots Sitemap URL. It also rejects source maps, source files, unresolved build tokens, missing assets, and symlinks, then writes `dist/release-evidence.json` with the source commit, clean/dirty tree status, Node/package-manager versions, lockfile digest, and stable SHA-256/byte evidence. Publicly retrievable payload files are recorded separately from the required `.nojekyll` deployment control file, which GitHub Pages consumes but does not serve. The evidence file deliberately does not hash itself.
 
-Preview the artifact at the same base path used for its build. For a normal root build, run `npm run build`, then `npm run preview -- --host 127.0.0.1 --port 4173` and open `http://127.0.0.1:4173/#demo`. For the Pages build above, keep the configured artifact, run `VITE_BASE_PATH=/replay-sol/ npm run preview -- --host 127.0.0.1 --port 4173`, and open `http://127.0.0.1:4173/replay-sol/#demo`. Vite's preview server reads the base configuration too; the build and preview commands must therefore agree. REPLAY uses hash navigation, so `#demo` is never sent to the server. The build rewrites the copied 404 page's return link to the configured base path; unsupported or ambiguous `VITE_BASE_PATH` values fail the build instead of producing a partially broken artifact.
+Preview the artifact at the same base path used for its build. For a normal root build, run `npm run build`, then `npm run preview -- --host 127.0.0.1 --port 4173` and open `http://127.0.0.1:4173/#demo`. For the Pages build above, keep the configured artifact, run `VITE_BASE_PATH=/replay/ npm run preview -- --host 127.0.0.1 --port 4173`, and open `http://127.0.0.1:4173/replay/#demo`. Vite's preview server reads the base configuration too; the build and preview commands must therefore agree. REPLAY uses hash navigation, so `#demo` is never sent to the server. The build rewrites the copied 404 page's return link to the configured base path; unsupported or ambiguous `VITE_BASE_PATH` values fail the build instead of producing a partially broken artifact.
 
 ## Current GitHub Pages workflow
 
@@ -38,9 +38,9 @@ The workflow used by the current deployed release runs a read-only verification 
 3. gates the release on formatting, ESLint, TypeScript, and the full Vitest suite with coverage;
 4. installs Chromium, Firefox, and WebKit, runs the complete desktop/mobile Chromium suite, and runs the bounded release/export smoke in Firefox and WebKit;
 5. retains coverage, dependency-audit, JUnit, Playwright HTML, trace, screenshot, video, and downloaded export diagnostics when produced;
-6. builds the final artifact with `VITE_BASE_PATH=/replay-sol/`;
+6. builds the final artifact with `VITE_BASE_PATH=/replay/`;
 7. verifies the configured subpath and writes the machine-readable release evidence;
-8. boots that exact already-built artifact at `/replay-sol/` without rebuilding and runs a 12-case focused matrix: the release/export smoke in desktop and mobile Chromium, Firefox, and WebKit, plus the high-speed, authored-impact, handler-contract, and submission-story journeys in desktop and mobile Chromium;
+8. boots that exact already-built artifact at `/replay/` without rebuilding and runs a 12-case focused matrix: the release/export smoke in desktop and mobile Chromium, Firefox, and WebKit, plus the high-speed, authored-impact, handler-contract, and submission-story journeys in desktop and mobile Chromium;
 9. retains the release evidence for 90 days and focused configured-base diagnostics for 30 days;
 10. uploads the verified `dist/` Pages artifact for non-PR runs;
 11. deploys it from a separate non-PR job that alone receives `pages: write` and `id-token: write`; and
@@ -51,7 +51,7 @@ All third-party workflow actions are pinned to immutable full commit SHAs. The v
 For an explicit live check outside Actions against a deployment produced by this new attested workflow, point the same verifier at its deployed base URL and full source commit:
 
 ```bash
-REPLAY_DEPLOYED_URL=https://artem-musii.github.io/replay-sol/ \
+REPLAY_DEPLOYED_URL=https://artem-musii.github.io/replay/ \
 REPLAY_DEPLOYED_COMMIT=<full-commit-sha> \
 REPLAY_EXPECT_PAYLOAD_MANIFEST_SHA256=<artifact-manifest-sha256> \
 npm run verify:deployment
@@ -83,7 +83,7 @@ The current public application payload originated from the attested workflow bel
 | Live payload              | **46 files**, **5,297,260 bytes**, all byte-matched                                                                                         |
 | Payload manifest hash     | `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`                                                                          |
 
-The live [`release-evidence.json`](https://artem-musii.github.io/replay-sol/release-evidence.json) names the latest clean wrapper commit, Node.js and npm versions, the `/replay-sol/` base, and the payload values above. The payload is the same seed-v6 application when it remains 46 files / 5,297,260 bytes with manifest SHA-256 `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that wrapper's exact build artifact and exported manifest digest.
+The live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) names the latest clean wrapper commit, Node.js and npm versions, the `/replay/` base, and the payload values above. The payload is the same seed-v6 application when it remains 46 files / 5,297,260 bytes with manifest SHA-256 `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that wrapper's exact build artifact and exported manifest digest.
 
 ### Superseded `cd88755b` release evidence
 
@@ -139,7 +139,7 @@ GitHub Pages does **not** consume `_headers`. The current verified response ther
 
 Site Tools worked in the historical `f980d28` top-level GitHub Pages session under the browser’s default top-level policy. An earlier `00688d8a` Codex smoke surfaced 18 tools without invoking one. The current cache-busted public payload later surfaced all 18 baseline tools and returned `ok: true` from bounded operator-directed summary, structured-state, all-scope-validation, and recent-activity bridge calls at case v1. This is live page-defined bridge evidence, not supported-model choice, native **Recently used/Sources**, framed/cross-origin, mutation/lifecycle, or complete Chrome compatibility.
 
-GitHub Pages is also a shared-origin host: IndexedDB is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. The public URL is a synthetic/non-sensitive challenge demo, not a private incident vault. Use a dedicated origin for sensitive or production-like evaluation.
+GitHub Pages is also a shared-origin host: IndexedDB is scoped to `artem-musii.github.io`, not to the `/replay/` path. The public URL is a synthetic/non-sensitive challenge demo, not a private incident vault. Use a dedicated origin for sensitive or production-like evaluation.
 
 “Local-first” describes the case/evidence data boundary, not guaranteed offline installation. REPLAY does not register a service worker: an already loaded workspace can continue without a network connection, but a cold start or reload still needs the static host unless the browser happens to retain those assets. The web manifest supplies install presentation metadata only. Browser storage can also be evicted when the best-effort persistent-storage request is denied, so the saved indicator and explicit exports remain the durability boundary; do not claim an offline-capable PWA or permanent browser storage.
 
@@ -156,18 +156,18 @@ The checked-in production identity is intentionally pinned to the challenge’s 
 ### Responses, assets, and metadata
 
 ```bash
-curl -sS -D - -o /dev/null https://artem-musii.github.io/replay-sol/
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/replay-hero.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-roundabout-wide-v2.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-vehicle-a-damage-v2.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-vehicle-b-damage-v2.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-road-condition.webp
+curl -sS -D - -o /dev/null https://artem-musii.github.io/replay/
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/replay-hero.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-roundabout-wide-v2.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-vehicle-a-damage-v2.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-vehicle-b-damage-v2.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-road-condition.webp
 # Retained because saved seed-v1 demos may still reference them:
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-roundabout-wide.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-vehicle-a-damage.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/assets/generated/demo-vehicle-b-damage.webp
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/site.webmanifest
-curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/sitemap.xml
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-roundabout-wide.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-vehicle-a-damage.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/assets/generated/demo-vehicle-b-damage.webp
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/site.webmanifest
+curl -fsS -o /dev/null https://artem-musii.github.io/replay/sitemap.xml
 ```
 
 The current automated acceptance audit fetched every path declared by the deployed evidence manifest. All 46 public payload files / 5,297,260 bytes returned successfully and were byte-identical to the verified build; the stable live manifest SHA-256 was `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`.

@@ -73,7 +73,7 @@ function formatLocalCaseTime(value: string): string {
   return localCaseTimeFormatter.format(new Date(value));
 }
 
-const SOURCE_REPOSITORY_URL = "https://github.com/artem-musii/replay-sol";
+const SOURCE_REPOSITORY_URL = "https://github.com/artem-musii/replay";
 const MIT_LICENSE_URL = `${SOURCE_REPOSITORY_URL}/blob/main/LICENSE`;
 
 export function LandingPage({

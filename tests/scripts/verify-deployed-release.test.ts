@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const workspaceRoot = process.cwd();
 const verifierPath = path.join(workspaceRoot, "scripts/verify-deployed-release.mjs");
-const basePath = "/replay-sol/";
+const basePath = "/replay/";
 const evidencePath = `${basePath}release-evidence.json`;
 const deploymentControlPath = ".nojekyll";
 const deployedControlPath = `${basePath}${deploymentControlPath}`;

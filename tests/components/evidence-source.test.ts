@@ -43,16 +43,16 @@ describe("resolveEvidenceImageSource", () => {
     );
     if (!currentOverview) throw new Error("Current overview evidence is missing");
 
-    expect(resolveEvidenceImageSource(currentOverview, undefined, "/replay-sol/")).toBe(
-      "/replay-sol/assets/generated/demo-roundabout-wide-v2.webp",
+    expect(resolveEvidenceImageSource(currentOverview, undefined, "/replay/")).toBe(
+      "/replay/assets/generated/demo-roundabout-wide-v2.webp",
     );
 
     const savedVersionOneOverview = {
       ...currentOverview,
       localBlobKey: "/assets/generated/demo-roundabout-wide.webp",
     };
-    expect(resolveEvidenceImageSource(savedVersionOneOverview, undefined, "/replay-sol")).toBe(
-      "/replay-sol/assets/generated/demo-roundabout-wide.webp",
+    expect(resolveEvidenceImageSource(savedVersionOneOverview, undefined, "/replay")).toBe(
+      "/replay/assets/generated/demo-roundabout-wide.webp",
     );
   });
 
@@ -65,7 +65,7 @@ describe("resolveEvidenceImageSource", () => {
           syntheticDemoAsset: false,
         },
         runtimeBlobUrl,
-        "/replay-sol/",
+        "/replay/",
       ),
     ).toBe(runtimeBlobUrl);
   });
@@ -81,7 +81,7 @@ describe("resolveEvidenceImageSource", () => {
       resolveEvidenceImageSource(
         { localBlobKey, syntheticDemoAsset: true },
         "blob:https://replay.test/untrusted-fallback",
-        "/replay-sol/",
+        "/replay/",
       ),
     ).toBeUndefined();
   });

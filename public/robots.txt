@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://artem-musii.github.io/replay-sol/sitemap.xml
+Sitemap: https://artem-musii.github.io/replay/sitemap.xml

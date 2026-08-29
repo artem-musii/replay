@@ -15,8 +15,8 @@ npm run test
 npm run test:coverage
 npx playwright install chromium firefox webkit
 npm run test:e2e
-VITE_BASE_PATH=/replay-sol/ npm run build
-REPLAY_EXPECT_BASE_PATH=/replay-sol/ npm run verify:artifact:clean
+VITE_BASE_PATH=/replay/ npm run build
+REPLAY_EXPECT_BASE_PATH=/replay/ npm run verify:artifact:clean
 npm audit --audit-level=moderate
 npm audit --omit=dev --audit-level=moderate
 git diff --check
@@ -32,7 +32,7 @@ npm run test:coverage
 npm run preview
 ```
 
-The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` automatically. The complete interaction suite runs in desktop/mobile Chromium; `release-smoke.spec.ts` additionally runs in Firefox and WebKit. Set `REPLAY_E2E_BASE_PATH=/replay-sol/`, `VITE_BASE_PATH=/replay-sol/`, and `REPLAY_E2E_SKIP_BUILD=true` to boot an already-built Pages-subpath artifact instead of rebuilding it.
+The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` automatically. The complete interaction suite runs in desktop/mobile Chromium; `release-smoke.spec.ts` additionally runs in Firefox and WebKit. Set `REPLAY_E2E_BASE_PATH=/replay/`, `VITE_BASE_PATH=/replay/`, and `REPLAY_E2E_SKIP_BUILD=true` to boot an already-built Pages-subpath artifact instead of rebuilding it.
 
 ## Current deterministic coverage
 
@@ -51,7 +51,7 @@ The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` auto
 
 ### Current deployed release result
 
-Application commit `b2e93905ff349a29f21b0b544a59e3afc738671d` completed the following matrix on **2026-08-29** in successful [GitHub Actions run `33272807674`](https://github.com/artem-musii/replay-sol/actions/runs/33272807674). The configured-base artifact was then deployed and independently byte-verified.
+Application commit `b2e93905ff349a29f21b0b544a59e3afc738671d` completed the following matrix on **2026-08-29** in successful [GitHub Actions run `33272807674`](https://github.com/artem-musii/replay/actions/runs/33272807674). The configured-base artifact was then deployed and independently byte-verified.
 
 | Check                   | Result                                                                                                                                                                                                                                                                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,7 +67,7 @@ Application commit `b2e93905ff349a29f21b0b544a59e3afc738671d` completed the foll
 | Visual regression       | **20** checked screenshot baselines                                                                                                                                                                                                                                                                                             |
 | Lighthouse              | Historical preceding `cd88755b` payload: Lighthouse 13.4.1/Chrome 151 completed three warning-free runs per profile, with mobile performance **89/91/90**, accessibility/best-practices/SEO **100/100/100** on every run, and desktop **100/100/100/100** throughout. No Lighthouse score is attributed to the current payload. |
 | Dependencies            | Full and production-only audits reported **0 vulnerabilities**; `npm ls --all` resolved cleanly                                                                                                                                                                                                                                 |
-| Production artifacts    | Root: **46 public payload files / 5,296,864 bytes**, plus `.nojekyll`, manifest SHA-256 `1928042d80975e5f2680e2a87504b9a231a80264ea6d1ff648cabb5c5e166df3`; `/replay-sol/`: **46 / 5,297,260 bytes**, plus `.nojekyll`, SHA-256 `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`                              |
+| Production artifacts    | Root: **46 public payload files / 5,296,864 bytes**, plus `.nojekyll`, manifest SHA-256 `1928042d80975e5f2680e2a87504b9a231a80264ea6d1ff648cabb5c5e166df3`; `/replay/`: **46 / 5,297,260 bytes**, plus `.nojekyll`, SHA-256 `586c81a32c8b0d15deed08ecd99ebd069697a2158aa0ca047d87cdd0f0e6bb87`                                  |
 | Diff integrity          | `git diff --check` passed                                                                                                                                                                                                                                                                                                       |
 | Clean-tree release gate | Passed in hosted CI against exact clean commit `b2e93905ff349a29f21b0b544a59e3afc738671d`                                                                                                                                                                                                                                       |
 | Deployment jobs         | Verify/build `99154232692`; deploy `99155253861`; verify-deployment `99155282304`, all successful                                                                                                                                                                                                                               |
@@ -202,7 +202,7 @@ Use a deployed HTTPS URL because that is the submission environment. At the sour
 
 The public URL serves application commit `b2e93905ff349a29f21b0b544a59e3afc738671d`. Record the exact browser/client/model and confirm native `document.modelContext` before calling any result Site Tools evidence.
 
-1. Open [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo) in the desktop app’s built-in browser.
+1. Open [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo) in the desktop app’s built-in browser.
 2. Confirm REPLAY’s page status says Site Tools available.
 3. Ask the four prompts in [demo-script.md](demo-script.md) without naming internal tools.
 4. Capture tool names, arguments, order, results, case versions, activity IDs, and visible UI effects.
@@ -217,13 +217,13 @@ The machine-readable eval suite and scoring rules are documented in [webmcp-eval
 
 **Earlier local runtime smoke (2026-08-28):** a fresh in-app-browser session executed the page-defined `get_case_summary`, `get_workspace_state`, `validate_case_consistency`, `focus_workspace_item`, and `build_report_preview` tools against a disposable seed-v6 run. It verified the 18→19 lifecycle, live selection after focus, unchanged case v1 and no durable factual activity for session focus, visible report review with human-only finalization, exact contact at 10.0 s, separated authored positions at 16.0 s, desktop and 390 px reflow without horizontal overflow, and no console warnings/errors. This confirms that local page/runtime contract; it is not evidence that a supported model independently chose the tools, and it is not a live-deployment result.
 
-**Preceding `cd88755b` native bridge smoke (2026-08-29):** its 46-payload `/replay-sol/` artifact at 5,295,872 bytes with manifest SHA-256 `70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c` exposed 18 page-defined Site Tools in the Codex in-app browser before deployment. Four operator-directed read/UI-only calls returned `ok: true` at v1, visible focus and session audit agreed, and runtime logs had no warning or error. This remains historical bridge/UI evidence for those exact bytes. It is not a current-deployment invocation or evidence of main-world constructor behavior, mutation/lifecycle, supported-model choice, native **Recently used/Sources**, or cross-client behavior.
+**Preceding `cd88755b` native bridge smoke (2026-08-29):** its 46-payload `/replay/` artifact at 5,295,872 bytes with manifest SHA-256 `70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c` exposed 18 page-defined Site Tools in the Codex in-app browser before deployment. Four operator-directed read/UI-only calls returned `ok: true` at v1, visible focus and session audit agreed, and runtime logs had no warning or error. This remains historical bridge/UI evidence for those exact bytes. It is not a current-deployment invocation or evidence of main-world constructor behavior, mutation/lifecycle, supported-model choice, native **Recently used/Sources**, or cross-client behavior.
 
 **Preceding `cd88755b` public product and operator-bridge smoke (2026-08-29):** a cache-busted fresh in-app-browser tab loaded that deployed 5,295,872-byte payload with no warning/error logs and surfaced the 18 baseline Site Tools. Operator-directed reads returned `ok: true` at case v1 and remained session-only; roundabout playback continued after one click, authored final headings diverged, and the labelled 65/77 km/h high-speed case opened. This remains historical product/bridge evidence for `cd88755b`, not the current payload or an uncoached supported-model trace.
 
 **Current `b2e93905` public product and contract smoke (2026-08-29):** a cache-busted operator journey selected the exact 10.000 s impact marker and advanced to 17.7 s after one Play click. A separate 9.5 s path auto-paused once at 10.0 s; one resume advanced to 15.9 s while playback remained active. The public technical inspector visibly exposed `propose_scene_changes`, `changes.minItems=1`, full `trajectory-set` start/final schema semantics, and separate `mark_impact_event` semantics. No console error or failed dynamic request occurred. The ordinary Playwright browser emitted expected unsupported origin-trial `Permissions-Policy` warnings because `document.modelContext` was absent. This proves current live product behavior and published contract visibility, not native Site Tools invocation, supported-model choice, or **Recently used/Sources**.
 
-**Earlier pre-polish native Chrome smoke (2026-08-29):** the 45-payload `/replay-sol/` artifact at 5,229,846 bytes with manifest SHA-256 `356be07e17a995608cfd558c685ba1fc9bf582b2f2fd530a9644604a8f2bd6ee` exposed a native main-world `ModelContext` and 18 tools with no console warning or error. In case `case-demo-roundabout-calibrated-run-9cd0d1c1-c522-4e01-9d23-e10c88f92810`, an operator invoked the four-call judge opening: scene/questions read, all-scope validation, blocking-question focus, then request `native-current-final-20260829-1` for a two-keyframe review proposal. The first three calls stayed session-only at v1; validation returned exactly one question, `integrity.calibration-source`; the pending proposal alone created v2; and the visible human UI rejected it at v3. A subsequent native read found no proposal and confirmed Vehicle A/B's original 8,000 ms poses remained unchanged. This remains historical main-world constructor, mutation, and human-gate evidence for that earlier artifact only.
+**Earlier pre-polish native Chrome smoke (2026-08-29):** the 45-payload `/replay/` artifact at 5,229,846 bytes with manifest SHA-256 `356be07e17a995608cfd558c685ba1fc9bf582b2f2fd530a9644604a8f2bd6ee` exposed a native main-world `ModelContext` and 18 tools with no console warning or error. In case `case-demo-roundabout-calibrated-run-9cd0d1c1-c522-4e01-9d23-e10c88f92810`, an operator invoked the four-call judge opening: scene/questions read, all-scope validation, blocking-question focus, then request `native-current-final-20260829-1` for a two-keyframe review proposal. The first three calls stayed session-only at v1; validation returned exactly one question, `integrity.calibration-source`; the pending proposal alone created v2; and the visible human UI rejected it at v3. A subsequent native read found no proposal and confirmed Vehicle A/B's original 8,000 ms poses remained unchanged. This remains historical main-world constructor, mutation, and human-gate evidence for that earlier artifact only.
 
 ## Accessibility verification
 
@@ -250,10 +250,10 @@ Automated axe results are a starting point, not a substitute for interaction rev
 7. Check deployed response headers with:
 
 ```bash
-curl -sS -D - -o /dev/null https://artem-musii.github.io/replay-sol/
+curl -sS -D - -o /dev/null https://artem-musii.github.io/replay/
 ```
 
-The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so its live response lacks the intended `Permissions-Policy`, origin isolation, CSP, frame restriction, content-type, and referrer response policies. The document mitigates representable policies with CSP/no-referrer meta elements, and the app refuses to render/register tools while framed, but neither replaces response headers. GitHub Pages also scopes IndexedDB to the shared `artem-musii.github.io` origin, not `/replay-sol/`; test there only with synthetic/non-sensitive data. Use a dedicated origin on Cloudflare Pages, Netlify, or another header-capable host when the complete response/privacy contract is required. Hash fragments are client-side and are not sent to the server, so header checks target `/`.
+The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so its live response lacks the intended `Permissions-Policy`, origin isolation, CSP, frame restriction, content-type, and referrer response policies. The document mitigates representable policies with CSP/no-referrer meta elements, and the app refuses to render/register tools while framed, but neither replaces response headers. GitHub Pages also scopes IndexedDB to the shared `artem-musii.github.io` origin, not `/replay/`; test there only with synthetic/non-sensitive data. Use a dedicated origin on Cloudflare Pages, Netlify, or another header-capable host when the complete response/privacy contract is required. Hash fragments are client-side and are not sent to the server, so header checks target `/`.
 
 ## Performance and visual verification
 

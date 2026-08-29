@@ -329,7 +329,7 @@
       "deployedCommit": "00688d8a51fb783dbf147e08ece60470b8877544",
       "releaseStatus": "historical-superseded",
       "supersededBy": "2855f0bc50da2916128b2278a46f0d0a8a4e2bbd",
-      "pageUrl": "https://artem-musii.github.io/replay-sol/#demo",
+      "pageUrl": "https://artem-musii.github.io/replay/#demo",
       "chatTitle": "Evaluate REPLAY Demo",
       "pageState": "Workspace caseVersion=1; REPLAY's local inspector catalog showed 19 definitions because the shared origin already had report-preview state.",
       "nativeDocumentModelContext": false,
