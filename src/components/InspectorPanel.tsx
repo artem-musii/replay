@@ -1131,7 +1131,13 @@ function ProposalReviewPanel(props: InspectorPanelProps) {
                       <div className="proposal-keyframes">
                         {change.proposedTrajectory.keyframes.map((frame, frameIndex) => (
                           <div className="proposal-keyframe" key={frame.id}>
-                            <strong>Point {frameIndex + 1}</strong>
+                            <strong>
+                              {frameIndex === 0
+                                ? "Start"
+                                : frameIndex === change.proposedTrajectory.keyframes.length - 1
+                                  ? "Final"
+                                  : `Point ${String(frameIndex + 1)}`}
+                            </strong>
                             <div className="scene-numeric-form__grid scene-numeric-form__grid--four">
                               <label>
                                 <span>Time ms</span>

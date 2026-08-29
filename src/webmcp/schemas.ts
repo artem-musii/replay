@@ -138,7 +138,10 @@ const proposedKeyframeSchema = z
     y: normalizedCoordinateSchema,
     rotationDeg: z.number().min(-360).max(360).describe("Vehicle rotation in degrees."),
   })
-  .strict();
+  .strict()
+  .describe(
+    "One pose in a complete ordered trajectory. The first keyframe is the starting pose and the last is the final pose; intermediate poses describe geometry only and do not create timeline events.",
+  );
 
 const trajectoryKeyframeAdjustmentSchema = z
   .object({
@@ -206,7 +209,13 @@ const proposalChangeSchema = z.discriminatedUnion("kind", [
         .describe("Existing trajectory ID from the scene read, or omit when proposing a new path."),
       actorId: replayIdSchema.describe("Existing scene actor ID."),
       branchId: replayIdSchema.describe("Existing active hypothesis branch ID."),
-      keyframes: z.array(proposedKeyframeSchema).min(2).max(100),
+      keyframes: z
+        .array(proposedKeyframeSchema)
+        .min(2)
+        .max(100)
+        .describe(
+          "Complete ordered reconstruction path. The first keyframe sets the starting pose and the last sets the final pose; include intermediate geometry as needed. A keyframe does not create an impact event—use mark_impact_event separately. Reuse existing keyframe IDs when replacing a path, or omit IDs for new points.",
+        ),
       visible: z.boolean().default(true),
     })
     .strict(),
@@ -417,7 +426,13 @@ export const webMCPInputSchemas = {
         .describe("Optional new proposal ID; omit to derive one from requestId."),
       title: shortTextSchema,
       rationale: descriptionSchema,
-      changes: z.array(proposalChangeSchema).min(2).max(10),
+      changes: z
+        .array(proposalChangeSchema)
+        .min(1)
+        .max(10)
+        .describe(
+          "One preview change per affected actor. A single-actor proposal is allowed; group multiple actors when their reconstruction should be reviewed atomically. Read current scene and timeline sections first for actor/branch IDs, coordinates, and timeline.timeRangeMs.",
+        ),
       expectedPoseTarget: expectedPoseTargetSchema
         .optional()
         .describe(

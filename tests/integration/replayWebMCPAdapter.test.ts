@@ -1630,6 +1630,193 @@ describe("Replay WebMCP adapter activity", () => {
     expect(persistCase).toHaveBeenCalledOnce();
   });
 
+  it("keeps a single start-to-final reconstruction preview-only until human acceptance", async () => {
+    const engine = createReplayEngine(createDemoCase());
+    const before = engine.getState();
+    const persistCase = vi.fn(() => Promise.resolve());
+    const adapter = createReplayWebMCPAdapter(engine, requiredUiBridge(engine, persistCase));
+    const workspace = (await adapter.getWorkspaceState(
+      ["scene"],
+      context("get_workspace_state"),
+    )) as {
+      scene: {
+        trajectories: Array<{
+          id: string;
+          actorId: string;
+          branchId: string;
+          visible: boolean;
+          keyframes: Array<{
+            id: string;
+            timeMs: number;
+            x: number;
+            y: number;
+            rotationDeg: number;
+          }>;
+        }>;
+      };
+    };
+    const trajectory = workspace.scene.trajectories.find(
+      (candidate) => candidate.actorId === "actor-vehicle-a",
+    );
+    if (!trajectory) throw new Error("Vehicle A trajectory is missing");
+    const proposedKeyframes = trajectory.keyframes.map((frame, index) => ({
+      ...frame,
+      x: index === 0 ? frame.x + 0.01 : frame.x,
+      y: index === trajectory.keyframes.length - 1 ? frame.y - 0.01 : frame.y,
+    }));
+    const tool = createReplayWebMCPTools(adapter).find(
+      (candidate) => candidate.name === "propose_scene_changes",
+    );
+    if (!tool) throw new Error("Missing proposal tool");
+
+    const result = await tool.execute(
+      {
+        title: "Review reported start and final positions",
+        rationale:
+          "Translate the description into a visible reconstruction draft without changing the accepted scene.",
+        changes: [
+          {
+            kind: "trajectory-set",
+            trajectoryId: trajectory.id,
+            actorId: trajectory.actorId,
+            branchId: trajectory.branchId,
+            keyframes: proposedKeyframes,
+            visible: trajectory.visible,
+          },
+        ],
+        expectedVersion: before.caseVersion,
+        requestId: "request-single-reconstruction-0001",
+      },
+      { signal: new AbortController().signal },
+    );
+
+    expect(result).toMatchObject({ ok: true, caseVersion: before.caseVersion + 1 });
+    expect(engine.getState().trajectories).toEqual(before.trajectories);
+    const proposal = engine.getState().proposals.at(-1);
+    const change = proposal?.revisions.at(-1)?.changes[0];
+    if (!proposal || change?.kind !== "trajectory-set") {
+      throw new Error("The reconstruction must remain a pending trajectory proposal");
+    }
+    expect(proposal.status).toBe("pending");
+    expect(change.proposedTrajectory.keyframes[0]).not.toEqual(change.baseTrajectory?.keyframes[0]);
+    expect(change.proposedTrajectory.keyframes.at(-1)).not.toEqual(
+      change.baseTrajectory?.keyframes.at(-1),
+    );
+    expect(persistCase).toHaveBeenCalledOnce();
+
+    const accepted = engine.execute({
+      type: "proposal.accept",
+      actor: "human",
+      origin: "ui",
+      poseAt: { branchId: trajectory.branchId, timeMs: before.timeRangeMs.end },
+      expectedVersion: result.caseVersion,
+      proposalId: proposal.id,
+      note: "Reviewed the start and final positions against the reported account.",
+    });
+
+    expect(accepted).toMatchObject({ ok: true, caseVersion: before.caseVersion + 2 });
+    const appliedTrajectory = engine
+      .getState()
+      .trajectories.find((candidate) => candidate.id === trajectory.id);
+    expect(appliedTrajectory?.keyframes).toEqual(change.proposedTrajectory.keyframes);
+    const finalKeyframe = change.proposedTrajectory.keyframes.at(-1);
+    expect(engine.getState().actors.find((actor) => actor.id === trajectory.actorId)?.pose).toEqual(
+      {
+        x: finalKeyframe?.x,
+        y: finalKeyframe?.y,
+        rotationDeg: finalKeyframe?.rotationDeg,
+      },
+    );
+  });
+
+  it("proposes an actor's first complete path from a blank case without applying it", async () => {
+    const engine = createReplayEngine(
+      createBlankCase(
+        {
+          title: "First path proposal test",
+          sceneType: "straight-road",
+          roadCondition: "unknown",
+          vehicleCount: 2,
+        },
+        { caseId: "case-first-path-proposal", now: "2026-08-29T10:00:00.000Z" },
+      ),
+    );
+    const before = engine.getState();
+    const persistCase = vi.fn(() => Promise.resolve());
+    const adapter = createReplayWebMCPAdapter(engine, requiredUiBridge(engine, persistCase));
+    const workspace = (await adapter.getWorkspaceState(
+      ["scene", "timeline"],
+      context("get_workspace_state"),
+    )) as {
+      scene: { actors: Array<{ id: string }>; branchId: string };
+      timeline: { timeRangeMs: { start: number; end: number } };
+    };
+    const actorId = workspace.scene.actors[0]?.id;
+    if (!actorId) throw new Error("Blank case actor is missing");
+    const tool = createReplayWebMCPTools(adapter).find(
+      (candidate) => candidate.name === "propose_scene_changes",
+    );
+    if (!tool) throw new Error("Missing proposal tool");
+    const { start, end } = workspace.timeline.timeRangeMs;
+
+    const result = await tool.execute(
+      {
+        title: "Review the reported first path",
+        rationale:
+          "Draft the reported start, contact geometry, and final position for human review.",
+        changes: [
+          {
+            kind: "trajectory-set",
+            actorId,
+            branchId: workspace.scene.branchId,
+            keyframes: [
+              { timeMs: start, x: 0.15, y: 0.56, rotationDeg: 0 },
+              { timeMs: (start + end) / 2, x: 0.5, y: 0.5, rotationDeg: 8 },
+              { timeMs: end, x: 0.82, y: 0.43, rotationDeg: 16 },
+            ],
+            visible: true,
+          },
+        ],
+        expectedVersion: before.caseVersion,
+        requestId: "request-first-path-proposal-0001",
+      },
+      { signal: new AbortController().signal },
+    );
+
+    expect(result).toMatchObject({ ok: true, caseVersion: before.caseVersion + 1 });
+    expect(engine.getState().trajectories).toEqual([]);
+    const proposal = engine.getState().proposals.at(-1);
+    const change = proposal?.revisions.at(-1)?.changes[0];
+    if (!proposal || change?.kind !== "trajectory-set") {
+      throw new Error("The first path must remain a pending trajectory proposal");
+    }
+    expect(proposal.status).toBe("pending");
+    expect(change.baseTrajectory).toBeUndefined();
+    expect(persistCase).toHaveBeenCalledOnce();
+
+    expect(
+      engine.execute({
+        type: "proposal.accept",
+        actor: "human",
+        origin: "ui",
+        poseAt: { branchId: workspace.scene.branchId, timeMs: end },
+        expectedVersion: result.caseVersion,
+        proposalId: proposal.id,
+        note: "Reviewed the complete path against the reported account.",
+      }),
+    ).toMatchObject({ ok: true, caseVersion: before.caseVersion + 2 });
+    expect(engine.getState().trajectories).toHaveLength(1);
+    expect(engine.getState().trajectories[0]?.keyframes).toEqual(
+      change.proposedTrajectory.keyframes,
+    );
+    const finalKeyframe = change.proposedTrajectory.keyframes.at(-1);
+    expect(engine.getState().actors.find((actor) => actor.id === actorId)?.pose).toEqual({
+      x: finalKeyframe?.x,
+      y: finalKeyframe?.y,
+      rotationDeg: finalKeyframe?.rotationDeg,
+    });
+  });
+
   it("does not collide omitted actor IDs for long request IDs with the same prefix", async () => {
     const engine = createReplayEngine(createDemoCase());
     const persistCase = vi.fn(() => Promise.resolve());
@@ -2203,12 +2390,21 @@ describe("Replay WebMCP adapter activity", () => {
       patchCommand("request-patch-endpoint-0001", trajectory.keyframes[0]?.id ?? "missing"),
       context("propose_scene_changes"),
     );
+    const finalEndpoint = await demoAdapter.execute(
+      patchCommand(
+        "request-patch-final-endpoint-0001",
+        trajectory.keyframes.at(-1)?.id ?? "missing",
+      ),
+      context("propose_scene_changes"),
+    );
     const missingKeyframe = await demoAdapter.execute(
       patchCommand("request-patch-missing-frame-0001", "keyframe-does-not-exist"),
       context("propose_scene_changes"),
     );
     expect(endpoint).toMatchObject({ ok: false, code: "INVALID_INPUT" });
     expect(endpoint.message).toContain("preserve first and last endpoints");
+    expect(finalEndpoint).toMatchObject({ ok: false, code: "INVALID_INPUT" });
+    expect(finalEndpoint.message).toContain("preserve first and last endpoints");
     expect(missingKeyframe).toMatchObject({ ok: false, code: "NOT_FOUND" });
     expect(missingKeyframe.message).toContain("keyframe-does-not-exist");
     expect(demoEngine.getState()).toEqual(demoBefore);

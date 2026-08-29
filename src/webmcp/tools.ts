@@ -89,7 +89,7 @@ const metadata = {
   propose_scene_changes: {
     title: "Propose coordinated scene changes",
     description:
-      "Creates a multi-actor preview without applying geometry. actor-pose requires expectedPoseTarget from the latest scene read and fails if branch/playhead moved. Prefer trajectory-keyframe-patch for 1–8 interior edits while preserving path, timing, IDs, and endpoints. Only the proposal ledger changes; a human must adjust, accept, or reject. Current version and unlocked targets are required.",
+      "Creates a review-only geometry proposal for 1-10 distinct actors. For a full path use trajectory-set: first keyframe is start, last is final; middle keyframes are geometry only—use mark_impact_event for timeline semantics. trajectory-keyframe-patch changes only interior points and preserves endpoints. actor-pose needs expectedPoseTarget. One change per actor; only a human can adjust, accept, or reject.",
     annotations: WRITE_UNTRUSTED,
   },
   mark_impact_event: {

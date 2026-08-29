@@ -828,12 +828,18 @@ describe("ReplayWebMCPRegistry", () => {
     expect(modelContext.definition("set_actor_trajectory")?.description).toContain(
       "use propose_scene_changes",
     );
-    expect(modelContext.definition("propose_scene_changes")?.description).toContain(
-      "trajectory-keyframe-patch",
-    );
-    expect(modelContext.definition("propose_scene_changes")?.description).toContain(
-      "preserving path, timing, IDs, and endpoints",
-    );
+    const proposalDefinition = modelContext.definition("propose_scene_changes");
+    expect(proposalDefinition?.description).toContain("trajectory-set");
+    expect(proposalDefinition?.description).toContain("first keyframe is start");
+    expect(proposalDefinition?.description).toContain("last is final");
+    expect(proposalDefinition?.description).toContain("trajectory-keyframe-patch");
+    expect(proposalDefinition?.description).toContain("interior points and preserves endpoints");
+    const proposalProperties = proposalDefinition?.inputSchema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(proposalProperties.changes?.minItems).toBe(1);
+    expect(proposalProperties.changes?.description).toContain("single-actor proposal is allowed");
     expect(modelContext.definition("propose_scene_changes")?.description).toContain(
       "expectedPoseTarget",
     );
@@ -1198,6 +1204,55 @@ describe("ReplayWebMCPRegistry", () => {
             kind: "trajectory-keyframe-patch",
             actorId: "vehicle-b",
             visible: true,
+          },
+        ],
+      },
+    });
+  });
+
+  it("accepts one complete start-to-final reconstruction proposal", async () => {
+    const adapter = new TestAdapter();
+    allContexts(adapter);
+    const modelContext = new ModelContextPolyfill();
+    const registry = new ReplayWebMCPRegistry(adapter, { modelContext });
+    await registry.start();
+
+    const result = (await registry.simulateTool("propose_scene_changes", {
+      title: "Review Vehicle A reconstruction",
+      rationale:
+        "Translate the reported start and final positions into a review-only path without applying it.",
+      changes: [
+        {
+          kind: "trajectory-set",
+          trajectoryId: "trajectory-a",
+          actorId: "vehicle-a",
+          branchId: "branch-main",
+          keyframes: [
+            { id: "keyframe-a-start", timeMs: 0, x: 0.12, y: 0.62, rotationDeg: 0 },
+            { id: "keyframe-a-impact", timeMs: 10_000, x: 0.52, y: 0.5, rotationDeg: 18 },
+            { id: "keyframe-a-final", timeMs: 16_000, x: 0.76, y: 0.34, rotationDeg: 32 },
+          ],
+          visible: true,
+        },
+      ],
+      expectedVersion: INITIAL_VERSION,
+      requestId: "request-single-full-path-0001",
+    })) as { ok: boolean; caseVersion: number };
+
+    expect(result).toMatchObject({ ok: true, caseVersion: INITIAL_VERSION + 1 });
+    expect(adapter.executeCalls).toHaveLength(1);
+    expect(adapter.executeCalls[0]).toMatchObject({
+      type: "propose_scene_changes",
+      payload: {
+        changes: [
+          {
+            kind: "trajectory-set",
+            actorId: "vehicle-a",
+            keyframes: [
+              expect.objectContaining({ timeMs: 0, x: 0.12, y: 0.62 }),
+              expect.objectContaining({ timeMs: 10_000, x: 0.52, y: 0.5 }),
+              expect.objectContaining({ timeMs: 16_000, x: 0.76, y: 0.34 }),
+            ],
           },
         ],
       },

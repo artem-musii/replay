@@ -375,6 +375,8 @@ export function Workspace({
   const [currentTimeMs, setCurrentTimeMs] = useState(initialCase.timeRangeMs.start);
   const currentTimeMsRef = useRef(initialCase.timeRangeMs.start);
   const automaticImpactPauseRef = useRef<AutomaticImpactPause | undefined>(undefined);
+  const resumedImpactEventIdRef = useRef<string | undefined>(undefined);
+  const playbackSessionRef = useRef(0);
   const setPlayheadTime = useCallback((timeMs: number) => {
     const automaticImpactPause = automaticImpactPauseRef.current;
     if (!remainsAtAutomaticImpactPause(timeMs, automaticImpactPause)) {
@@ -384,6 +386,7 @@ export function Workspace({
     setCurrentTimeMs(timeMs);
   }, []);
   const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(DEFAULT_PLAYBACK_SPEED);
   const [activeTab, setActiveTab] = useState<InspectorTab>(() =>
     inspectorModes.has(initialCase.workspaceMode as InspectorTab)
@@ -482,31 +485,44 @@ export function Workspace({
       }
     | undefined
   >(undefined);
+  const stopPlayback = useCallback(() => {
+    playbackSessionRef.current += 1;
+    impactReplayWindowRef.current = undefined;
+    resumedImpactEventIdRef.current = undefined;
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+  }, []);
   const setPlaybackActive = useCallback(
     (playing: boolean) => {
-      if (playing) {
-        const impactAtPlayhead = activeImpactTimelineRef.current.find((event) =>
-          remainsAtAutomaticImpactPause(currentTimeMsRef.current, {
-            eventId: event.id,
-            timeMs: event.timeMs,
-          }),
-        );
-        const impactPauseAtPlayhead = impactAtPlayhead
-          ? { eventId: impactAtPlayhead.id, timeMs: impactAtPlayhead.timeMs }
-          : undefined;
-        const resumeTimeMs = resumedPlayheadTime(
-          currentTimeMsRef.current,
-          automaticImpactPauseRef.current ?? impactPauseAtPlayhead,
-          replayCaseRef.current.timeRangeMs.end,
-        );
-        if (resumeTimeMs !== undefined) {
-          automaticImpactPauseRef.current = undefined;
-          setPlayheadTime(resumeTimeMs);
-        }
+      if (!playing) {
+        stopPlayback();
+        return;
       }
-      setIsPlaying(playing);
+      if (!isPlayingRef.current) playbackSessionRef.current += 1;
+      const impactAtPlayhead = activeImpactTimelineRef.current.find((event) =>
+        remainsAtAutomaticImpactPause(currentTimeMsRef.current, {
+          eventId: event.id,
+          timeMs: event.timeMs,
+        }),
+      );
+      const impactPauseAtPlayhead = impactAtPlayhead
+        ? { eventId: impactAtPlayhead.id, timeMs: impactAtPlayhead.timeMs }
+        : undefined;
+      const resumeTimeMs = resumedPlayheadTime(
+        currentTimeMsRef.current,
+        automaticImpactPauseRef.current ?? impactPauseAtPlayhead,
+        replayCaseRef.current.timeRangeMs.end,
+      );
+      if (resumeTimeMs !== undefined) {
+        resumedImpactEventIdRef.current = (automaticImpactPauseRef.current ?? impactPauseAtPlayhead)
+          ?.eventId;
+        automaticImpactPauseRef.current = undefined;
+        setPlayheadTime(resumeTimeMs);
+      }
+      isPlayingRef.current = true;
+      setIsPlaying(true);
     },
-    [setPlayheadTime],
+    [setPlayheadTime, stopPlayback],
   );
   const pendingEvidenceBlobDeletionsRef = useRef(
     new Map<string, { evidenceId: string; blobKey: string }>(),
@@ -1005,7 +1021,9 @@ export function Workspace({
     if (!isPlaying) return;
     let animationFrame = 0;
     let previous = performance.now();
+    const playbackSession = playbackSessionRef.current;
     const tick = (now: number) => {
+      if (playbackSessionRef.current !== playbackSession) return;
       const elapsed = (now - previous) * playbackSpeed;
       previous = now;
       const current = currentTimeMsRef.current;
@@ -1015,7 +1033,9 @@ export function Workspace({
         impactReplayWindow?.holdUntilPerformanceMs !== undefined &&
         now < impactReplayWindow.holdUntilPerformanceMs
       ) {
-        animationFrame = requestAnimationFrame(tick);
+        if (playbackSessionRef.current === playbackSession) {
+          animationFrame = requestAnimationFrame(tick);
+        }
         return;
       }
       const activeImpacts = activeImpactTimelineRef.current;
@@ -1032,12 +1052,14 @@ export function Workspace({
         impactReplayWindow.contactRendered = true;
         impactReplayWindow.holdUntilPerformanceMs = now + IMPACT_REPLAY_CONTACT_HOLD_MS;
         setPlayheadTime(replayImpact.timeMs);
-        animationFrame = requestAnimationFrame(tick);
+        if (playbackSessionRef.current === playbackSession) {
+          animationFrame = requestAnimationFrame(tick);
+        }
         return;
       }
       if (impactReplayWindow && next >= impactReplayWindow.stopTimeMs) {
         setPlayheadTime(impactReplayWindow.stopTimeMs);
-        setIsPlaying(false);
+        stopPlayback();
         setToast({
           kind: "info",
           message: "Authored impact sequence complete.",
@@ -1058,13 +1080,18 @@ export function Workspace({
       }
       let crossedImpact = activeImpacts[lowerBound];
       if (crossedImpact && crossedImpact.timeMs > next) crossedImpact = undefined;
+      if (crossedImpact?.id === resumedImpactEventIdRef.current) {
+        resumedImpactEventIdRef.current = undefined;
+        crossedImpact = activeImpacts[lowerBound + 1];
+        if (crossedImpact && crossedImpact.timeMs > next) crossedImpact = undefined;
+      }
       if (crossedImpact) {
         automaticImpactPauseRef.current = {
           eventId: crossedImpact.id,
           timeMs: crossedImpact.timeMs,
         };
         setPlayheadTime(crossedImpact.timeMs);
-        setIsPlaying(false);
+        stopPlayback();
         setToast({
           kind: "info",
           message: "Paused at the impact event for geometry review.",
@@ -1074,15 +1101,24 @@ export function Workspace({
       }
       if (next >= replayCaseRef.current.timeRangeMs.end) {
         setPlayheadTime(replayCaseRef.current.timeRangeMs.end);
-        setIsPlaying(false);
+        stopPlayback();
         return;
       }
       setPlayheadTime(next);
-      animationFrame = requestAnimationFrame(tick);
+      const resumedImpactEventId = resumedImpactEventIdRef.current;
+      if (resumedImpactEventId) {
+        const resumedImpact = activeImpacts.find((event) => event.id === resumedImpactEventId);
+        if (!resumedImpact || next > resumedImpact.timeMs) {
+          resumedImpactEventIdRef.current = undefined;
+        }
+      }
+      if (playbackSessionRef.current === playbackSession) {
+        animationFrame = requestAnimationFrame(tick);
+      }
     };
     animationFrame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animationFrame);
-  }, [isPlaying, playbackSpeed, setPlayheadTime]);
+  }, [isPlaying, playbackSpeed, setPlayheadTime, stopPlayback]);
 
   const revealAffected = useCallback((ids: readonly string[]) => {
     setActiveAgentIds([...ids]);
@@ -1108,8 +1144,8 @@ export function Workspace({
       if (type === "timeline-event") {
         const event = replayCaseRef.current.timelineEvents.find((item) => item.id === itemId);
         if (event) {
+          stopPlayback();
           setPlayheadTime(event.timeMs);
-          setIsPlaying(false);
         }
       }
       setFocusedIssueId(undefined);
@@ -1121,7 +1157,7 @@ export function Workspace({
       }
       changeWorkspaceMode(workspaceModeForItem(type));
     },
-    [changeWorkspaceMode, setPlayheadTime, workspaceFocusStore],
+    [changeWorkspaceMode, setPlayheadTime, stopPlayback, workspaceFocusStore],
   );
 
   const recordToolInvocation = useCallback(
@@ -1428,7 +1464,7 @@ export function Workspace({
     x: number,
     y: number,
   ): void {
-    setIsPlaying(false);
+    stopPlayback();
     const state = engine.getState();
     const trajectory = state.trajectories.find((item) => item.id === trajectoryId);
     if (!trajectory) return;
@@ -1453,7 +1489,7 @@ export function Workspace({
     actorId: string,
     pose: { x: number; y: number; rotationDeg: number },
   ): void {
-    setIsPlaying(false);
+    stopPlayback();
     const state = engine.getState();
     const boundedPose = {
       ...pose,
@@ -1677,7 +1713,7 @@ export function Workspace({
   }
 
   function addTrajectoryKeyframeAtPlayhead(trajectoryId: string): void {
-    setIsPlaying(false);
+    stopPlayback();
     const state = engine.getState();
     const trajectory = state.trajectories.find((item) => item.id === trajectoryId);
     if (!trajectory) return;
@@ -1709,7 +1745,7 @@ export function Workspace({
   }
 
   function removeTrajectoryKeyframe(trajectoryId: string, keyframeId: string): void {
-    setIsPlaying(false);
+    stopPlayback();
     const trajectory = engine.getState().trajectories.find((item) => item.id === trajectoryId);
     if (!trajectory) return;
     if (trajectory.keyframes.length <= 2) {
@@ -1836,7 +1872,7 @@ export function Workspace({
       contactRendered: false,
     };
     setPlayheadTime(startTimeMs);
-    setIsPlaying(true);
+    setPlaybackActive(true);
   }
 
   function runWorkspaceTourAction(actionId: WorkspaceTourActionId): void {
@@ -1862,8 +1898,8 @@ export function Workspace({
     }
     if (actionId === "jump-impact") {
       selectItem("timeline-event", impact.id);
+      stopPlayback();
       setPlayheadTime(impact.timeMs);
-      setIsPlaying(false);
       return;
     }
     replayImpactMotion(impact.id);
@@ -2539,7 +2575,7 @@ export function Workspace({
             {...(proposalReviewTarget ? { proposalReviewTarget } : {})}
             onSelect={(type, id) => selectItem(type, id)}
             onSelectKeyframe={(_trajectoryId, keyframeId) => setSelectedKeyframeId(keyframeId)}
-            onEditStart={() => setIsPlaying(false)}
+            onEditStart={stopPlayback}
             onMoveActor={moveActorAtCurrentTime}
             onMoveKeyframe={moveKeyframePosition}
             onCreateTrajectory={createTrajectory}
@@ -2611,7 +2647,7 @@ export function Workspace({
           evidenceUrls={evidenceUrls}
           compareBranchIds={displayedCompareBranchIds}
           {...(proposalReviewTarget ? { proposalReviewTarget } : {})}
-          onEditStart={() => setIsPlaying(false)}
+          onEditStart={stopPlayback}
           onTabChange={changeInspectorTab}
           onSelect={(type, id) => selectItem(type, id)}
           onAddClaim={(statement, status, sourceType, sourceIds) =>
@@ -2712,7 +2748,7 @@ export function Workspace({
               timeRangeMs: state.timeRangeMs,
             });
             if (!resolved.ok) return false;
-            setIsPlaying(false);
+            stopPlayback();
             setProposalReviewTarget(resolved.target);
             setPlayheadTime(resolved.target.reviewTimeMs);
             if (window.matchMedia("(max-width: 900px)").matches) {
@@ -2894,8 +2930,8 @@ export function Workspace({
               }
             : {})}
           onTimeChange={(time) => {
+            stopPlayback();
             setPlayheadTime(time);
-            setIsPlaying(false);
           }}
           onPlayingChange={setPlaybackActive}
           onPlaybackSpeedChange={setPlaybackSpeed}

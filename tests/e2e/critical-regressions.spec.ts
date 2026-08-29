@@ -585,6 +585,8 @@ test.describe("production-critical regressions", () => {
       .locator("fieldset.proposal-change")
       .filter({ hasText: "Vehicle A · proposed path" });
     const frames = vehicleAEditor.locator(".proposal-keyframe");
+    await expect(frames.first()).toContainText("Start");
+    await expect(frames.last()).toContainText("Final");
     let eightSecondFrame = frames.first();
     for (let index = 0; index < (await frames.count()); index += 1) {
       const candidate = frames.nth(index);

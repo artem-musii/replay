@@ -175,7 +175,14 @@ test.describe("REPLAY primary journey", () => {
     await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(10_050);
     await timeline.getByRole("button", { name: "Pause reconstruction", exact: true }).click();
 
+    // Replaying the authored impact while ordinary playback is already active
+    // must replace that motion cleanly instead of invalidating its only RAF loop.
+    await scrubber.fill("4000");
     await page.getByLabel("Playback speed").selectOption("2");
+    await timeline.getByRole("button", { name: "Play reconstruction", exact: true }).click();
+    await expect(
+      timeline.getByRole("button", { name: "Pause reconstruction", exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Play authored motion around impact" }).click();
     await expect(
       timeline.getByRole("button", { name: "Pause reconstruction", exact: true }),
