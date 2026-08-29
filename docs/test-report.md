@@ -4,7 +4,7 @@
 - Application commit: [`00688d8a51fb783dbf147e08ece60470b8877544`](https://github.com/artem-musii/replay-sol/commit/00688d8a51fb783dbf147e08ece60470b8877544)
 - Public application: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
 
-> **Historical evidence only.** This report is permanently scoped to superseded commit `00688d8a`; use [testing.md](testing.md) and [deployment.md](deployment.md) for the current deployed release and later local candidate.
+> **Historical evidence only.** This report is permanently scoped to superseded commit `00688d8a`; use [testing.md](testing.md) and [deployment.md](deployment.md) for the current deployed release.
 
 This report distinguishes deterministic source/CI evidence, public artifact verification, ordinary live-browser and manual/WebMCP-guidance behavior, and still-unrun native execution, supported-model, and manual checks. Evidence in one category is not presented as proof of another.
 

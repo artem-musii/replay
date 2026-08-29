@@ -163,6 +163,18 @@ test.describe("REPLAY primary journey", () => {
 
     const timeline = page.getByLabel("Incident timeline");
     await expect(page.getByLabel("Playback speed")).toHaveValue("1.25");
+
+    // Starting from an impact selected by the event marker or scrubber must
+    // consume that boundary immediately. This is separate from resuming after
+    // playback itself crossed the impact and triggered the automatic pause.
+    await timeline.getByRole("button", { name: "Play reconstruction", exact: true }).click();
+    await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(10_050);
+    await timeline.getByRole("button", { name: "Pause reconstruction", exact: true }).click();
+    await scrubber.fill("10000");
+    await timeline.getByRole("button", { name: "Play reconstruction", exact: true }).click();
+    await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(10_050);
+    await timeline.getByRole("button", { name: "Pause reconstruction", exact: true }).click();
+
     await page.getByLabel("Playback speed").selectOption("2");
     await page.getByRole("button", { name: "Play authored motion around impact" }).click();
     await expect(

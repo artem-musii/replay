@@ -2,13 +2,13 @@
 
 Target edited runtime: **2:34**. Hard ceiling: **2:45**. The uploaded public YouTube video must remain below three minutes and include clear audio. [Official video requirements](https://webmcp.devpost.com/rules)
 
-This is a recording runbook, not evidence that a video or final deployment exists. Record only after the release gates in [hackathon-readiness.md](hackathon-readiness.md) pass.
+This is a recording runbook, not evidence that a video exists. The final seed-v6 application payload originates at commit `cd88755b9b72e2e0a360a8a877584dc36c7c2053`; record only after the remaining supported-model and recording gates in [hackathon-readiness.md](hackathon-readiness.md) pass.
 
 The main proof is one continuous roundabout case: **typed read and validation → reversible proposal → visible review decision → attributable inference → cited draft → visible finalization**. The WebMCP difference must be visible before motion detail: the agent works in the exact case the reviewer sees, while no Site Tool can operate the consequential review commands. One brief, clearly labelled closing cutaway shows the same release handling an unmeasured high-speed account.
 
 ## Preflight — not part of the video
 
-1. Freeze one clean commit, deploy that exact commit, and use its final HTTPS `/#demo` URL everywhere in the video and submission.
+1. Confirm the final HTTPS `/#demo` URL loads, the live `release-evidence.json` names the latest clean wrapper commit, and the application payload remains 46 files / 5,295,872 bytes with manifest SHA-256 `70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c`; then use that same URL everywhere in the video and submission.
 2. Use the latest ChatGPT/Codex desktop app with **GPT-5.6 Sol or GPT-5.6 Terra**. OpenAI currently says Luna has WebMCP disabled; Site Tools availability remains rollout- and workspace-dependent. [OpenAI Site Tools](https://learn.chatgpt.com/docs/webmcp)
 3. Confirm the page reports Site Tools available. In preflight only, inspect the registered tools and verify native `get_workspace_state`, `validate_case_consistency`, `propose_scene_changes`, and `build_report_preview` calls against the deployed URL. Close the technical inspector before recording.
 4. Start from a new chat, clean browser profile, and fresh seed-v6 **Roundabout reconstruction** run. Confirm the fixture is synthetic, calibrated, contains no personal data, and shows no recovery warning from an earlier local state. Rehearsals must use disposable runs because proposals, observations, and finalization change state. Prepare one fresh **High-speed braking account** run from the same deployed release for the closing cutaway and label it as a separate synthetic case.

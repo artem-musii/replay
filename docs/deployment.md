@@ -1,11 +1,11 @@
 # Deploying REPLAY
 
-Last verified public status (**2026-08-29**): application commit [`2855f0bc50da2916128b2278a46f0d0a8a4e2bbd`](https://github.com/artem-musii/replay-sol/commit/2855f0bc50da2916128b2278a46f0d0a8a4e2bbd) is deployed and byte-verified on GitHub Pages.
+Last verified public status (**2026-08-29**): application commit [`cd88755b9b72e2e0a360a8a877584dc36c7c2053`](https://github.com/artem-musii/replay-sol/commit/cd88755b9b72e2e0a360a8a877584dc36c7c2053) is deployed and byte-verified on GitHub Pages.
 
 - Landing: [https://artem-musii.github.io/replay-sol/](https://artem-musii.github.io/replay-sol/)
 - Deterministic demo: [https://artem-musii.github.io/replay-sol/#demo](https://artem-musii.github.io/replay-sol/#demo)
 - Repository: [https://github.com/artem-musii/replay-sol](https://github.com/artem-musii/replay-sol)
-- Current application: commit `2855f0bc50da2916128b2278a46f0d0a8a4e2bbd`, successful [GitHub Actions run `33184281134`](https://github.com/artem-musii/replay-sol/actions/runs/33184281134)
+- Current application: commit `cd88755b9b72e2e0a360a8a877584dc36c7c2053`, successful [GitHub Actions run `33269347192`](https://github.com/artem-musii/replay-sol/actions/runs/33269347192)
 
 REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API.
 
@@ -29,9 +29,9 @@ The verifier checks that local entrypoint, icon, manifest, SPA fallback, 404 ret
 
 Preview the artifact at the same base path used for its build. For a normal root build, run `npm run build`, then `npm run preview -- --host 127.0.0.1 --port 4173` and open `http://127.0.0.1:4173/#demo`. For the Pages build above, keep the configured artifact, run `VITE_BASE_PATH=/replay-sol/ npm run preview -- --host 127.0.0.1 --port 4173`, and open `http://127.0.0.1:4173/replay-sol/#demo`. Vite's preview server reads the base configuration too; the build and preview commands must therefore agree. REPLAY uses hash navigation, so `#demo` is never sent to the server. The build rewrites the copied 404 page's return link to the configured base path; unsupported or ambiguous `VITE_BASE_PATH` values fail the build instead of producing a partially broken artifact.
 
-## Current-source GitHub Pages workflow
+## Current GitHub Pages workflow
 
-The workflow now in the working tree was added after public commit `2855f0bc`. Every pull request to `main` runs its read-only verification job. Every push to `main`, plus an explicit manual dispatch of `main`, runs verification and then deploys. A manual dispatch of any other ref remains verification-only. The current-source workflow:
+The workflow used by the current deployed release runs a read-only verification job for every pull request to `main`. Every push to `main`, plus an explicit manual dispatch of `main`, runs verification and then deploys. A manual dispatch of any other ref remains verification-only. The workflow:
 
 1. checks out the public source without persisting Git credentials;
 2. installs dependencies from the lockfile with Node.js 22.13.0, including normal package lifecycle scripts, and audits both the complete and production-only dependency trees;
@@ -59,25 +59,31 @@ npm run verify:deployment
 
 The deployed verifier requires an expected full commit and build-manifest digest for every remote target. It refuses non-HTTPS remote targets, credentials, query strings, unsafe manifest paths, oversized payloads, redirects, stale commits, dirty-tree evidence, build-manifest drift, byte-count drift, and per-file or aggregate hash mismatches. It validates the release evidence for `.nojekyll` but does not request that host-consumed control file from the public URL. Downloads have per-request and whole-attempt deadlines, bounded concurrency, coordinated cancellation, and streaming size limits; the complete worst-case retry budget stays below the workflow timeout. Loopback HTTP is permitted only for local artifact testing.
 
-## Current public release record
+## Current application-payload release record
 
-The current public release was produced by the preceding workflow, which stopped after the Pages deployment and did not publish `release-evidence.json` or run `verify-deployment`. Its CI/deployment metadata and the later independent payload comparison are:
+The current public application payload originated from the attested workflow below. Documentation/test-only wrappers may advance the deployed source commit while retaining these exact application bytes and payload manifest:
 
-| Item                  | Exact result                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------- |
-| Application commit    | `2855f0bc50da2916128b2278a46f0d0a8a4e2bbd`                                            |
-| Actions workflow      | `33184281134`, successful                                                             |
-| Verify/build job      | `98893121004`, successful                                                             |
-| Deploy job            | `98894240126`, successful                                                             |
-| Pages artifact        | `9691136611`, 3,032,328 compressed bytes                                              |
-| Artifact SHA-256      | `27c2bf89662de9280ddca52f9d2cb922545a913a27f819b855110f184e924da9`                    |
-| Pages deployment      | `6143728209`, successful                                                              |
-| Vitest                | **196/196** across 20 files                                                           |
-| Playwright            | **109 passed, 5 intentional mobile screenshot-owner skips, 0 failed** across 114 runs |
-| Live payload          | **43 files**, **4,248,606 bytes**, all byte-matched                                   |
-| Payload manifest hash | `6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4`                    |
+| Item                   | Exact result                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| Payload origin commit  | `cd88755b9b72e2e0a360a8a877584dc36c7c2053`                                            |
+| Actions workflow       | `33269347192`, successful                                                             |
+| Verify/build job       | `99144899873`, successful                                                             |
+| Deploy job             | `99145725110`, successful                                                             |
+| Verify-deployment job  | `99145744458`, successful                                                             |
+| Pages artifact         | `9719700894`, 3,656,260 compressed bytes                                              |
+| Artifact SHA-256       | `1488827c7ee3164568c418eeba147d742be2b6dab9f175a7c0bfa2ecf5b7b875`                    |
+| Pages deployment       | `6159028555`, successful                                                              |
+| Vitest                 | **457/457** across 37 files                                                           |
+| Playwright             | **221 passed, 9 intentional mobile screenshot-owner skips, 0 failed** across 230 runs |
+| Configured-base matrix | **12/12 passed**                                                                      |
+| Live payload           | **46 files**, **5,295,872 bytes**, all byte-matched                                   |
+| Payload manifest hash  | `70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c`                    |
 
-An independent 2026-08-29 acceptance audit downloaded the Pages artifact and cache-busted every public payload path. All 43 deployed files returned successfully and byte-matched the artifact; the remote payload totalled 4,248,606 bytes and its stable manifest SHA-256 was `6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4`, distinct from the compressed Pages artifact digest above. Commit `2855f0bc` was deployed by the preceding workflow, before the current source added `release-evidence.json` and the automatic `verify-deployment` job; consequently `https://artem-musii.github.io/replay-sol/release-evidence.json` currently returns 404 for this older release. The next frozen release must pass the current workflow before its automated attestation is claimed.
+The live [`release-evidence.json`](https://artem-musii.github.io/replay-sol/release-evidence.json) names the latest clean wrapper commit, Node.js and npm versions, the `/replay-sol/` base, and the payload values above. The payload is the same seed-v6 application when it remains 46 files / 5,295,872 bytes with manifest SHA-256 `70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c`. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that wrapper's exact build artifact and exported manifest digest.
+
+### Superseded `2855f0bc` release evidence
+
+The previous seed-v5 application commit `2855f0bc50da2916128b2278a46f0d0a8a4e2bbd` passed Actions run `33184281134`, verify job `98893121004`, and deploy job `98894240126`. Pages deployment `6143728209` published artifact `9691136611` (3,032,328 compressed bytes; SHA-256 `27c2bf89662de9280ddca52f9d2cb922545a913a27f819b855110f184e924da9`) after **196/196 Vitest tests across 20 files** and **114 Playwright runs: 109 passed, 5 intentional skips, 0 failed**. An independent comparison byte-matched all **43 public files / 4,248,606 bytes**, yielding manifest SHA-256 `6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4`. That release predates the automated public evidence endpoint and remains historical rather than current-release evidence.
 
 ### Superseded `00688d8a` release evidence
 
@@ -87,13 +93,13 @@ An earlier run, `33124001324` for commit `54ccefcf0919be237916310dfb05b74dd3172a
 
 The historical `f980d28` in-app browser run discovered 17 baseline tools. `get_case_summary`, `add_observation`, and `revert_agent_action` completed against visible shared state. Building a report preview registered the 18th `add_report_note` tool and exposed one declarative `finalize_factual_report` form with no `toolautosubmit`. This remains historical direct contract evidence, not a supported-model evaluation pass.
 
-The current release contains the optional landing/workspace guide, clearer manual/WebMCP and uncertainty explanations, production path-point creation/editing, improved vehicle movement/rotation and scene-pointer routing, schema-v2 storage/migration, versioned evidence assets, `propose_scene_changes`, session invocation audit, proposal review, semantic-intent idempotency, staged WebMCP compare-and-swap save/live commit/compensation behavior, ordinary-UI persistence pause/recovery controls, a runtime framing guard, seed-v5 calibrated geometry/motion/integrity review, four deterministic scenarios, and physically coherent authored contact geometry.
+The superseded seed-v5 release contains the optional landing/workspace guide, clearer manual/WebMCP and uncertainty explanations, production path-point creation/editing, improved vehicle movement/rotation and scene-pointer routing, schema-v2 storage/migration, versioned evidence assets, `propose_scene_changes`, session invocation audit, proposal review, semantic-intent idempotency, staged WebMCP compare-and-swap save/live commit/compensation behavior, ordinary-UI persistence pause/recovery controls, a runtime framing guard, seed-v5 calibrated geometry/motion/integrity review, four deterministic scenarios, and physically coherent authored contact geometry.
 
-The later working-tree candidate additionally contains stable `#case/<encoded-case-id>` routes with a landing-page local-case list, exact actor-pair impact placement for three- and four-vehicle cases, the path-derived 65–80 km/h straight-road demo, and canonical human/UI-only completeness attestations. Those attestations can make a legitimate no-evidence case finalizable after explicit review, become stale after relevant evidence/damage/question changes, and lose authority on unsigned import. These behaviors must not be described as deployed until the final candidate passes the release workflow and public byte verification.
+The current seed-v6 release additionally contains stable `#case/<encoded-case-id>` routes with a landing-page local-case list, exact actor-pair impact placement for three- and four-vehicle cases, the path-derived 65–80 km/h straight-road demo, and canonical human/UI-only completeness attestations. Those attestations can make a legitimate no-evidence case finalizable after explicit review, become stale after relevant evidence/damage/question changes, and lose authority on unsigned import.
 
 ### Current release CI gate
 
-Against exact commit `2855f0bc50da2916128b2278a46f0d0a8a4e2bbd`, the workflow passed its dependency installation, formatting, lint, strict typecheck, Vitest, Playwright, and production-build gates. The exact test and deployment results are in the release table above. Manual screen-reader/cross-browser/export fidelity, native compatible Site Tools/supported-model behavior, YouTube publication, and a header-capable production origin remain separate evidence boundaries.
+Against exact commit `cd88755b9b72e2e0a360a8a877584dc36c7c2053`, the workflow passed dependency installation and audits, formatting, lint, strict typecheck, Vitest with coverage, the full Playwright suite, both production-build/artifact gates, the configured-base focused matrix, Pages deployment, and post-deploy byte verification. The exact results are in the release table above. Manual screen-reader/cross-browser/export fidelity, native compatible Site Tools/supported-model behavior, YouTube publication, and a header-capable production origin remain separate evidence boundaries.
 
 ### Superseded `00688d8a` local gate
 
@@ -123,7 +129,7 @@ The policy intentionally omits `upgrade-insecure-requests`. Production assets ar
 
 GitHub Pages does **not** consume `_headers`. The current verified response therefore does not contain the application’s `Permissions-Policy`, CSP, COOP/COEP, `X-Content-Type-Options`, or `X-Frame-Options` values. The build mitigates representable policies by injecting restrictive Content Security Policy and no-referrer meta elements. Meta CSP cannot express `frame-ancestors`, and it cannot replace response-level origin isolation or permissions policy. The current app also refuses to render its workspace or register tools while framed; that runtime guard is defense in depth rather than response-header proof.
 
-Site Tools worked in the historical `f980d28` top-level GitHub Pages session under the browser’s default top-level policy. A separate current Codex in-app-browser smoke surfaced all 18 baseline tools and the visible `18 registered` state without invoking a tool. This is discovery-only evidence; do not generalize it into native execution, supported-model, framed/cross-origin, or complete Chrome compatibility.
+Site Tools worked in the historical `f980d28` top-level GitHub Pages session under the browser’s default top-level policy. An earlier `00688d8a` Codex smoke surfaced 18 tools without invoking one. The current cache-busted public payload later surfaced all 18 baseline tools and returned `ok: true` from bounded operator-directed summary, structured-state, all-scope-validation, and recent-activity bridge calls at case v1. This is live page-defined bridge evidence, not supported-model choice, native **Recently used/Sources**, framed/cross-origin, mutation/lifecycle, or complete Chrome compatibility.
 
 GitHub Pages is also a shared-origin host: IndexedDB is scoped to `artem-musii.github.io`, not to the `/replay-sol/` path. The public URL is a synthetic/non-sensitive challenge demo, not a private incident vault. Use a dedicated origin for sensitive or production-like evaluation.
 
@@ -156,7 +162,7 @@ curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/site.webmanifest
 curl -fsS -o /dev/null https://artem-musii.github.io/replay-sol/sitemap.xml
 ```
 
-The current acceptance audit fetched the landing route, generated hero, every seed-v5 evidence asset, all retained seed-v1 compatibility assets, manifest, sitemap, and the remaining deployment paths. All 43 files / 4,248,606 bytes returned successfully and were byte-identical to artifact `9691136611`; the stable live manifest SHA-256 was `6eb13acc1eec75d60298a3979009a175e2ba94bc8e9ad00382d4a274bdcc6ba4`.
+The current automated acceptance audit fetched every path declared by the deployed evidence manifest. All 46 public payload files / 5,295,872 bytes returned successfully and were byte-identical to the verified build; the stable live manifest SHA-256 was `70323dbd1cd355dd3415a242e6c58a361d8617e35dd84a5cf3b1bc161b8e4e5c`.
 
 Inspect the returned HTML for its title, description, canonical URL, favicon, absolute social image, CSP meta, and referrer meta. Confirm no generated source PNG is present in the clean build or loaded by the UI.
 
@@ -164,11 +170,11 @@ Inspect the returned HTML for its title, description, canonical URL, favicon, ab
 
 A fresh live browser against the then-current `00688d8a` release loaded the landing, optional guide, WebMCP explanation, and deterministic seed-v3 demo with no console errors or warnings, no failed requests, and no off-origin requests. All four active evidence images returned 200. It verified Vehicle A's seeded 146° heading, rotated it to 161° through the visible UI, added a sixth trajectory point, confirmed the new uncertainty explanation remained visible, and kept landing help reachable at 320 px and 200% text beneath a retained-recovery notice.
 
-This journey is historical evidence for `00688d8a`: it verified app load, same-origin assets, guide/manual-WebMCP discoverability, seed-v3 scene editing, trajectory extension, uncertainty copy, and recovery-notice access to landing help. It is not a product-browser smoke of `2855f0bc` and does not replace native Site Tools execution, supported-model traces, or the remaining screen-reader, cross-browser, upload/delete/reload, multi-tab recovery, persistence/reset, and downloaded-export inspections.
+This journey is historical evidence for `00688d8a`: it verified app load, same-origin assets, guide/manual-WebMCP discoverability, seed-v3 scene editing, trajectory extension, uncertainty copy, and recovery-notice access to landing help. It is not a product-browser smoke of `cd88755b` and does not replace native Site Tools execution, supported-model traces, or the remaining screen-reader, cross-browser, upload/delete/reload, multi-tab recovery, persistence/reset, and downloaded-export inspections.
 
 ### WebMCP evidence boundary
 
-The superseded `00688d8a` live smoke verified the public WebMCP explanation and that manual mode remained available, while its deterministic tests exercised the registry and command contract. A separate Codex in-app-browser smoke surfaced all 18 baseline tools and the visible `18 registered` state without invoking one. The current `2855f0bc` artifact is deployed and byte-verified, but an exact-current-deployment product-browser/native trace has not yet been recorded. Native execution, supported-model traces, proposal/cancellation behavior in a live client, and declarative-form behavior remain separate evidence gates. OpenAI's current Site Tools browser does not expose declarative HTML form tools; ordinary browser interaction is a separate, non-WebMCP capability and must not operate the human-only confirmation controls.
+The superseded `00688d8a` live smoke verified the public WebMCP explanation and that manual mode remained available, while its deterministic tests exercised the registry and command contract. The current payload is deployed and byte-verified, and a cache-busted post-deploy in-app-browser smoke loaded it without warning/error logs, surfaced 18 baseline tools, invoked four bounded read/validation/activity tools through the page bridge, reproduced the one-time 10.0 s impact pause and one-click continuation, verified divergent authored post-contact headings, and opened the labelled high-speed case. This is operator-directed live product/bridge evidence, not native supported-model choice or **Recently used/Sources**. Native supported-model execution, proposal/cancellation behavior in a live client, and declarative-form behavior remain separate evidence gates. OpenAI's current Site Tools browser does not expose declarative HTML form tools; ordinary browser interaction is a separate, non-WebMCP capability and must not operate the human-only confirmation controls.
 
 For a strict WebMCP-enabled Chrome header/isolation test, use the local preview or a header-capable deployment rather than treating GitHub Pages as proof of the complete response policy.
 
@@ -178,7 +184,7 @@ For a strict WebMCP-enabled Chrome header/isolation test, use the local preview 
 - Run the eleven-scenario supported-model matrix and retain tool traces.
 - Verify the current imperative lifecycle in a native compatible Site Tools client and the declarative lifecycle in compatible Chrome.
 - Complete the screen-reader and real-Safari manual matrix, including upload/delete/reload and multi-tab recovery; the automated Firefox/WebKit release journey is a bounded smoke, not the whole product matrix.
-- Repeat the retained PDF/JSON/SVG/PNG inspection in platform-native readers. The current candidate already passed browser decode/render checks plus visual PNG and four-page Poppler PDF review, but that does not substitute for final-platform inspection.
+- Repeat the retained PDF/JSON/SVG/PNG inspection in platform-native readers. The exact bytes now deployed already passed browser decode/render checks plus visual PNG and four-page Poppler PDF review, but that does not substitute for final-platform inspection.
 - Deploy to a dedicated header-capable origin and capture its exact response headers if production-like privacy/security claims are required.
 
 ## Rollback
