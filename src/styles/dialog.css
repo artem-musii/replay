@@ -84,15 +84,3 @@
 .confirm-dialog footer {
   justify-content: center;
 }
-
-@media (max-width: 520px) {
-  .dialog-backdrop {
-    align-items: end;
-    padding: 12px;
-  }
-
-  .dialog {
-    max-height: calc(100dvh - 24px);
-    padding: 18px;
-  }
-}
