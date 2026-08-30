@@ -280,6 +280,9 @@ describe("ReplayGuide", () => {
     );
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const quickProofPrompt = writeText.mock.calls[0]?.[0] as string;
+    expect(quickProofPrompt).toMatch(/^Use only this page's native Site Tools \(WebMCP\)/);
+    expect(quickProofPrompt).toMatch(/Do not use computer use or browser UI controls/);
+    expect(quickProofPrompt).toMatch(/If the page's Site Tools are not available, stop/);
     expect(quickProofPrompt).toMatch(/review the unresolved lane-position question/);
     expect(quickProofPrompt).toMatch(/smallest coordinated two-car alternative/);
     expect(quickProofPrompt).toMatch(/Keep the baseline, claims, endpoints, point IDs, times/);

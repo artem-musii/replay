@@ -81,6 +81,7 @@ import {
   type WebMCPDebugState,
   type WebMCPToolName,
 } from "../webmcp";
+import { buildSimpleAgentReviewPrompt } from "../webmcp/prompts";
 import { ActivityPanel } from "./ActivityPanel";
 import { BrandMark } from "./BrandMark";
 import { CaseDetailsDialog, type CaseDetailsInput } from "./CaseDetailsDialog";
@@ -2314,7 +2315,7 @@ export function Workspace({
       setToast({ kind: "info", message: "There is no unresolved question to send for review." });
       return;
     }
-    const prompt = `Use this page's Site Tools to review this unresolved question: "${question.question}" Read the live scene, timeline, related evidence links, human statements, and full consistency results. Focus this question, then create the smallest reversible scene proposal that would help a person examine it. Keep current claims, endpoints, times, unrelated geometry, and the baseline unchanged. Explain the evidence in scope, missing support, uncertainty, contradictions, and what remains unresolved. Do not apply the proposal, answer or confirm a claim, finalize a report, or infer fault.`;
+    const prompt = buildSimpleAgentReviewPrompt(question.question);
     try {
       await copyTextToClipboard(prompt);
       setToast({

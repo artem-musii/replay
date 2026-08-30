@@ -169,8 +169,8 @@ function ReviewStage({
       <p className="simple-action-help">
         {mutationBlocked ??
           (siteToolsSupported
-            ? "Copies a focused request for the connected agent. The agent may only create a proposal."
-            : "Copies a focused request. Open REPLAY in a supported client to run it with Site Tools.")}
+            ? "Copies a native Site Tools request. It does not authorize computer or browser control."
+            : "Copies a Site Tools-only request. If Site Tools are unavailable, the agent must stop instead of controlling the browser.")}
       </p>
     </section>
   );

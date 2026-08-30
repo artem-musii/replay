@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isProposalStale, simpleStageForCase } from "../../src/components/simpleWorkspaceState";
 import { createDemoCase, type AgentProposal } from "../../src/domain";
+import { buildSimpleAgentReviewPrompt } from "../../src/webmcp/prompts";
 
 function pendingProposal(): AgentProposal {
   const replayCase = createDemoCase();
@@ -54,6 +55,16 @@ function pendingProposal(): AgentProposal {
 }
 
 describe("Simple mode state", () => {
+  it("keeps copied requests on native Site Tools and forbids computer control", () => {
+    const prompt = buildSimpleAgentReviewPrompt("Which vehicle crossed the lane boundary?");
+    expect(prompt).toContain("native Site Tools (WebMCP)");
+    expect(prompt).toContain("Do not use computer use or browser UI controls");
+    expect(prompt).toContain("do not click, type, scroll, inspect screenshots");
+    expect(prompt).toContain("If the page's Site Tools are not available, stop");
+    expect(prompt).toContain('review this unresolved question: "Which vehicle crossed');
+    expect(prompt).toContain("create the smallest reversible scene proposal");
+  });
+
   it("moves from review to decide to report without storing a second workflow state", () => {
     const replayCase = createDemoCase();
     expect(simpleStageForCase(replayCase)).toBe("review");

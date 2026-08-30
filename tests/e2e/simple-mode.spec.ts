@@ -61,6 +61,7 @@ test("defaults to Simple, preserves Expert, and completes the guided human flow"
     }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Ask agent to review" })).toBeVisible();
+  await expect(page.getByText(/does not authorize computer or browser control/)).toBeVisible();
   await expect(page.getByRole("tablist", { name: "Case workspaces" })).toHaveCount(0);
   await expect(page.locator(".workspace-activity")).toHaveCount(0);
   await expect(page.getByRole("slider", { name: "Timeline position" })).toBeVisible();

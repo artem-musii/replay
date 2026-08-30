@@ -1,3 +1,5 @@
+import { siteToolsOnlyRequest } from "../webmcp/prompts";
+
 export const GUIDE_SECTION_IDS = [
   "quick-start",
   "scene",
@@ -246,41 +248,47 @@ export interface SiteToolPrompt {
 export const SITE_TOOL_QUICK_PROOF: SiteToolPrompt = {
   id: "quick-proof",
   title: "Review the unresolved lane question",
-  prompt:
-    "Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.",
+  prompt: siteToolsOnlyRequest(
+    "review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.",
+  ),
 };
 
 export const SITE_TOOL_DETERMINISTIC_PROOF: SiteToolPrompt = {
   id: "deterministic-proof",
   title: "Run the deterministic proof fixture",
-  prompt:
-    "Use this page's Site Tools. Read only the current scene and questions; run full consistency validation and focus the blocking question. Then create one pending coordinated proposal by patching only each current path's existing 8,000 ms keyframe: Vehicle A y +0.008; Vehicle B y −0.008. Reuse both keyframe IDs and preserve every other value. Do not apply, confirm, answer, add claims, or infer fault. Report the before/after versions and the one canonical mutation.",
+  prompt: siteToolsOnlyRequest(
+    "read only the current scene and questions; run full consistency validation and focus the blocking question. Then create one pending coordinated proposal by patching only each current path's existing 8,000 ms keyframe: Vehicle A y +0.008; Vehicle B y −0.008. Reuse both keyframe IDs and preserve every other value. Do not apply, confirm, answer, add claims, or infer fault. Report the before/after versions and the one canonical mutation.",
+  ),
 };
 
 export const SITE_TOOL_PROMPTS: readonly SiteToolPrompt[] = [
   {
     id: "inspect",
     title: "Inspect the case",
-    prompt:
-      "Use this page's Site Tools to read the scene, claims, and timeline. Run the full consistency check, focus the approximate impact, and separate confirmed, reported, unknown, and advisory information. Do not change the case or infer fault.",
+    prompt: siteToolsOnlyRequest(
+      "read the scene, claims, and timeline. Run the full consistency check, focus the approximate impact, and separate confirmed, reported, unknown, and advisory information. Do not change the case or infer fault.",
+    ),
   },
   {
     id: "propose",
     title: "Propose the smallest review",
-    prompt:
-      "Use this page's Site Tools to read the current scene, open questions, claims, and evidence relationships, then run the full consistency check. Focus the highest-priority blocker and create one review-only coordinated proposal with the smallest conservative interior path adjustments that address it. Reuse the existing timed paths; preserve endpoints, point IDs, times, unrelated geometry, and the baseline. Explain the assumptions and what remains unchanged. Do not apply anything, confirm or answer claims, or infer fault.",
+    prompt: siteToolsOnlyRequest(
+      "read the current scene, open questions, claims, and evidence relationships, then run the full consistency check. Focus the highest-priority blocker and create one review-only coordinated proposal with the smallest conservative interior path adjustments that address it. Reuse the existing timed paths; preserve endpoints, point IDs, times, unrelated geometry, and the baseline. Explain the assumptions and what remains unchanged. Do not apply anything, confirm or answer claims, or infer fault.",
+    ),
   },
   {
     id: "alternatives",
     title: "Preserve two possibilities",
-    prompt:
-      "Use this page's Site Tools to review recent activity and the unresolved lane-position question, then revalidate the case. Fork two clearly named hypotheses from the baseline: one where Vehicle A changed lane and one where Vehicle B changed lane. Preserve each explanation as an explicit assumption, not a fact; do not alter the baseline or resolve the question.",
+    prompt: siteToolsOnlyRequest(
+      "review recent activity and the unresolved lane-position question, then revalidate the case. Fork two clearly named hypotheses from the baseline: one where Vehicle A changed lane and one where Vehicle B changed lane. Preserve each explanation as an explicit assumption, not a fact; do not alter the baseline or resolve the question.",
+    ),
   },
   {
     id: "report",
     title: "Prepare a neutral report",
-    prompt:
-      "Use this page's Site Tools to build a neutral, cited report preview for the current baseline. Keep confirmed observations in the factual section, reported or uncertain material separate, agent hypotheses in their appendix, and every open question visible. Do not confirm claims, change the case, or finalize the report.",
+    prompt: siteToolsOnlyRequest(
+      "build a neutral, cited report preview for the current baseline. Keep confirmed observations in the factual section, reported or uncertain material separate, agent hypotheses in their appendix, and every open question visible. Do not confirm claims, change the case, or finalize the report.",
+    ),
   },
 ];
 
@@ -288,20 +296,23 @@ export const SITE_TOOL_GENERAL_PROMPTS: readonly SiteToolPrompt[] = [
   {
     id: "inspect-current",
     title: "Inspect this case",
-    prompt:
-      "Use this page's Site Tools to read the case summary, scene, facts, questions, and timeline. Run full consistency validation, then focus the highest-priority unresolved question or validation issue if one exists. Distinguish confirmed, reported, unknown, advisory, and agent-inference content. Do not change the case or infer fault.",
+    prompt: siteToolsOnlyRequest(
+      "read the case summary, scene, facts, questions, and timeline. Run full consistency validation, then focus the highest-priority unresolved question or validation issue if one exists. Distinguish confirmed, reported, unknown, advisory, and agent-inference content. Do not change the case or infer fault.",
+    ),
   },
   {
     id: "review-readiness",
     title: "Review reconstruction readiness",
-    prompt:
-      "Use this page's Site Tools to inspect the current scene, timeline, evidence relationships, and open questions. Validate geometry, motion, provenance, completeness, and report readiness. Focus the most actionable unresolved item if one exists, then summarize what a human should review next. Do not add, confirm, answer, or finalize anything.",
+    prompt: siteToolsOnlyRequest(
+      "inspect the current scene, timeline, evidence relationships, and open questions. Validate geometry, motion, provenance, completeness, and report readiness. Focus the most actionable unresolved item if one exists, then summarize what a human should review next. Do not add, confirm, answer, or finalize anything.",
+    ),
   },
   {
     id: "report-current",
     title: "Prepare a neutral report",
-    prompt:
-      "Use this page's Site Tools to build a neutral, cited report preview for the current baseline. Keep confirmed observations in the factual section, reported or uncertain material separate, agent hypotheses in their appendix, and every open question visible. Do not confirm claims, change the case, or finalize the report.",
+    prompt: siteToolsOnlyRequest(
+      "build a neutral, cited report preview for the current baseline. Keep confirmed observations in the factual section, reported or uncertain material separate, agent hypotheses in their appendix, and every open question visible. Do not confirm claims, change the case, or finalize the report.",
+    ),
   },
 ];
 
