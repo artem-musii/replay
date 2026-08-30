@@ -2063,6 +2063,7 @@ test.describe("production-critical regressions", () => {
     const contender = await context.newPage();
     await contender.goto("/#demo");
     await expect(contender.locator("main.workspace")).toBeVisible();
+    await contender.getByRole("button", { name: "Expert", exact: true }).click();
     expect(currentDemoRunId(contender)).not.toBe(originalRunId);
     await expect(contender.locator(".workspace-conflict")).toHaveCount(0);
     await expect(contender.locator(".workspace-case-title")).toContainText("v1");

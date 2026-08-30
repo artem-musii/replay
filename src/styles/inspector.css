@@ -1127,12 +1127,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 .relation-group button,
 .relation-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: 0 1 100%;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   min-height: 28px;

@@ -12,12 +12,18 @@ export async function openLanding(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
-export async function openDemo(page: Page): Promise<void> {
+export async function openDemoSimple(page: Page): Promise<void> {
   await openLanding(page);
   await page.getByRole("button", { name: "Open Roundabout demo" }).click();
   await expect(page.locator("main.workspace")).toBeVisible();
   await expect(page.getByText("Roundabout incident — 17:42", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#case\/case-demo-roundabout-calibrated-run-/);
+}
+
+export async function openDemo(page: Page): Promise<void> {
+  await openDemoSimple(page);
+  await page.getByRole("button", { name: "Expert", exact: true }).click();
+  await expect(page.getByRole("tablist", { name: "Case workspaces" })).toBeVisible();
 }
 
 export function currentDemoRunId(page: Page): string {

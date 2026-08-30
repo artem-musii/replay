@@ -37,6 +37,19 @@ test.describe("explicit human workspace journeys", () => {
     await expect(relatedItems.getByRole("button", { name: "Path · Vehicle A" })).toBeVisible();
     await expect(relatedItems.getByRole("button", { name: "Path · Vehicle B" })).toBeVisible();
     await expect(relatedItems.getByRole("button", { name: "Hypothesis · Baseline" })).toBeVisible();
+    const relatedObservation = relatedItems.getByRole("button", {
+      name: /Observation · The exact lane positions immediately before contact are unknown/,
+    });
+    await expect(relatedObservation).toHaveAttribute(
+      "title",
+      "Observation · The exact lane positions immediately before contact are unknown.",
+    );
+    await expect(relatedObservation).not.toHaveAttribute("title", "claim-lane-positions");
+    const relationOverflow = await relatedItems.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(relationOverflow.scrollWidth).toBeLessThanOrEqual(relationOverflow.clientWidth);
     await questionCard.getByRole("button", { name: "Answer", exact: true }).click();
     await questionCard.getByLabel("Answer", { exact: true }).fill(answer);
     await questionCard.getByLabel("Also create a reported observation").check();

@@ -83,6 +83,7 @@ test.describe("REPLAY primary journey", () => {
     await highSpeedCard
       .getByRole("button", { name: "Open case: High-speed braking account" })
       .click();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
 
     await expect(page.locator(".workspace-case-title")).toContainText("High-speed braking account");
     await page.getByRole("button", { name: /Approximate impact at 3\.0 seconds/ }).click();
@@ -104,6 +105,7 @@ test.describe("REPLAY primary journey", () => {
     await page
       .getByRole("button", { name: "Open case: Parking-area account contradiction" })
       .click();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
 
     await expect(page.locator(".parking-speed-label")).toHaveText("15");
     await page.getByRole("button", { name: /Approximate impact at 1\.0 seconds/ }).click();
@@ -705,6 +707,7 @@ test.describe("REPLAY primary journey", () => {
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Create local case" }).click();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
 
     await expect(page.getByText("No observations yet", { exact: true })).toBeVisible();
     await expect(
@@ -798,6 +801,7 @@ test.describe("REPLAY primary journey", () => {
       .getByLabel(/Initial factual statement/)
       .fill("Vehicle A and Vehicle B were present; the exact movement is not yet established.");
     await page.getByRole("button", { name: "Create local case" }).click();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
 
     await expect(page.locator(".workspace-case-title")).toContainText("Local case");
     await expect(page.getByText("Evening intersection account", { exact: true })).toBeVisible();
@@ -867,6 +871,7 @@ test.describe("REPLAY primary journey", () => {
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Create local case" }).click();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
 
     const vehicleA = page.getByRole("button", { name: /^Vehicle A, position/ });
     await vehicleA.click();
@@ -967,6 +972,7 @@ test.describe("REPLAY primary journey", () => {
       .getByLabel(/Initial factual statement/)
       .fill("Vehicle A was stopped after the incident.");
     await page.getByRole("button", { name: "Create local case" }).click();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
     await inspectorTab(page, "Facts").click();
     await page
       .getByLabel("Case inspector")
@@ -997,6 +1003,7 @@ test.describe("REPLAY primary journey", () => {
 
     await page.getByRole("button", { name: "Open Roundabout demo" }).click();
     await expect(page.locator("main.workspace")).toBeVisible();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
     const siteToolsButton = page.locator("button.webmcp-status");
     await expect(siteToolsButton).toContainText("Manual mode");
     await expect(siteToolsButton).toHaveAccessibleName("Site Tools Manual mode");

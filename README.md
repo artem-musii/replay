@@ -2,50 +2,41 @@
 
 **A shared black box for incidents that did not have one.** After a minor no-injury collision, a driver and claims-intake reviewer need to turn photographs, damage, final positions, timing, and conflicting memories into a record they can inspect. REPLAY gives them one local-first visual case where evidence, memory, uncertainty, dispute, and inference remain visibly distinct—and a cited report that no Site Tool can finalize.
 
-[Live app](https://artem-musii.github.io/replay/) · [Deterministic judge case](https://artem-musii.github.io/replay/#demo) · [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+[Live app](https://artem-musii.github.io/replay/) · [Roundabout demo](https://artem-musii.github.io/replay/#demo) · [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-![REPLAY workspace with 18 Site Tools registered, a reversible two-vehicle proposal over the unchanged baseline, and separate session and case activity](docs/images/replay-webmcp-collaboration.webp)
-
-_Historical 1280 × 720 capture from a pre-`b2e93905` configured-base payload in the Codex in-app browser. It shows the Scene calibration UI, 1.25× playback, 12-point paths, 18 registered Site Tools, the live baseline beside a pending review-only proposal, and separate case/session activity. The proposal call was operator-directed; this is neither current-payload nor supported-model-choice evidence._
+![REPLAY roundabout workspace showing a reversible two-vehicle agent proposal over the unchanged baseline](docs/images/replay-devpost-thumbnail.jpg)
 
 > REPLAY organizes and visualizes a factual account. Its calibrated geometry and motion checks are deterministic review aids, not a forensic reconstruction, collision-dynamics simulation, truth/lie detector, legal determination, or decision about fault or liability.
 
 ## Try it
 
-| Destination             | Link                                                                                     |
-| ----------------------- | ---------------------------------------------------------------------------------------- |
-| Live build              | [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)           |
-| Live deterministic demo | [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo) |
-| Public repository       | [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)           |
-| Open-source license     | [MIT](LICENSE)                                                                           |
-| Demo video              | **Not recorded yet.** Add the public YouTube URL before the final Devpost submission.    |
+| Destination         | Link                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| Live build          | [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)           |
+| Roundabout demo     | [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo) |
+| Public repository   | [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)           |
+| Open-source license | [MIT](LICENSE)                                                                           |
 
-**Fast judge prompt:** Open the deterministic demo in ChatGPT's built-in browser and ask: “Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.” The in-product Site Tools guide also provides an exact-coordinate deterministic fallback for repeatable evaluation.
+**Try it with Site Tools:** Open the roundabout demo in ChatGPT's built-in browser and ask: “Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.” The in-product Site Tools guide also provides an exact-coordinate deterministic alternative.
 
 To start without WebMCP, run the app locally and choose **Open Roundabout demo**. Every core workspace feature remains available in an ordinary browser.
 
-The public GitHub Pages build is a shared-origin challenge demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. In current source, `/#demo`, a landing-page scenario card, and **Case options → Start fresh demo copy** each create a new seed-v6 run without overwriting an earlier one, then replace the location with a stable `#case/<encoded-case-id>` route. The landing page lists every retained run under **Your local cases**, where a visible, cancel-first human control can permanently remove one local case and its stored evidence bytes. Site Tools cannot request that deletion. A saved run resumes only from its route in the same origin and browser profile; an unavailable route shows a recovery message instead of opening a different case. Valid legacy seed-v1 through seed-v6 records remain loadable.
+The public GitHub Pages build is a shared-origin demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. In current source, `/#demo`, a landing-page scenario card, and **Case options → Start fresh demo copy** each create a new seed-v6 run without overwriting an earlier one, then replace the location with a stable `#case/<encoded-case-id>` route. The landing page lists every retained run under **Your local cases**, where a visible, cancel-first human control can permanently remove one local case and its stored evidence bytes. Site Tools cannot request that deletion. A saved run resumes only from its route in the same origin and browser profile; an unavailable route shows a recovery message instead of opening a different case. Valid legacy seed-v1 through seed-v6 records remain loadable.
 
-The public URL serves the verified seed-v6 application release at [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20), including the full trust, persistence, accessibility, report, release-verification, calibrated-scene, impact-response, and four-scenario work described here. Its WebMCP proposal contract now makes complete single- or multi-actor start-to-final reconstruction explicit while preserving human-only application, and playback invalidates stale animation sessions so one click reliably continues from the impact pause. CI, deployment, and byte-for-byte public verification are complete. An uncoached supported-model Site Tools trace with native **Recently used/Sources** and the public video are still pending. The [WebMCP Challenge rules](https://webmcp.devpost.com/rules) require a working live URL, public source/instructions/license, an English submission description, free judge access, and a public YouTube demonstration under three minutes with audio showing actual WebMCP use. The submission deadline is **September 3, 2026 at 1:00 PM PDT**; see the [official challenge page](https://openai.com/webmcp-challenge/).
+The public URL serves the verified seed-v6 application release at [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20). CI, deployment, and byte-for-byte public verification are complete.
 
-## The three-minute judge path
+## Human-agent workflow
 
 A screenshot can show two vehicles, but it cannot reliably tell an agent which timed point belongs to which branch, whether a statement is photo-backed or disputed, whether a path is locked, or which case version is current. WebMCP exposes those exact live semantics and validated actions. Its writes pass through the same domain commands as visible UI actions, so every proposal is attributable and inspectable in the one case the person sees—never an agent-only shadow copy.
 
 **Agent: read, validate, propose, draft. Reviewer: attest, decide, finalize.**
 
-In one coherent demo, a judge can see the complete contract:
+The collaboration follows four visible steps:
 
 1. **Inspect the record without overstating it.** The authored roundabout paths visibly slow and diverge after the reported contact, while the inspector labels the comparison as authored motion—not simulated collision physics or proof of causation.
 2. **Use native Site Tools on live structured state.** The agent reads the scene and facts, runs REPLAY's deterministic consistency checks, and focuses the result in the same workspace.
 3. **Keep proposal, inference, and fact separate.** A coordinated geometry proposal remains a reversible preview; an agent hypothesis stays attributed and unconfirmed; no Site Tool can adjust, accept, or reject that proposal or confirm an eligible statement. Those commands require the visible UI review origin.
 4. **Turn the record into a practical output.** The agent prepares a neutral, citation-bound report preview, but only a visible human review can create the immutable final snapshot.
-
-The exact recording sequence, pass cues, and native-tool proof requirements are in the [under-three-minute demo script](docs/demo-script.md).
-
-## Challenge-period provenance
-
-REPLAY was created during the Challenge submission window, not extended from a pre-existing product. The repository's first commit, `c95df75`, is dated **August 27, 2026**, after submissions opened on August 25. The public history then records the WebMCP command bridge, shared human-agent domain model, releases, onboarding, calibrated realism, and review safeguards. Preserve that dated history with the final submission so judges can distinguish eligible Challenge work directly.
 
 ## Learn REPLAY in the product
 
@@ -157,7 +148,7 @@ Every imperative result is marked as potentially untrusted output. Read calls, v
 
 Read the complete contracts in [WebMCP tools](docs/webmcp-tools.md), [WebMCP evals](docs/webmcp-evals.md), and the dated [source of truth](docs/source-of-truth.md).
 
-Primary external references: the [WebMCP Draft Community Group Report](https://webmachinelearning.github.io/webmcp/), [Chrome WebMCP documentation](https://developer.chrome.com/docs/ai/webmcp), [OpenAI Site Tools documentation](https://learn.chatgpt.com/docs/webmcp), the [WebMCP Challenge](https://webmcp.devpost.com/), and its [official rules](https://webmcp.devpost.com/rules). WebMCP is a proposed, evolving standard; the repository source of truth records the retrieval dates and implementation consequences.
+Primary external references: the [WebMCP Draft Community Group Report](https://webmachinelearning.github.io/webmcp/), [Chrome WebMCP documentation](https://developer.chrome.com/docs/ai/webmcp), and [OpenAI Site Tools documentation](https://learn.chatgpt.com/docs/webmcp). WebMCP is a proposed, evolving standard; the repository source of truth records the retrieval dates and implementation consequences.
 
 ## Architecture
 
@@ -235,25 +226,9 @@ npm run build
 
 The repository contains deterministic coverage for the domain engine, schema migration/import/report rules, the cancel-first import trust-reset review, exact-revision claim and completeness attestations, source-enforced photo/document observations, human-only evidence unlinking without asset deletion, legitimate no-evidence finalization, unsigned-import trust reset, proposals, persistence conflict and recovery behavior, semantic-intent idempotency, staged WebMCP save/commit/compensation behavior, calibrated geometry, motion envelopes, smooth timed interpolation, four demo scenarios, stable local-case routing/listing, exact multi-vehicle impact-pair placement, onboarding, timed path authoring and rotation, narrow/200%-text reflow, timeline/dialog behavior, export regressions, the real adapter, and the WebMCP registry. The model-behavior cases in `evals/webmcp-evals.json` are an evaluation specification; they are not presented as captured model-run results.
 
-**Current deployed application payload:** application commit [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20) passed [GitHub Actions run `33274844653`](https://github.com/artem-musii/replay/actions/runs/33274844653), including verify/build job `99159652619`, deploy job `99160674554`, and post-deploy byte-verification job `99160705929`: **460/460 Vitest tests across 37 files**, **230 Playwright project runs: 221 passed, 9 intentional mobile screenshot-owner skips, and 0 failed**, plus a **12/12** configured-base release matrix. Pages deployment `6160091470` published artifact `9721285202` (3,655,679 compressed bytes; SHA-256 `5505a03a515a0c455f786a0f9fec7a6d9376d7046c77072d9df6d9c2412d8e1b`). The retained release-evidence artifact is `9721284748` (SHA-256 `280d1f1c3e345b0a10655ec2afdbf3ed29b39c6f56155ea7e775f72a49c0c875`). The live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) identifies the latest clean wrapper commit and attests the same **46 public payload files / 5,297,092 bytes** with manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`; hosted CI and independent post-deploy verification fetch and match every file. Documentation/test-only follow-up commits may therefore change the wrapper commit recorded by that endpoint without changing the attested application payload.
+The verified seed-v6 release passed **460/460 Vitest tests across 37 files** and **230 Playwright project runs: 221 passed, 9 intentional mobile screenshot-owner skips, and 0 failed**, plus formatting, zero-warning lint, strict TypeScript checking, dependency audits, production builds, visual baselines, and focused release checks. The deployed artifact is independently byte-verified through [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json).
 
-**Superseded public-browser evidence:** the preceding seed-v6 `cd88755b` operator bridge, product, and Lighthouse checks remain historical to those exact bytes. Commit `00688d8a51fb783dbf147e08ece60470b8877544` retains its cache-busted 100/100/100/100 Lighthouse report and the live seed-v3 guide, scene/path-editing, recovery, and 18-tool discovery smokes. Those checks are not attributed to the current release or presented as supported-model execution. The older `f980d28` and seed-v5 `2855f0bc` results are likewise preserved as historical evidence. An exact-current-deployment supported-model trace, a final real-device/screen-reader spot check, a dedicated header-capable origin for full response-policy claims, and the public video remain external gates.
-
-**Current-release verification:** the 2026-08-29 hosted release gate passed **460/460 Vitest tests across 37 files** on Node 22.13.0 and all **230 Playwright project runs: 221 passed, 9 intentional mobile screenshot-owner skips, and 0 failed**, with 20 checked visual baselines. The browser split was 114/114 desktop Chromium, 105 passed plus 9 intentional skips in mobile Chrome, and 1/1 release smoke in both Firefox and WebKit. Hosted V8 coverage was **63.78% statements (6,781/10,631), 54.28% branches (4,500/8,289), 62.04% functions (1,628/2,624), and 65.85% lines (6,276/9,530)**. In a separate post-fix local stress run, the final playback guard passed **50/50** repeated exact-impact resume checks across desktop/mobile and **20/20** mixed critical journeys with no flake. Format, zero-warning ESLint, strict TypeScript, both dependency audits with 0 vulnerabilities, dependency-tree resolution, default and `/replay/` production builds, and `git diff --check` passed.
-
-The Node 22.13.0 root artifact contains **46 public payload files / 5,296,840 bytes**, plus the deployment-control `.nojekyll`, with manifest SHA-256 `efcc58d83a224460c2d53ebd1c14786095f91cd07a2f17c8b22c13afcbbeced0`. The `/replay/` artifact contains **46 public payload files / 5,297,092 bytes**, plus `.nojekyll`, with manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`. The configured-base artifact passed **12/12** focused runs against that exact already-built subpath artifact: the release/high-speed/impact matrix **8/8**, handler contract **2/2**, and submission story **2/2** on desktop and mobile. The handler run used the deterministic imperative `document.modelContext` polyfill, registered 18 lifecycle-eligible tools without churn, and returned all eight requested workspace sections—including explicit `selection: null`—in a complete **18,970-byte** response at case v1, below the **32,768-byte compact target** and 524,288-byte hard cap. Deterministic registry/adapter coverage separately proves that a one-actor full trajectory proposal keeps canonical geometry unchanged until a visible human acceptance, while the submission story exercises the 18→19→18 lifecycle, proposal/rejection, impact response, provenance-safe inference, human confirmation/finalization, and PDF export.
-
-An operator opened the preceding `cd88755b` configured-base payload in the Codex in-app browser and invoked four page-defined Site Tools through its native bridge: `get_case_summary`, `get_workspace_state` for scene/questions, all-scope `validate_case_consistency`, and `focus_workspace_item` for `question-lane-change`. All returned `ok: true` at case v1; validation returned the single `integrity.calibration-source` question, focus visibly opened that question, and the activity panel showed one durable seed change plus four session-only calls, each labelled **No case change · observed v1**. Browser runtime logs contained no warning or error. This remains historical page-bridge and visible UI/session-audit evidence for that payload—not current-deployment or supported-model choice, **Recently used/Sources**, mutation/lifecycle, or broad cross-client evidence.
-
-A post-deploy in-app-browser smoke of the preceding `cd88755b` payload independently exercised its read/UI bridge and remains historical to those bytes. A separate cache-busted operator smoke of the pre-rename `b2e93905` deployment selected the exact 10.000 s impact marker and advanced to 17.7 s after one Play click; from 9.5 s it auto-paused once at 10.0 s, then advanced to 15.9 s and remained playing after one resume. The public technical inspector visibly exposed `propose_scene_changes` with `changes.minItems=1`, full `trajectory-set` start/final semantics, and separate `mark_impact_event` semantics. There were no console errors or failed dynamic requests. The renamed release passed the same deterministic behavior and contract checks in hosted CI; neither result is native Site Tools invocation or supported-model choice.
-
-A fresh cache-busted ordinary-browser smoke of the renamed `b252fbde` deployment selected the 9.5 s keyframe, auto-paused once at the 10.0 s impact, and reached the 20.0 s end after exactly one Play click. The browser recorded zero console errors and no failed dynamic requests. This is current live playback evidence, not native Site Tools or supported-model evidence.
-
-Lighthouse 13.4.1 with Chrome 151 completed three warning-free runs per profile against the preceding `cd88755b` configured-base artifact. The mobile runs scored **89/91/90 performance**, all with **100 accessibility / 100 best practices / 100 SEO**, for median performance **90** and medians of FCP **2.032 s**, LCP **3.308 s**, TBT **17 ms**, CLS **0.00004**, Speed Index **2.032 s**, and TTI **3.308 s**; every desktop run scored **100/100/100/100**, with medians of FCP **0.445 s**, LCP **0.686 s**, TBT **0 ms**, CLS **0.0149**, Speed Index **0.529 s**, and TTI **0.686 s**. That lab result remains historical rather than a current-payload performance claim. Rendered-export and responsive-layout review from the same release also remains useful historical evidence; the current release retains automated layout/export regressions.
-
-The clean-tree artifact verifier, hosted CI, Pages deployment, and independent public-byte verification all passed for the release above. An uncoached supported-model trace on the final deployment with **Recently used/Sources** and the public video remain pending. The operator-directed traces above are not presented as model-choice evidence.
-
-See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, Site Tools steps, and how to record results without conflating deterministic tests with probabilistic evals.
+See [docs/testing.md](docs/testing.md) for fixtures, exact results, manual checks, and Site Tools verification steps.
 
 ## Privacy, safety, and limitations
 
@@ -281,12 +256,12 @@ GitHub Pages does not apply the repository’s `_headers` file, so response-only
 
 ## Project documents
 
-- [Demo script](docs/demo-script.md) and [storyboard](docs/demo-storyboard.md)
-- [Devpost submission draft](docs/devpost-submission.md)
-- [Judging matrix](docs/judging-matrix.md)
+- [Architecture](docs/architecture.md)
+- [Data model](docs/data-model.md)
+- [WebMCP tools](docs/webmcp-tools.md)
 - [Testing guide](docs/testing.md)
+- [Security and privacy notes](docs/security-and-privacy-notes.md)
 - [Dependency and license notes](docs/dependency-notes.md)
-- [Implementation status](IMPLEMENTATION_STATUS.md)
 
 ## License
 

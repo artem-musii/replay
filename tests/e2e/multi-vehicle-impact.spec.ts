@@ -28,6 +28,7 @@ async function createThreeVehicleCase(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Create local case" }).click();
   await expect(page.locator("main.workspace")).toBeVisible();
+  await page.getByRole("button", { name: "Expert", exact: true }).click();
   await waitForLocalSave(page);
 }
 

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import "../styles/debug.css";
 import "../styles/inspector.css";
 import "../styles/scene.css";
+import "../styles/simple-workspace.css";
 import "../styles/workspace.css";
 
 import {
@@ -37,6 +38,7 @@ import {
   interpolateTrajectory,
   quantizeEditableTimeMs,
   quantizeTimeInRange,
+  rankOpenQuestions,
   resolveProposalReviewRequest,
   sceneDeltaForMetricHeading,
   type ActivityEvent,
@@ -82,6 +84,7 @@ import {
 import { ActivityPanel } from "./ActivityPanel";
 import { BrandMark } from "./BrandMark";
 import { CaseDetailsDialog, type CaseDetailsInput } from "./CaseDetailsDialog";
+import { copyTextToClipboard } from "./clipboard";
 import { type EvidenceUploadInput, InspectorPanel, type InspectorTab } from "./InspectorPanel";
 import {
   DEFAULT_PLAYBACK_SPEED,
@@ -90,6 +93,7 @@ import {
   type AutomaticImpactPause,
 } from "./playback";
 import { SceneCanvas } from "./SceneCanvas";
+import { SimpleWorkspace } from "./SimpleWorkspace";
 import { Timeline } from "./Timeline";
 import { useDialogFocus } from "./useDialogFocus";
 import { WebMCPDebugPanel } from "./WebMCPDebugPanel";
@@ -99,6 +103,8 @@ import { WorkspaceTour } from "./WorkspaceTour";
 interface WorkspaceProps {
   initialCase: ReplayCase;
   isDemo: boolean;
+  experienceMode: ExperienceMode;
+  onExperienceModeChange: (mode: ExperienceMode) => void;
   onHome: (latestCase: ReplayCase) => void;
   onResetDemo: () => boolean | Promise<boolean>;
   activeDemoScenarioId?: DemoScenarioId;
@@ -111,6 +117,7 @@ interface WorkspaceProps {
 
 type SaveState = "saving" | "saved" | "error";
 type WriteAccess = "checking" | "writable" | "blocked";
+type ExperienceMode = "simple" | "expert";
 
 interface PendingCaseImport {
   replayCase: ReplayCase;
@@ -360,6 +367,8 @@ class WorkspaceFocusStore {
 export function Workspace({
   initialCase,
   isDemo,
+  experienceMode,
+  onExperienceModeChange,
   onHome,
   onResetDemo,
   activeDemoScenarioId,
@@ -409,6 +418,16 @@ export function Workspace({
     [workspaceFocusStore],
   );
   const [compareBranchIds, setCompareBranchIds] = useState<string[]>([]);
+  const changeExperienceMode = useCallback(
+    (mode: ExperienceMode) => {
+      onExperienceModeChange(mode);
+      if (mode === "simple") {
+        setCompareBranchIds([]);
+        setShowDebug(false);
+      }
+    },
+    [onExperienceModeChange],
+  );
   const activeBranchIds = useMemo(
     () =>
       new Set(
@@ -2284,6 +2303,89 @@ export function Workspace({
     });
   }
 
+  async function askAgentToReview(): Promise<void> {
+    const state = replayCaseRef.current;
+    const question = rankOpenQuestions(
+      state.questions.filter(
+        (candidate) => candidate.status === "open" || candidate.status === "deferred",
+      ),
+    )[0];
+    if (!question) {
+      setToast({ kind: "info", message: "There is no unresolved question to send for review." });
+      return;
+    }
+    const prompt = `Use this page's Site Tools to review this unresolved question: "${question.question}" Read the live scene, timeline, related evidence links, human statements, and full consistency results. Focus this question, then create the smallest reversible scene proposal that would help a person examine it. Keep current claims, endpoints, times, unrelated geometry, and the baseline unchanged. Explain the evidence in scope, missing support, uncertainty, contradictions, and what remains unresolved. Do not apply the proposal, answer or confirm a claim, finalize a report, or infer fault.`;
+    try {
+      await copyTextToClipboard(prompt);
+      setToast({
+        kind: "success",
+        message: "Agent review request copied.",
+        detail: debugState.supported
+          ? "Paste it into the connected conversation. Site Tools will work against this same live case."
+          : "Open this case in a supported client, then paste the request into the conversation.",
+      });
+    } catch {
+      setToast({
+        kind: "error",
+        message: "The review request could not be copied.",
+        detail:
+          "Clipboard access is unavailable. Switch to Expert mode and open the Site Tools guide to copy a prompt manually.",
+      });
+    }
+  }
+
+  function acceptProposal(proposalId: string): boolean {
+    const state = engine.getState();
+    return runCommand({
+      type: "proposal.accept",
+      proposalId,
+      poseAt: {
+        branchId: state.activeBranchId,
+        timeMs: clampTimeToRange(currentTimeMs, state.timeRangeMs),
+      },
+    }).ok;
+  }
+
+  function rejectProposal(proposalId: string): boolean {
+    return runCommand({ type: "proposal.reject", proposalId }).ok;
+  }
+
+  function finalizeReport(reviewedPreview: ReportPreview): boolean {
+    const binding = reviewedPreview.reviewBinding;
+    if (!binding) {
+      setToast({
+        kind: "error",
+        message: "This preview is not bound to a reviewable case state. Build it again.",
+      });
+      return false;
+    }
+    const result = runCommand({
+      type: "report.finalize",
+      expectedVersion: reviewedPreview.caseVersion,
+      unresolvedQuestionsReviewed: true,
+      limitationsAcknowledged: true,
+      confirmedFactsReviewed: true,
+      includedUnconfirmedContentReviewed: true,
+      manualConfirmation: true,
+      reviewedPreview: {
+        caseId: reviewedPreview.caseId,
+        caseVersion: reviewedPreview.caseVersion,
+        generatedAt: reviewedPreview.generatedAt,
+        fingerprint: binding.fingerprint,
+        branchIds: binding.branchIds,
+        includeHypotheses: binding.includeHypotheses,
+      },
+    });
+    if (result.ok) {
+      const snapshot = engine.getState().reportSnapshots.at(-1);
+      if (snapshot) {
+        setSelectedReportSnapshotId(snapshot.id);
+        setReportPreview(snapshot.preview);
+      }
+    }
+    return result.ok;
+  }
+
   async function importFile(file: File | undefined): Promise<void> {
     if (!file) return;
     try {
@@ -2438,7 +2540,7 @@ export function Workspace({
   );
 
   return (
-    <main className="workspace">
+    <main className={`workspace is-${experienceMode}`}>
       <input
         ref={importInputRef}
         className="visually-hidden"
@@ -2450,6 +2552,8 @@ export function Workspace({
       />
       <WorkspaceHeader
         replayCase={replayCase}
+        mode={experienceMode}
+        onModeChange={changeExperienceMode}
         isDemo={isDemo}
         saveState={saveState}
         canUndo={engine.canUndo && !humanMutationBlockReason}
@@ -2538,13 +2642,15 @@ export function Workspace({
           </div>
         </div>
       )}
-      <div className="mobile-edit-guidance" role="note">
-        <CircleAlert size={16} aria-hidden="true" />
-        <span>
-          Compact view prioritizes review. Use a larger screen for precise dragging; exact numeric
-          controls remain available after selecting a scene item.
-        </span>
-      </div>
+      {experienceMode === "expert" && (
+        <div className="mobile-edit-guidance" role="note">
+          <CircleAlert size={16} aria-hidden="true" />
+          <span>
+            Compact view prioritizes review. Use a larger screen for precise dragging; exact numeric
+            controls remain available after selecting a scene item.
+          </span>
+        </div>
+      )}
       <div
         className={`workspace-grid${displayedCompareBranchIds.length > 0 ? " is-comparing" : ""}`}
         id="main-content"
@@ -2635,275 +2741,251 @@ export function Workspace({
             }}
           />
         </div>
-        <InspectorPanel
-          replayCase={replayCase}
-          currentTimeMs={currentTimeMs}
-          activeTab={activeTab}
-          {...(focusedIssueId ? { focusedIssueId } : {})}
-          {...(selectedId ? { selectedId } : {})}
-          {...(selectedKeyframeId ? { selectedKeyframeId } : {})}
-          {...(reportPreview ? { reportPreview } : {})}
-          {...(selectedReportSnapshotId ? { selectedReportSnapshotId } : {})}
-          evidenceUrls={evidenceUrls}
-          compareBranchIds={displayedCompareBranchIds}
-          {...(proposalReviewTarget ? { proposalReviewTarget } : {})}
-          onEditStart={stopPlayback}
-          onTabChange={changeInspectorTab}
-          onSelect={(type, id) => selectItem(type, id)}
-          onAddClaim={(statement, status, sourceType, sourceIds) =>
-            runCommand({
-              type: "claim.add",
-              statement,
-              status,
-              sourceType,
-              sourceIds,
-              linkedEvidenceIds: sourceIds.filter((id) =>
-                replayCase.evidence.some((asset) => asset.id === id && !asset.deleted),
-              ),
-              linkedEventIds: [],
-              linkedSceneObjectIds: [],
-              sharedAcrossBranches: true,
-            }).ok
-          }
-          onUpdateClaim={(claimId, update) =>
-            runCommand({ type: "claim.update", claimId, ...update }).ok
-          }
-          onConfirmClaim={(claimId) => runCommand({ type: "claim.confirm", claimId })}
-          onSetClaimStatus={(claimId, status) =>
-            runCommand({ type: "claim.update", claimId, status })
-          }
-          onToggleLock={(_, id, locked) =>
-            runCommand({
-              type: "lock.set",
-              targetType: "claim",
-              targetId: id,
-              locked,
-              ...(locked ? { reason: "Human protected this observation." } : {}),
-            })
-          }
-          onUpdateActorPose={moveActorAtCurrentTime}
-          onUpdateActorSpecs={updateActorSpecs}
-          onUpdateTrajectoryKeyframe={updateTrajectoryKeyframeExact}
-          onAddTrajectoryKeyframe={addTrajectoryKeyframeAtPlayhead}
-          onRemoveTrajectoryKeyframe={removeTrajectoryKeyframe}
-          onSelectTrajectoryKeyframe={(_trajectoryId, keyframeId) =>
-            setSelectedKeyframeId(keyframeId)
-          }
-          onSetTrajectoryVisible={setTrajectoryVisible}
-          onUpdateTimelineEvent={updateTimelineEventExact}
-          onReplayImpact={replayImpactMotion}
-          onToggleSceneItemLock={toggleSceneItemLock}
-          onAdjustProposal={(proposalId, summary, changes) => {
-            const state = engine.getState();
-            return runCommand({
-              type: "proposal.adjust",
-              proposalId,
-              summary,
-              changes,
-              poseAt: {
-                branchId: state.activeBranchId,
-                timeMs: clampTimeToRange(currentTimeMs, state.timeRangeMs),
-              },
-            }).ok;
-          }}
-          onAcceptProposal={(proposalId) => {
-            const state = engine.getState();
-            return runCommand({
-              type: "proposal.accept",
-              proposalId,
-              poseAt: {
-                branchId: state.activeBranchId,
-                timeMs: clampTimeToRange(currentTimeMs, state.timeRangeMs),
-              },
-            }).ok;
-          }}
-          onRejectProposal={(proposalId) => runCommand({ type: "proposal.reject", proposalId }).ok}
-          onReviewProposalAtTime={(target) => {
-            const state = replayCaseRef.current;
-            const proposal = state.proposals.find(
-              (candidate) => candidate.id === target.proposalId && candidate.status === "pending",
-            );
-            const revision = proposal?.revisions.at(-1);
-            const change = revision?.changes.find((candidate) => candidate.id === target.changeId);
-            if (
-              revision?.id !== target.revisionId ||
-              !change?.branchId ||
-              change.branchId !== target.branchId
-            )
-              return false;
-            if (
-              target.keyframeId &&
-              change.kind === "trajectory-set" &&
-              !change.proposedTrajectory.keyframes.some(
-                (keyframe) => keyframe.id === target.keyframeId,
-              ) &&
-              !change.baseTrajectory?.keyframes.some(
-                (keyframe) => keyframe.id === target.keyframeId,
+        {experienceMode === "simple" ? (
+          <SimpleWorkspace
+            replayCase={replayCase}
+            {...(reportPreview ? { reportPreview } : {})}
+            {...(agentAction ? { agentWorking: agentAction } : {})}
+            siteToolsSupported={debugState.supported}
+            siteToolsError={debugState.tools.some((tool) => tool.registrationState === "error")}
+            {...(humanMutationBlockReason ? { mutationBlocked: humanMutationBlockReason } : {})}
+            onAskAgent={askAgentToReview}
+            onAcceptProposal={acceptProposal}
+            onRejectProposal={rejectProposal}
+            onBuildReport={buildPreview}
+            onFinalizeReport={finalizeReport}
+          />
+        ) : (
+          <InspectorPanel
+            replayCase={replayCase}
+            currentTimeMs={currentTimeMs}
+            activeTab={activeTab}
+            {...(focusedIssueId ? { focusedIssueId } : {})}
+            {...(selectedId ? { selectedId } : {})}
+            {...(selectedKeyframeId ? { selectedKeyframeId } : {})}
+            {...(reportPreview ? { reportPreview } : {})}
+            {...(selectedReportSnapshotId ? { selectedReportSnapshotId } : {})}
+            evidenceUrls={evidenceUrls}
+            compareBranchIds={displayedCompareBranchIds}
+            {...(proposalReviewTarget ? { proposalReviewTarget } : {})}
+            onEditStart={stopPlayback}
+            onTabChange={changeInspectorTab}
+            onSelect={(type, id) => selectItem(type, id)}
+            onAddClaim={(statement, status, sourceType, sourceIds) =>
+              runCommand({
+                type: "claim.add",
+                statement,
+                status,
+                sourceType,
+                sourceIds,
+                linkedEvidenceIds: sourceIds.filter((id) =>
+                  replayCase.evidence.some((asset) => asset.id === id && !asset.deleted),
+                ),
+                linkedEventIds: [],
+                linkedSceneObjectIds: [],
+                sharedAcrossBranches: true,
+              }).ok
+            }
+            onUpdateClaim={(claimId, update) =>
+              runCommand({ type: "claim.update", claimId, ...update }).ok
+            }
+            onConfirmClaim={(claimId) => runCommand({ type: "claim.confirm", claimId })}
+            onSetClaimStatus={(claimId, status) =>
+              runCommand({ type: "claim.update", claimId, status })
+            }
+            onToggleLock={(_, id, locked) =>
+              runCommand({
+                type: "lock.set",
+                targetType: "claim",
+                targetId: id,
+                locked,
+                ...(locked ? { reason: "Human protected this observation." } : {}),
+              })
+            }
+            onUpdateActorPose={moveActorAtCurrentTime}
+            onUpdateActorSpecs={updateActorSpecs}
+            onUpdateTrajectoryKeyframe={updateTrajectoryKeyframeExact}
+            onAddTrajectoryKeyframe={addTrajectoryKeyframeAtPlayhead}
+            onRemoveTrajectoryKeyframe={removeTrajectoryKeyframe}
+            onSelectTrajectoryKeyframe={(_trajectoryId, keyframeId) =>
+              setSelectedKeyframeId(keyframeId)
+            }
+            onSetTrajectoryVisible={setTrajectoryVisible}
+            onUpdateTimelineEvent={updateTimelineEventExact}
+            onReplayImpact={replayImpactMotion}
+            onToggleSceneItemLock={toggleSceneItemLock}
+            onAdjustProposal={(proposalId, summary, changes) => {
+              const state = engine.getState();
+              return runCommand({
+                type: "proposal.adjust",
+                proposalId,
+                summary,
+                changes,
+                poseAt: {
+                  branchId: state.activeBranchId,
+                  timeMs: clampTimeToRange(currentTimeMs, state.timeRangeMs),
+                },
+              }).ok;
+            }}
+            onAcceptProposal={acceptProposal}
+            onRejectProposal={rejectProposal}
+            onReviewProposalAtTime={(target) => {
+              const state = replayCaseRef.current;
+              const proposal = state.proposals.find(
+                (candidate) => candidate.id === target.proposalId && candidate.status === "pending",
+              );
+              const revision = proposal?.revisions.at(-1);
+              const change = revision?.changes.find(
+                (candidate) => candidate.id === target.changeId,
+              );
+              if (
+                revision?.id !== target.revisionId ||
+                !change?.branchId ||
+                change.branchId !== target.branchId
               )
-            ) {
-              return false;
-            }
-            const resolved = resolveProposalReviewRequest(target, {
-              activeBranchId: state.activeBranchId,
-              timeRangeMs: state.timeRangeMs,
-            });
-            if (!resolved.ok) return false;
-            stopPlayback();
-            setProposalReviewTarget(resolved.target);
-            setPlayheadTime(resolved.target.reviewTimeMs);
-            if (window.matchMedia("(max-width: 900px)").matches) {
-              if (proposalReviewScrollFrameRef.current !== undefined) {
-                window.cancelAnimationFrame(proposalReviewScrollFrameRef.current);
+                return false;
+              if (
+                target.keyframeId &&
+                change.kind === "trajectory-set" &&
+                !change.proposedTrajectory.keyframes.some(
+                  (keyframe) => keyframe.id === target.keyframeId,
+                ) &&
+                !change.baseTrajectory?.keyframes.some(
+                  (keyframe) => keyframe.id === target.keyframeId,
+                )
+              ) {
+                return false;
               }
-              proposalReviewScrollFrameRef.current = window.requestAnimationFrame(() => {
-                proposalReviewScrollFrameRef.current = undefined;
-                proposalSceneRef.current?.scrollIntoView({
-                  block: "center",
-                  behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                    ? "auto"
-                    : "smooth",
+              const resolved = resolveProposalReviewRequest(target, {
+                activeBranchId: state.activeBranchId,
+                timeRangeMs: state.timeRangeMs,
+              });
+              if (!resolved.ok) return false;
+              stopPlayback();
+              setProposalReviewTarget(resolved.target);
+              setPlayheadTime(resolved.target.reviewTimeMs);
+              if (window.matchMedia("(max-width: 900px)").matches) {
+                if (proposalReviewScrollFrameRef.current !== undefined) {
+                  window.cancelAnimationFrame(proposalReviewScrollFrameRef.current);
+                }
+                proposalReviewScrollFrameRef.current = window.requestAnimationFrame(() => {
+                  proposalReviewScrollFrameRef.current = undefined;
+                  proposalSceneRef.current?.scrollIntoView({
+                    block: "center",
+                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                      ? "auto"
+                      : "smooth",
+                  });
                 });
-              });
-            }
-            return true;
-          }}
-          onUploadEvidence={(input) => void uploadEvidence(input)}
-          onDeleteEvidence={deleteEvidence}
-          onUpdateEvidence={(evidenceId, update) =>
-            runCommand({ type: "evidence.update", evidenceId, ...update }).ok
-          }
-          onLinkEvidence={(evidenceId, targetType, targetId, annotationId) =>
-            runCommand({
-              type: "evidence.link",
-              evidenceId,
-              targetType,
-              targetId,
-              ...(annotationId ? { annotationId } : {}),
-            }).ok
-          }
-          onUnlinkEvidence={(evidenceId, targetType, targetId, annotationId) =>
-            runCommand({
-              type: "evidence.unlink",
-              evidenceId,
-              targetType,
-              targetId,
-              ...(annotationId ? { annotationId } : {}),
-            }).ok
-          }
-          onAddQuestion={(question, reason, importance) =>
-            runCommand({
-              type: "question.add",
-              question,
-              reason,
-              importance,
-              rankingReasons:
-                importance === "blocking"
-                  ? ["blocks-report"]
-                  : importance === "high"
-                    ? ["resolves-contradiction"]
-                    : ["contextual-detail"],
-              relatedClaimIds: [],
-              relatedSceneObjectIds: [],
-              relatedBranchIds: [replayCaseRef.current.activeBranchId],
-            }).ok
-          }
-          onUpdateQuestion={updateQuestion}
-          onForkBranch={(parentBranchId, name, description) =>
-            runCommand({ type: "hypothesis.fork", parentBranchId, name, description }).ok
-          }
-          onSetActiveBranch={(branchId) => runCommand({ type: "hypothesis.set-active", branchId })}
-          onRenameBranch={(branchId, name, description) =>
-            runCommand({ type: "hypothesis.rename", branchId, name, description }).ok
-          }
-          onAddAssumption={(branchId, statement) =>
-            runCommand({
-              type: "hypothesis.add-assumption",
-              branchId,
-              statement,
-              supportingEvidenceIds: [],
-              conflictingEvidenceIds: [],
-            }).ok
-          }
-          onUpdateAssumption={(branchId, assumptionId, update) =>
-            runCommand({
-              type: "hypothesis.update-assumption",
-              branchId,
-              assumptionId,
-              ...update,
-            }).ok
-          }
-          onToggleBranchArchive={(branch) =>
-            runCommand({
-              type: branch.status === "archived" ? "hypothesis.restore" : "hypothesis.archive",
-              branchId: branch.id,
-            })
-          }
-          onCompareBranches={setCompareBranchIds}
-          onValidate={() => runCommand({ type: "case.validate", scope: "all" })}
-          onFocusIssue={(issue) => {
-            focusConsistencyIssue(issue.id, issue.affectedIds);
-            setToast({ kind: "info", message: issue.title, detail: issue.explanation });
-          }}
-          onAttestCompleteness={(attestation) =>
-            runCommand({ type: "completeness.attest", attestation }).ok
-          }
-          onWithdrawCompleteness={(attestationId) =>
-            runCommand({ type: "completeness.withdraw", attestationId }).ok
-          }
-          onBuildReport={buildPreview}
-          onOpenReportSnapshot={openReportSnapshot}
-          onExportReportSnapshot={(snapshotId) => void exportPdf(snapshotId)}
-          onAddReportNote={(text, claimIds, evidenceIds) =>
-            runCommand({
-              type: "report.add-note",
-              text,
-              claimIds,
-              evidenceIds,
-            }).ok
-          }
-          onReviewReportNote={(noteId, approved) =>
-            runCommand({ type: "report.review-note", noteId, approved })
-          }
-          onFinalizeReport={(reviewedPreview) => {
-            const binding = reviewedPreview.reviewBinding;
-            if (!binding) {
-              setToast({
-                kind: "error",
-                message: "This preview is not bound to a reviewable case state. Build it again.",
-              });
-              return false;
-            }
-            const result = runCommand({
-              type: "report.finalize",
-              expectedVersion: reviewedPreview.caseVersion,
-              unresolvedQuestionsReviewed: true,
-              limitationsAcknowledged: true,
-              confirmedFactsReviewed: true,
-              includedUnconfirmedContentReviewed: true,
-              manualConfirmation: true,
-              reviewedPreview: {
-                caseId: reviewedPreview.caseId,
-                caseVersion: reviewedPreview.caseVersion,
-                generatedAt: reviewedPreview.generatedAt,
-                fingerprint: binding.fingerprint,
-                branchIds: binding.branchIds,
-                includeHypotheses: binding.includeHypotheses,
-              },
-            });
-            if (result.ok) {
-              const snapshot = engine.getState().reportSnapshots.at(-1);
-              if (snapshot) {
-                setSelectedReportSnapshotId(snapshot.id);
-                setReportPreview(snapshot.preview);
               }
+              return true;
+            }}
+            onUploadEvidence={(input) => void uploadEvidence(input)}
+            onDeleteEvidence={deleteEvidence}
+            onUpdateEvidence={(evidenceId, update) =>
+              runCommand({ type: "evidence.update", evidenceId, ...update }).ok
             }
-            return result.ok;
-          }}
-          onExportJson={() => exportCaseJson(replayCaseRef.current)}
-          onExportPdf={() => void exportPdf()}
-          onExportScene={(format) => void exportScene(format)}
-          {...(exportInFlight ? { exportInFlight } : {})}
-        />
+            onLinkEvidence={(evidenceId, targetType, targetId, annotationId) =>
+              runCommand({
+                type: "evidence.link",
+                evidenceId,
+                targetType,
+                targetId,
+                ...(annotationId ? { annotationId } : {}),
+              }).ok
+            }
+            onUnlinkEvidence={(evidenceId, targetType, targetId, annotationId) =>
+              runCommand({
+                type: "evidence.unlink",
+                evidenceId,
+                targetType,
+                targetId,
+                ...(annotationId ? { annotationId } : {}),
+              }).ok
+            }
+            onAddQuestion={(question, reason, importance) =>
+              runCommand({
+                type: "question.add",
+                question,
+                reason,
+                importance,
+                rankingReasons:
+                  importance === "blocking"
+                    ? ["blocks-report"]
+                    : importance === "high"
+                      ? ["resolves-contradiction"]
+                      : ["contextual-detail"],
+                relatedClaimIds: [],
+                relatedSceneObjectIds: [],
+                relatedBranchIds: [replayCaseRef.current.activeBranchId],
+              }).ok
+            }
+            onUpdateQuestion={updateQuestion}
+            onForkBranch={(parentBranchId, name, description) =>
+              runCommand({ type: "hypothesis.fork", parentBranchId, name, description }).ok
+            }
+            onSetActiveBranch={(branchId) =>
+              runCommand({ type: "hypothesis.set-active", branchId })
+            }
+            onRenameBranch={(branchId, name, description) =>
+              runCommand({ type: "hypothesis.rename", branchId, name, description }).ok
+            }
+            onAddAssumption={(branchId, statement) =>
+              runCommand({
+                type: "hypothesis.add-assumption",
+                branchId,
+                statement,
+                supportingEvidenceIds: [],
+                conflictingEvidenceIds: [],
+              }).ok
+            }
+            onUpdateAssumption={(branchId, assumptionId, update) =>
+              runCommand({
+                type: "hypothesis.update-assumption",
+                branchId,
+                assumptionId,
+                ...update,
+              }).ok
+            }
+            onToggleBranchArchive={(branch) =>
+              runCommand({
+                type: branch.status === "archived" ? "hypothesis.restore" : "hypothesis.archive",
+                branchId: branch.id,
+              })
+            }
+            onCompareBranches={setCompareBranchIds}
+            onValidate={() => runCommand({ type: "case.validate", scope: "all" })}
+            onFocusIssue={(issue) => {
+              focusConsistencyIssue(issue.id, issue.affectedIds);
+              setToast({ kind: "info", message: issue.title, detail: issue.explanation });
+            }}
+            onAttestCompleteness={(attestation) =>
+              runCommand({ type: "completeness.attest", attestation }).ok
+            }
+            onWithdrawCompleteness={(attestationId) =>
+              runCommand({ type: "completeness.withdraw", attestationId }).ok
+            }
+            onBuildReport={buildPreview}
+            onOpenReportSnapshot={openReportSnapshot}
+            onExportReportSnapshot={(snapshotId) => void exportPdf(snapshotId)}
+            onAddReportNote={(text, claimIds, evidenceIds) =>
+              runCommand({
+                type: "report.add-note",
+                text,
+                claimIds,
+                evidenceIds,
+              }).ok
+            }
+            onReviewReportNote={(noteId, approved) =>
+              runCommand({ type: "report.review-note", noteId, approved })
+            }
+            onFinalizeReport={finalizeReport}
+            onExportJson={() => exportCaseJson(replayCaseRef.current)}
+            onExportPdf={() => void exportPdf()}
+            onExportScene={(format) => void exportScene(format)}
+            {...(exportInFlight ? { exportInFlight } : {})}
+          />
+        )}
         <Timeline
           timeRangeMs={replayCase.timeRangeMs}
           currentTimeMs={currentTimeMs}
@@ -2943,18 +3025,20 @@ export function Workspace({
           onMoveKeyframe={moveKeyframeTime}
           onAddEvent={addTimelineEvent}
         />
-        <div className="workspace-activity" data-onboarding-id="case-activity">
-          <ActivityPanel
-            activities={replayCase.activity}
-            sessionActivities={toolInvocationActivity}
-            {...(agentAction ? { activeAgentAction: agentAction } : {})}
-            {...(revertingActivityId ? { revertingActivityId } : {})}
-            revertibleActivityIds={revertibleActivityIds}
-            maxItems={20}
-            onRevert={revertActivity}
-            onSelectActivity={focusActivity}
-          />
-        </div>
+        {experienceMode === "expert" && (
+          <div className="workspace-activity" data-onboarding-id="case-activity">
+            <ActivityPanel
+              activities={replayCase.activity}
+              sessionActivities={toolInvocationActivity}
+              {...(agentAction ? { activeAgentAction: agentAction } : {})}
+              {...(revertingActivityId ? { revertingActivityId } : {})}
+              revertibleActivityIds={revertibleActivityIds}
+              maxItems={20}
+              onRevert={revertActivity}
+              onSelectActivity={focusActivity}
+            />
+          </div>
+        )}
       </div>
       {toast && (
         <div
@@ -3327,6 +3411,8 @@ function DemoResetDialog({
 
 interface WorkspaceHeaderProps {
   replayCase: ReplayCase;
+  mode: ExperienceMode;
+  onModeChange: (mode: ExperienceMode) => void;
   isDemo: boolean;
   saveState: SaveState;
   canUndo: boolean;
@@ -3409,96 +3495,126 @@ function WorkspaceHeader(props: WorkspaceHeaderProps) {
         </div>
       </div>
       <div className="workspace-header__spacer" />
-      <div className="history-controls">
-        <button onClick={props.onUndo} disabled={!props.canUndo} title="Undo">
-          <Undo2 size={15} />
-          <span>Undo</span>
+      <div className="mode-switch" role="group" aria-label="Workspace mode">
+        <button
+          type="button"
+          aria-pressed={props.mode === "simple"}
+          onClick={() => props.onModeChange("simple")}
+        >
+          Simple
         </button>
-        <button onClick={props.onRedo} disabled={!props.canRedo} title="Redo">
-          <Redo2 size={15} />
-          <span>Redo</span>
+        <button
+          type="button"
+          aria-pressed={props.mode === "expert"}
+          onClick={() => props.onModeChange("expert")}
+        >
+          Expert
         </button>
       </div>
-      <button className="workspace-help" onClick={props.onGuide} aria-label="Open REPLAY guide">
-        <CircleHelp size={15} aria-hidden="true" /> <span>Guide</span>
-      </button>
-      <button
-        className={`webmcp-status${props.webMcpSupported ? " is-supported" : ""}${props.agentWorking ? " is-working" : ""}`}
-        onClick={props.onSiteToolsHelp}
-        data-onboarding-id="site-tools-status"
-        {...(props.webMcpSupported
-          ? {
-              "aria-label": `Site Tools. ${siteToolsRegistrationExplanation}`,
-              title: siteToolsRegistrationExplanation,
-            }
-          : {})}
-      >
-        <span className="webmcp-status__dot" />
-        {props.webMcpSupported ? (
-          <Wifi size={14} aria-hidden="true" />
-        ) : (
-          <CloudOff size={14} aria-hidden="true" />
-        )}
-        <span className="webmcp-status__compact" aria-hidden="true">
-          Tools
-        </span>
-        <span className="webmcp-status__text">
-          <strong>Site Tools</strong>{" "}
-          <small>
-            {props.webMcpSupported ? `${props.registeredTools} registered` : "Manual mode"}
-          </small>
-        </span>
-      </button>
-      <details className="workspace-menu" data-onboarding-id="case-options">
-        <summary aria-label="Case options">
-          <Settings2 size={16} />
-          <ChevronDown size={12} />
-        </summary>
-        <div>
-          <button onClick={(event) => runMenuAction(event, props.onEditCaseDetails)}>
-            <Pencil size={14} /> Edit case details
-          </button>
-          <button onClick={(event) => runMenuAction(event, props.onExport)}>
-            <Download size={14} /> Export structured case JSON
-          </button>
-          <button onClick={(event) => runMenuAction(event, props.onImport)}>
-            <FileUp size={14} /> Import structured case JSON
-          </button>
-          {props.isDemo && (
-            <button onClick={(event) => runMenuAction(event, props.onResetDemo)}>
-              <RotateCcw size={14} /> Start fresh demo copy
+      {props.mode === "expert" ? (
+        <>
+          <div className="history-controls">
+            <button onClick={props.onUndo} disabled={!props.canUndo} title="Undo">
+              <Undo2 size={15} />
+              <span>Undo</span>
             </button>
-          )}
-          {props.isDemo && props.onOpenDemoScenario && (
-            <>
-              <span className="workspace-menu__section-label">Demo scenarios</span>
-              {DEMO_SCENARIO_METADATA.map((scenario) => {
-                const isCurrent = scenario.id === props.activeDemoScenarioId;
-                return (
-                  <button
-                    key={scenario.id}
-                    disabled={isCurrent}
-                    aria-current={isCurrent ? "page" : undefined}
-                    aria-label={`Open demo scenario: ${scenario.title}${isCurrent ? " (current)" : ""}`}
-                    onClick={(event) =>
-                      runMenuAction(event, () => props.onOpenDemoScenario?.(scenario.id))
-                    }
-                  >
-                    {isCurrent ? <Check size={14} /> : <Route size={14} />}
-                    {scenario.title}
-                  </button>
-                );
-              })}
-            </>
-          )}
-          <button onClick={(event) => runMenuAction(event, props.onDebug)}>
-            <ShieldCheck size={14} /> WebMCP inspector
+            <button onClick={props.onRedo} disabled={!props.canRedo} title="Redo">
+              <Redo2 size={15} />
+              <span>Redo</span>
+            </button>
+          </div>
+          <button className="workspace-help" onClick={props.onGuide} aria-label="Open REPLAY guide">
+            <CircleHelp size={15} aria-hidden="true" /> <span>Guide</span>
           </button>
-          <button onClick={(event) => runMenuAction(event, props.onHome)}>
-            <Home size={14} /> Close workspace
+          <button
+            className={`webmcp-status${props.webMcpSupported ? " is-supported" : ""}${props.agentWorking ? " is-working" : ""}`}
+            onClick={props.onSiteToolsHelp}
+            data-onboarding-id="site-tools-status"
+            {...(props.webMcpSupported
+              ? {
+                  "aria-label": `Site Tools. ${siteToolsRegistrationExplanation}`,
+                  title: siteToolsRegistrationExplanation,
+                }
+              : {})}
+          >
+            <span className="webmcp-status__dot" />
+            {props.webMcpSupported ? (
+              <Wifi size={14} aria-hidden="true" />
+            ) : (
+              <CloudOff size={14} aria-hidden="true" />
+            )}
+            <span className="webmcp-status__compact" aria-hidden="true">
+              Tools
+            </span>
+            <span className="webmcp-status__text">
+              <strong>Site Tools</strong>{" "}
+              <small>
+                {props.webMcpSupported ? `${props.registeredTools} registered` : "Manual mode"}
+              </small>
+            </span>
           </button>
-        </div>
-      </details>
+          <details className="workspace-menu" data-onboarding-id="case-options">
+            <summary aria-label="Case options">
+              <Settings2 size={16} />
+              <ChevronDown size={12} />
+            </summary>
+            <div>
+              <button onClick={(event) => runMenuAction(event, props.onEditCaseDetails)}>
+                <Pencil size={14} /> Edit case details
+              </button>
+              <button onClick={(event) => runMenuAction(event, props.onExport)}>
+                <Download size={14} /> Export structured case JSON
+              </button>
+              <button onClick={(event) => runMenuAction(event, props.onImport)}>
+                <FileUp size={14} /> Import structured case JSON
+              </button>
+              {props.isDemo && (
+                <button onClick={(event) => runMenuAction(event, props.onResetDemo)}>
+                  <RotateCcw size={14} /> Start fresh demo copy
+                </button>
+              )}
+              {props.isDemo && props.onOpenDemoScenario && (
+                <>
+                  <span className="workspace-menu__section-label">Demo scenarios</span>
+                  {DEMO_SCENARIO_METADATA.map((scenario) => {
+                    const isCurrent = scenario.id === props.activeDemoScenarioId;
+                    return (
+                      <button
+                        key={scenario.id}
+                        disabled={isCurrent}
+                        aria-current={isCurrent ? "page" : undefined}
+                        aria-label={`Open demo scenario: ${scenario.title}${isCurrent ? " (current)" : ""}`}
+                        onClick={(event) =>
+                          runMenuAction(event, () => props.onOpenDemoScenario?.(scenario.id))
+                        }
+                      >
+                        {isCurrent ? <Check size={14} /> : <Route size={14} />}
+                        {scenario.title}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+              <button onClick={(event) => runMenuAction(event, props.onDebug)}>
+                <ShieldCheck size={14} /> WebMCP inspector
+              </button>
+              <button onClick={(event) => runMenuAction(event, props.onHome)}>
+                <Home size={14} /> Close workspace
+              </button>
+            </div>
+          </details>
+        </>
+      ) : (
+        <button
+          className="workspace-simple-home"
+          type="button"
+          onClick={props.onHome}
+          aria-label="Close workspace"
+          title="Close workspace"
+        >
+          <Home size={16} aria-hidden="true" />
+        </button>
+      )}
     </header>
   );
 }

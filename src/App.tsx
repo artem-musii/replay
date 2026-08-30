@@ -25,10 +25,18 @@ const Workspace = lazy(async () => {
 });
 
 type View = "landing" | "wizard" | "workspace";
+type ExperienceMode = "simple" | "expert";
 
 const DEMO_CASE_ID = "case-demo-roundabout";
 const CASE_ROUTE_PREFIX = "#case/";
 const DEFAULT_DEMO_SCENARIO: DemoScenarioId = "roundabout-calibrated";
+const EXPERIENCE_MODE_SESSION_KEY = "replay-workspace-experience-mode";
+
+function initialExperienceMode(): ExperienceMode {
+  return window.sessionStorage.getItem(EXPERIENCE_MODE_SESSION_KEY) === "expert"
+    ? "expert"
+    : "simple";
+}
 
 function demoRunId(scenarioId: DemoScenarioId): string {
   return `case-demo-${scenarioId}-run-${crypto.randomUUID()}`;
@@ -168,6 +176,8 @@ function downloadRecoveryBackup(records: RetainedRecoveryRecord[]): void {
 
 export function App() {
   const [view, setView] = useState<View>("landing");
+  const [workspaceExperienceMode, setWorkspaceExperienceMode] =
+    useState<ExperienceMode>(initialExperienceMode);
   const [activeCase, setActiveCase] = useState<ReplayCase>();
   const [localCases, setLocalCases] = useState<LocalCaseSummary[]>([]);
   const [activeDemoScenarioId, setActiveDemoScenarioId] = useState<DemoScenarioId>();
@@ -187,6 +197,10 @@ export function App() {
   const activeCaseIdRef = useRef<string | undefined>(undefined);
   const workspaceLeaveGuardRef = useRef<(() => Promise<boolean>) | undefined>(undefined);
   const webMcpSupported = detectWebMCPSupport().available;
+
+  useEffect(() => {
+    window.sessionStorage.setItem(EXPERIENCE_MODE_SESSION_KEY, workspaceExperienceMode);
+  }, [workspaceExperienceMode]);
 
   useEffect(() => {
     activeCaseIdRef.current = activeCase?.id;
@@ -698,6 +712,7 @@ export function App() {
           onDeleteLocalCase={deleteSavedCase}
           onOpenDemo={() => openFreshDemo(DEFAULT_DEMO_SCENARIO)}
           onOpenGuidedDemo={() => {
+            setWorkspaceExperienceMode("expert");
             setStartWorkspaceTour(true);
             openFreshDemo(DEFAULT_DEMO_SCENARIO);
           }}
@@ -734,6 +749,8 @@ export function App() {
             <Workspace
               key={`${activeCase.id}-${workspaceKey}`}
               initialCase={activeCase}
+              experienceMode={workspaceExperienceMode}
+              onExperienceModeChange={setWorkspaceExperienceMode}
               isDemo={Boolean(activeDemoScenarioId) || activeCase.id === DEMO_CASE_ID}
               {...(activeDemoScenarioId ? { activeDemoScenarioId } : {})}
               onOpenDemoScenario={(scenarioId) => {

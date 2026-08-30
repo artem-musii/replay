@@ -12,6 +12,7 @@ test("edits case identity through an accessible, durable human UI command", asyn
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Create local case" }).click();
+  await page.getByRole("button", { name: "Expert", exact: true }).click();
   await waitForLocalSave(page);
 
   const editButton = page.getByRole("button", { name: "Edit case details" }).first();

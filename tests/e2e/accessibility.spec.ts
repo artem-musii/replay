@@ -355,6 +355,9 @@ test.describe("accessibility guardrails", () => {
     // boundary without inheriting focus from the landing-page launch control.
     await page.goto("/#demo");
     await expect(page.locator("main.workspace")).toBeVisible();
+    await page.getByRole("button", { name: "Expert", exact: true }).click();
+    await page.reload();
+    await expect(page.locator("main.workspace")).toBeVisible();
     await expect(page.locator(".save-status")).toContainText("Saved locally");
     await page.keyboard.press("Tab");
     await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();

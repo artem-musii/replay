@@ -749,13 +749,13 @@ function RelationLinks({
               key={relation.id}
               type="button"
               onClick={() => onSelect(relationType, relation.targetId ?? relation.id)}
-              title={relation.id}
+              title={relation.label}
             >
               <Link2 size={12} aria-hidden="true" />
               <span>{relation.label}</span>
             </button>
           ) : (
-            <span className="relation-chip" key={relation.id} title={relation.id}>
+            <span className="relation-chip" key={relation.id} title={relation.label}>
               <Link2 size={12} aria-hidden="true" />
               <span>{relation.label}</span>
             </span>
@@ -4724,7 +4724,7 @@ function reportCitationSummary(citations: ReportStatement["citations"]): string 
   return `Sources: ${sources.join(", ")}`;
 }
 
-function FinalizationDialog({
+export function FinalizationDialog({
   preview,
   onCancel,
   onFinalize,
