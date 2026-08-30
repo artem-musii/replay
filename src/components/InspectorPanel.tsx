@@ -4205,19 +4205,22 @@ function ReportView(props: InspectorPanelProps) {
               : "Finalization requires a visible human review and a manual confirmation.";
   const finalizationToolRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
-    const form = finalizationToolRef.current;
-    if (!form) return;
-    const activated = () => {
+    const isFinalizationToolEvent = (event: Event) =>
+      Reflect.get(event, "toolName") === "finalize_factual_report";
+    const activated = (event: Event) => {
+      if (!isFinalizationToolEvent(event)) return;
       setToolPrepared(true);
       setReviewFingerprint(reviewBindingFingerprint);
       setReviewOpen(true);
     };
-    const cancelled = () => setToolPrepared(false);
-    form.addEventListener("toolactivated", activated);
-    form.addEventListener("toolcancel", cancelled);
+    const cancelled = (event: Event) => {
+      if (isFinalizationToolEvent(event)) setToolPrepared(false);
+    };
+    window.addEventListener("toolactivated", activated);
+    window.addEventListener("toolcancel", cancelled);
     return () => {
-      form.removeEventListener("toolactivated", activated);
-      form.removeEventListener("toolcancel", cancelled);
+      window.removeEventListener("toolactivated", activated);
+      window.removeEventListener("toolcancel", cancelled);
     };
   }, [reviewBindingFingerprint]);
   return (

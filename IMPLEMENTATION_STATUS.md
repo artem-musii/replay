@@ -1,10 +1,10 @@
 # REPLAY implementation status
 
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 
 ## Current milestone
 
-The public GitHub Pages URL serves the verified seed-v6 application release from commit [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20) and [Actions run `33274844653`](https://github.com/artem-musii/replay/actions/runs/33274844653). The trust, persistence, proposal, actor-pose, import, accessibility, touch, reporting, release-verification, calibrated-scene, impact-response, and four-scenario work is frozen, deployed, and independently byte-verified. The release also makes complete start-to-final WebMCP reconstruction proposals explicit for one or more actors and hardens exact-impact resume against stale playback callbacks. Submission completion still depends on an uncoached supported-model trace with native **Recently used/Sources** on that deployment and publishing the demo video. A final real-device and assistive-technology spot check is recommended before submission.
+The public GitHub Pages URL serves a verified seed-v6 application release. The live [release evidence](https://artem-musii.github.io/replay/release-evidence.json) is authoritative for the exact clean commit and payload manifest checked by the post-deploy verifier. The trust, persistence, proposal, actor-pose, import, accessibility, touch, reporting, calibrated-scene, impact-response, four-scenario, and simple-workspace work is deployed. The required public 2:21 YouTube demo is published at [https://www.youtube.com/watch?v=0INcRPRIR04](https://www.youtube.com/watch?v=0INcRPRIR04). A retained uncoached supported-model **Recently used/Sources** trace and final real-device/assistive-technology spot check remain recommended judging-strength evidence, not required submission deliverables.
 
 ## Implemented product
 
@@ -26,7 +26,7 @@ The public GitHub Pages URL serves the verified seed-v6 application release from
 
 The 2026-08-27 baseline for commit `f980d28` remains preserved in `docs/testing.md` and `docs/deployment.md`. It recorded passing format/lint/typecheck/build, **53/53 Vitest tests across 6 files**, **32/32 Playwright project runs** across desktop/mobile Chromium, automated axe checks, Lighthouse results, a public persistence journey, and a direct Site Tools lifecycle smoke. That evidence is historical: it predates schema v2, proposals, recovery/CAS controls, the framing guard, new export/accessibility regressions, and the current 19-tool inventory.
 
-### Current deployed release
+### Historical deployed baseline
 
 The release contains the complete schema-v2/proposal system plus seed-v6 calibrated geometry, motion/integrity review, physically coherent authored contact geometry, four deterministic scenarios, explicit start-to-final review proposals, playback-session hardening, and refreshed visual baselines. GitHub Actions verify/build job `99159652619` passed the configured release gate with **460/460 Vitest tests across 37 files**, **230 Playwright project runs: 221 passed, 9 intentional mobile screenshot-owner skips, and 0 failed**, and the **12/12** configured-base matrix. Deploy job `99160674554` published Pages deployment `6160091470` from artifact `9721285202` (3,655,679 compressed bytes; SHA-256 `5505a03a515a0c455f786a0f9fec7a6d9376d7046c77072d9df6d9c2412d8e1b`). Post-deploy job `99160705929` and an independent verifier fetched and matched all **46 public payload files / 5,297,092 bytes**, yielding manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`. The public `release-evidence.json` identifies the latest clean wrapper commit; documentation/test-only wrappers retain this application-payload identity while the file count, byte count, and manifest remain exact.
 
@@ -42,7 +42,7 @@ The root artifact has **46 public payload files / 5,296,840 bytes**, plus one de
 
 The preceding `cd88755b` payload retains historical operator-directed bridge/UI-agreement and Lighthouse evidence. A cache-busted operator smoke of pre-rename `b2e93905` verified both exact-impact and automatic-pause one-click continuation, inspected the published single-actor/full-path proposal schema and separate impact-event semantics, and observed no console errors or failed dynamic requests. The renamed release passed the same behavior and contract checks in hosted CI; neither result is supported-model choice or native **Recently used/Sources** evidence.
 
-A fresh cache-busted ordinary-browser smoke of renamed public commit `b252fbde` selected 9.5 s, auto-paused once at the 10.0 s impact, and reached the 20.0 s end after exactly one Play click, with zero console errors and no failed dynamic requests. This is current live product evidence, not native Site Tools or supported-model evidence.
+A cache-busted ordinary-browser smoke of historical commit `b252fbde` selected 9.5 s, auto-paused once at the 10.0 s impact, and reached the 20.0 s end after exactly one Play click, with zero console errors and no failed dynamic requests. This remains product evidence for those exact bytes, not native Site Tools or supported-model evidence.
 
 Lighthouse 13.4.1 with Chrome 151 completed three warning-free runs per profile against the preceding `cd88755b` configured-base payload. The mobile runs scored **89/91/90 performance**, all with **100 accessibility / 100 best practices / 100 SEO**, for median performance **90** and medians of FCP **2.032 s**, LCP **3.308 s**, TBT **17 ms**, CLS **0.00004**, Speed Index **2.032 s**, and TTI **3.308 s**; every desktop run scored **100/100/100/100**, with medians of FCP **0.445 s**, LCP **0.686 s**, TBT **0 ms**, CLS **0.0149**, Speed Index **0.529 s**, and TTI **0.686 s**. Those lab measurements remain historical to that payload; the current release passed its clean-tree verifier and hosted CI before deployment.
 
@@ -61,7 +61,7 @@ The earlier native Chrome `ModelContext` trace belongs to the pre-polish, pre-re
 
 ## Deployment status
 
-The verified seed-v6 release is available at [artem-musii.github.io/replay](https://artem-musii.github.io/replay/) from application commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`. Commit `cd88755b` is the immediately preceding seed-v6 release, `2855f0bc` is the superseded seed-v5 release, `00688d8a` is the superseded seed-v3 release, initial deployment evidence used `c95df75`, and the older audited baseline used `f980d28`. Their evidence remains historical and is not conflated with the current public artifact.
+The verified seed-v6 release is available at [artem-musii.github.io/replay](https://artem-musii.github.io/replay/); its live [release evidence](https://artem-musii.github.io/replay/release-evidence.json) names the authoritative source commit and payload. Commits `b252fbde`, `cd88755b`, `2855f0bc`, `00688d8a`, `c95df75`, and `f980d28` retain historical evidence that is not conflated with the current public artifact.
 
 GitHub Pages shares the `artem-musii.github.io` storage origin with other projects and does not honor `public/_headers`; use the public build only with synthetic/non-sensitive data. The application-level framing guard helps at runtime, while response-level `Permissions-Policy`, COOP/COEP, `X-Content-Type-Options`, and frame policy still require a dedicated header-capable origin.
 
@@ -71,7 +71,7 @@ GitHub Pages shares the `artem-musii.github.io` storage origin with other projec
 - Run the full probabilistic eval matrix with each supported Site Tools model/client and retain traces without aggregating away safety failures.
 - Complete physical keyboard-only and VoiceOver/NVDA review, real Safari/device and broader pointer/multi-touch/file-picker checks, raw-recovery and cross-profile/multi-tab stress, and platform-native downloaded-file inspection. Automated Chromium regressions already cover upload/annotation/delete/reload, persistence failures and retries, conflict handling, dialog focus, and narrow reflow; they do not substitute for those manual checks.
 - Deploy to a dedicated origin/host honoring `public/_headers` if production-like privacy and response-policy claims are required.
-- Record and publish the under-three-minute YouTube demo and replace its submission placeholder.
+- Keep the published 2:21 YouTube demo public and unchanged through judging.
 
 ## Release rule
 

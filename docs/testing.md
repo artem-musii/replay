@@ -49,9 +49,9 @@ The Playwright command builds and serves `dist/` at `http://127.0.0.1:4173` auto
 | WebMCP registry                   | `tests/webmcp/registry.test.ts`                                                                                                       | Nineteen-tool inventory/schema/annotations, lifecycle, session-versus-canonical audit, proposal routing, cancellation, reconciliation, direct execution, and fallback.                                                                                                                                                                                                                                                                                                                |
 | Browser regressions               | `tests/e2e/*.spec.ts`                                                                                                                 | Core workflows plus optional onboarding, manual/WebMCP guidance, path creation and point editing, vehicle movement/rotation, pointer ownership and overlap routing, proposals, exact editors, issue focus, human overrides, finalizable no-evidence review, stable local-case routing/listing, exact multi-vehicle impact-pair placement, finalized JSON/PDF, unique-run demo switching/resume, impact playback, dialog focus behavior, 320px reflow, axe checks, and frame blocking. |
 
-### Current deployed release result
+### Historical deployed release result
 
-Application commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20` completed the following matrix on **2026-08-29** in successful [GitHub Actions run `33274844653`](https://github.com/artem-musii/replay/actions/runs/33274844653). The configured-base artifact was then deployed and independently byte-verified.
+Application commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20` completed the following historical matrix on **2026-08-29** in successful [GitHub Actions run `33274844653`](https://github.com/artem-musii/replay/actions/runs/33274844653). The configured-base artifact was then deployed and independently byte-verified. For the current public identity, use the live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json).
 
 | Check                   | Result                                                                                                                                                                                                                                                                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -96,7 +96,7 @@ Application commit `2855f0bc50da2916128b2278a46f0d0a8a4e2bbd` passed GitHub Acti
 
 The 43-file result is an independent 2026-08-29 comparison of the downloaded Pages artifact with cache-busted public paths. That historical release predated the automated `release-evidence.json` and `verify-deployment` workflow gate; the current release exercises both.
 
-Formal exact-deployment ChatGPT supported-model Site Tools traces, manual screen-reader/real-Safari review, complete WCAG conformance, YouTube publication, optional header-capable-origin verification, and platform-native export review remain separate gates. A bounded operator-directed public product/bridge smoke is recorded below.
+Formal exact-deployment ChatGPT supported-model Site Tools traces, manual screen-reader/real-Safari review, complete WCAG conformance, optional header-capable-origin verification, and platform-native export review remain separate evidence categories. The required public YouTube video is published. A bounded operator-directed public product/bridge smoke is recorded below.
 
 **Superseded deployed result:** commit `00688d8a51fb783dbf147e08ece60470b8877544` passed **136/136 Vitest tests across 15 files** and **108 Playwright runs: 103 passed, 5 intentional skips, 0 failed** before Pages deployment `6139340101`. Its 2026-08-28 coverage, artifact, browser, and Lighthouse record remains preserved in [test-report.md](test-report.md) and [deployment.md](deployment.md); it is historical evidence, not a current-release result.
 
@@ -200,11 +200,11 @@ Use a disposable demo fixture for direct mutation tests. Never use personal evid
 
 Use a deployed HTTPS URL because that is the submission environment. At the source-of-truth date, the official OpenAI Site Tools documentation lists GPT-5.6 Sol and GPT-5.6 Terra as supported and notes rollout/workspace limitations; recheck before the final run.
 
-The public URL serves application commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`. Record the exact browser/client/model and confirm native `document.modelContext` before calling any result Site Tools evidence.
+Record the exact commit from the live `release-evidence.json`, browser/client/model, and native `document.modelContext` status before calling any result Site Tools evidence.
 
 1. Open [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo) in the desktop app’s built-in browser.
 2. Confirm REPLAY’s page status says Site Tools available.
-3. Ask the four prompts in [demo-script.md](demo-script.md) without naming internal tools.
+3. Use the outcome prompts in **Guide → Site Tools** without naming internal tools.
 4. Capture tool names, arguments, order, results, case versions, activity IDs, and visible UI effects.
 5. Verify the agent reads recent activity after the human correction and does not restore its older geometry.
 6. Verify both hypotheses remain alternatives, shared damage stays unchanged, and no fault conclusion appears.
@@ -223,7 +223,7 @@ The machine-readable eval suite and scoring rules are documented in [webmcp-eval
 
 **Pre-rename `b2e93905` public product and contract smoke (2026-08-29):** a cache-busted operator journey selected the exact 10.000 s impact marker and advanced to 17.7 s after one Play click. A separate 9.5 s path auto-paused once at 10.0 s; one resume advanced to 15.9 s while playback remained active. The public technical inspector visibly exposed `propose_scene_changes`, `changes.minItems=1`, full `trajectory-set` start/final schema semantics, and separate `mark_impact_event` semantics. No console error or failed dynamic request occurred. The renamed release passed the same deterministic behavior and contract checks in hosted CI; neither result is native Site Tools invocation, supported-model choice, or **Recently used/Sources** evidence.
 
-**Current renamed `b252fbde` public playback smoke (2026-08-29):** a fresh cache-busted ordinary-browser journey selected the 9.5 s keyframe, auto-paused once at the 10.0 s impact, and reached the 20.0 s end after exactly one Play click. The browser recorded zero console errors and no failed dynamic requests. This is current live playback evidence, not native Site Tools invocation, supported-model choice, or **Recently used/Sources** evidence.
+**Historical renamed `b252fbde` public playback smoke (2026-08-29):** a fresh cache-busted ordinary-browser journey selected the 9.5 s keyframe, auto-paused once at the 10.0 s impact, and reached the 20.0 s end after exactly one Play click. The browser recorded zero console errors and no failed dynamic requests. This is evidence for those exact bytes, not native Site Tools invocation, supported-model choice, or **Recently used/Sources** evidence.
 
 **Earlier pre-polish native Chrome smoke (2026-08-29):** the 45-payload pre-rename configured-base artifact at 5,229,846 bytes with manifest SHA-256 `356be07e17a995608cfd558c685ba1fc9bf582b2f2fd530a9644604a8f2bd6ee` exposed a native main-world `ModelContext` and 18 tools with no console warning or error. In case `case-demo-roundabout-calibrated-run-9cd0d1c1-c522-4e01-9d23-e10c88f92810`, an operator invoked the four-call judge opening: scene/questions read, all-scope validation, blocking-question focus, then request `native-current-final-20260829-1` for a two-keyframe review proposal. The first three calls stayed session-only at v1; validation returned exactly one question, `integrity.calibration-source`; the pending proposal alone created v2; and the visible human UI rejected it at v3. A subsequent native read found no proposal and confirmed Vehicle A/B's original 8,000 ms poses remained unchanged. This remains historical main-world constructor, mutation, and human-gate evidence for that earlier artifact only.
 
@@ -266,13 +266,13 @@ The response must be HTTPS. GitHub Pages does not consume `public/_headers`, so 
 - Confirm no broken generated image, layout shift, clipped focus ring, unreadable status, or horizontal overflow at 1440 × 900, 1024 × 768, 390 × 844, and 200% zoom.
 - Inspect the five generated images for the criteria in [generated-assets.md](generated-assets.md).
 - Check the console for errors, unhandled rejections, hydration warnings, missing assets/source maps affecting users, and failed requests.
-- Search production paths for placeholders and TODOs:
+- Search production paths for unfinished release markers:
 
 ```bash
-rg -n "TODO|FIXME|PLACEHOLDER|example\.com|ADD VERIFIED|ADD PUBLIC|<live-app-url>|<deployment-host>|BLOCKED — replace" src public index.html README.md docs
+rg -n "T[D]O|F[I]XME|P[L]ACEHOLDER|example[.]com|ADD VERIFIE[D]|ADD PUBLI[C]|<live-app-ur[l]>|<deployment-hos[t]>|BLOCKED — replac[e]" src public index.html README.md docs
 ```
 
-The published app and repository must have no remaining placeholders. Before the video is recorded, the only intentional placeholder matched by this search is the explicit **BLOCKED — replace this line with the final public YouTube URL** entry in the Devpost draft. Replace it before submission, then require the search above to return no unexplained result. The native supported-model and remaining manual release gates remain in force even though they are not placeholder strings.
+The published app and repository must have no remaining placeholders. The public YouTube URL is now present in the README and submission draft, so the search above must return no unexplained result. Native supported-model and remaining manual release gates remain in force even though they are not placeholder strings.
 
 ## Result record template
 

@@ -1,11 +1,11 @@
 # Deploying REPLAY
 
-Last verified public status (**2026-08-29**): application commit [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20) is deployed and byte-verified on GitHub Pages.
+Current public status: the live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) names the exact clean commit and payload byte-verified by the latest GitHub Pages deployment.
 
 - Landing: [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)
 - Deterministic demo: [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo)
 - Repository: [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)
-- Current application: commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`, successful [GitHub Actions run `33274844653`](https://github.com/artem-musii/replay/actions/runs/33274844653)
+- Release identity: [live release evidence](https://artem-musii.github.io/replay/release-evidence.json)
 
 REPLAY is a client-only Vite application. The core demo needs no runtime secret, server function, database, account, analytics service, or model API.
 
@@ -65,7 +65,7 @@ The current public application payload originated from the attested workflow bel
 
 | Item                      | Exact result                                                                                                                                |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Payload origin commit     | `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`                                                                                                  |
+| Historical payload commit | `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`                                                                                                  |
 | Actions workflow          | `33274844653`, successful                                                                                                                   |
 | Verify/build job          | `99159652619`, successful                                                                                                                   |
 | Deploy job                | `99160674554`, successful                                                                                                                   |
@@ -83,7 +83,7 @@ The current public application payload originated from the attested workflow bel
 | Live payload              | **46 files**, **5,297,092 bytes**, all byte-matched                                                                                         |
 | Payload manifest hash     | `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`                                                                          |
 
-The live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) names the latest clean wrapper commit, Node.js and npm versions, the `/replay/` base, and the payload values above. The payload is the same seed-v6 application when it remains 46 files / 5,297,092 bytes with manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that wrapper's exact build artifact and exported manifest digest.
+The live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) names the latest clean commit, Node.js and npm versions, the `/replay/` base, and the current payload values. The table above preserves an earlier exact release for audit history. Each post-deploy verification job fetches the live endpoint and byte/hash-verifies every public payload file against that commit's exact build artifact and exported manifest digest.
 
 ### Superseded `cd88755b` release evidence
 
@@ -107,7 +107,7 @@ The current seed-v6 release additionally contains stable `#case/<encoded-case-id
 
 ### Current release CI gate
 
-Against exact commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`, the workflow passed dependency installation and audits, formatting, lint, strict typecheck, Vitest with coverage, the full Playwright suite, both production-build/artifact gates, the configured-base focused matrix, Pages deployment, and post-deploy byte verification. The exact results are in the release table above. Manual screen-reader/cross-browser/export fidelity, native compatible Site Tools/supported-model behavior, YouTube publication, and a header-capable production origin remain separate evidence boundaries.
+Against that exact historical commit, the workflow passed dependency installation and audits, formatting, lint, strict typecheck, Vitest with coverage, the full Playwright suite, both production-build/artifact gates, the configured-base focused matrix, Pages deployment, and post-deploy byte verification. The exact results are in the release table above. The required public YouTube video is published. Manual screen-reader/cross-browser/export fidelity, native compatible Site Tools/supported-model behavior, and a header-capable production origin remain separate evidence boundaries.
 
 ### Superseded `00688d8a` local gate
 
@@ -170,7 +170,7 @@ curl -fsS -o /dev/null https://artem-musii.github.io/replay/site.webmanifest
 curl -fsS -o /dev/null https://artem-musii.github.io/replay/sitemap.xml
 ```
 
-The current automated acceptance audit fetched every path declared by the deployed evidence manifest. All 46 public payload files / 5,297,092 bytes returned successfully and were byte-identical to the verified build; the stable live manifest SHA-256 was `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`.
+The historical `b252fbde` automated acceptance audit fetched every path declared by its deployed evidence manifest. All 46 public payload files / 5,297,092 bytes returned successfully and were byte-identical to that verified build; its manifest SHA-256 was `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`. Use the live evidence endpoint for the current audit identity.
 
 Inspect the returned HTML for its title, description, canonical URL, favicon, absolute social image, CSP meta, and referrer meta. Confirm no generated source PNG is present in the clean build or loaded by the UI.
 
@@ -188,12 +188,13 @@ For a strict WebMCP-enabled Chrome header/isolation test, use the local preview 
 
 ## Remaining external evidence
 
-- Record the under-three-minute public YouTube demo.
 - Run the eleven-scenario supported-model matrix and retain tool traces.
 - Verify the current imperative lifecycle in a native compatible Site Tools client and the declarative lifecycle in compatible Chrome.
 - Complete the screen-reader and real-Safari manual matrix, including upload/delete/reload and multi-tab recovery; the automated Firefox/WebKit release journey is a bounded smoke, not the whole product matrix.
 - Repeat the retained PDF/JSON/SVG/PNG inspection in platform-native readers. The exact bytes now deployed already passed browser decode/render checks plus visual PNG and four-page Poppler PDF review, but that does not substitute for final-platform inspection.
 - Deploy to a dedicated header-capable origin and capture its exact response headers if production-like privacy/security claims are required.
+
+The required public demo is published at [https://www.youtube.com/watch?v=0INcRPRIR04](https://www.youtube.com/watch?v=0INcRPRIR04). It runs for 2:21, contains English audio, and shows the WebMCP collaboration and human-only review boundary.
 
 ## Rollback
 

@@ -1,6 +1,6 @@
 # Generated asset disclosure
 
-Last inspected locally and on the deployed application: **2026-08-29**.
+Last inspected locally and on the deployed application: **2026-08-31**.
 
 The deployed seed-v6 release uses five original bitmap compositions created during development with the Codex built-in image-generation mode and two mechanically resized hero renditions for responsive delivery. The superseded seed-v5 and seed-v3 releases used the same five original paths without both responsive renditions. The built-in mode selected the available image model but did not expose a model identifier in the returned artifact, so this repository does not claim a specific model snapshot. Three earlier evidence assets remain packaged so a saved seed-v1 demo can still resume through its case-specific URL. No API key is bundled, and the running application performs no image generation or external evidence upload.
 
@@ -12,7 +12,7 @@ The submission source set documents the runtime image files, generation prompts,
 
 ## Active release files
 
-The deployed seed-v6 release includes the original hero, both responsive hero renditions, and four active evidence images from this set. They are public from commit `b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`; the post-deploy gate returned and byte-matched all **46 public payload files / 5,297,092 bytes** with manifest SHA-256 `22c26f2b61944986272a28d7568fd1421b96b62d37e07dec60fd34895f2aa9c9`. The preceding seed-v6 deployment at `cd88755b`, the seed-v5 deployment at `2855f0bc`, and the live-browser audit against seed-v3 commit `00688d8a` remain historical evidence rather than evidence for the current deployment.
+The deployed seed-v6 release includes the original hero, both responsive hero renditions, and four active evidence images from this set. The post-deploy gate byte-verifies every packaged asset; the live [`release-evidence.json`](https://artem-musii.github.io/replay/release-evidence.json) identifies the exact current commit and payload. Earlier commits `b252fbde`, `cd88755b`, `2855f0bc`, and `00688d8a` retain historical evidence rather than evidence for the current deployment.
 
 | File                                                                                        | Purpose                               |  Dimensions |     WebP size | SHA-256                                                            |
 | ------------------------------------------------------------------------------------------- | ------------------------------------- | ----------: | ------------: | ------------------------------------------------------------------ |

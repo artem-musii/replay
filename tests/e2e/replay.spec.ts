@@ -552,6 +552,30 @@ test.describe("REPLAY primary journey", () => {
       "true",
     );
     await expect(reviewButton).toBeEnabled();
+
+    await page.evaluate(() => {
+      const unrelated = new Event("toolactivated");
+      Object.defineProperty(unrelated, "toolName", { value: "unrelated_tool" });
+      window.dispatchEvent(unrelated);
+    });
+    await expect(page.getByRole("dialog", { name: "Review before finalizing" })).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const activated = new Event("toolactivated");
+      Object.defineProperty(activated, "toolName", { value: "finalize_factual_report" });
+      window.dispatchEvent(activated);
+    });
+    const preparedReview = page.getByRole("dialog", { name: "Review before finalizing" });
+    await expect(preparedReview).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(toolForm.getByRole("status")).toContainText("Site Tools prepared this review");
+    await page.evaluate(() => {
+      const cancelled = new Event("toolcancel");
+      Object.defineProperty(cancelled, "toolName", { value: "finalize_factual_report" });
+      window.dispatchEvent(cancelled);
+    });
+    await expect(toolForm.getByRole("status")).toHaveCount(0);
+
     await reviewButton.click();
 
     const reviewDialog = page.getByRole("dialog", { name: "Review before finalizing" });

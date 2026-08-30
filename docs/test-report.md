@@ -88,6 +88,7 @@ Commit `f980d28` remains the immutable 2026-08-27 baseline: **53/53 Vitest tests
 - Verify the current imperative lifecycle natively, and declarative activation/cancel in compatible Chrome.
 - Complete screen-reader, cross-browser, 200% zoom, reduced-motion, upload/delete/reload, multi-tab, and downloaded PDF/JSON/SVG/PNG inspection.
 - Deploy to a dedicated origin that honors `_headers` before making production-like response-policy/privacy claims; GitHub Pages ignores that file and shares its origin.
-- Record and publish the public under-three-minute YouTube demo.
+
+The current submission's public 2:21 video is available at [https://www.youtube.com/watch?v=0INcRPRIR04](https://www.youtube.com/watch?v=0INcRPRIR04). It is not retroactive evidence for this historical `00688d8a` test report.
 
 See [testing.md](testing.md) for repeatable procedures and evidence-boundary rules.

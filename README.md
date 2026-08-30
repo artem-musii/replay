@@ -2,7 +2,7 @@
 
 **A shared black box for incidents that did not have one.** After a minor no-injury collision, a driver and claims-intake reviewer need to turn photographs, damage, final positions, timing, and conflicting memories into a record they can inspect. REPLAY gives them one local-first visual case where evidence, memory, uncertainty, dispute, and inference remain visibly distinct—and a cited report that no Site Tool can finalize.
 
-[Live app](https://artem-musii.github.io/replay/) · [Roundabout demo](https://artem-musii.github.io/replay/#demo) · [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+[Live app](https://artem-musii.github.io/replay/) · [Roundabout demo](https://artem-musii.github.io/replay/#demo) · [2:21 video demo](https://www.youtube.com/watch?v=0INcRPRIR04) · [MIT License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ![REPLAY roundabout workspace showing a reversible two-vehicle agent proposal over the unchanged baseline](docs/images/replay-devpost-thumbnail.jpg)
 
@@ -10,12 +10,13 @@
 
 ## Try it
 
-| Destination         | Link                                                                                     |
-| ------------------- | ---------------------------------------------------------------------------------------- |
-| Live build          | [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)           |
-| Roundabout demo     | [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo) |
-| Public repository   | [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)           |
-| Open-source license | [MIT](LICENSE)                                                                           |
+| Destination         | Link                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| Live build          | [https://artem-musii.github.io/replay/](https://artem-musii.github.io/replay/)             |
+| Roundabout demo     | [https://artem-musii.github.io/replay/#demo](https://artem-musii.github.io/replay/#demo)   |
+| Video demo          | [https://www.youtube.com/watch?v=0INcRPRIR04](https://www.youtube.com/watch?v=0INcRPRIR04) |
+| Public repository   | [https://github.com/artem-musii/replay](https://github.com/artem-musii/replay)             |
+| Open-source license | [MIT](LICENSE)                                                                             |
 
 **Try it with Site Tools:** Open the roundabout demo in ChatGPT's built-in browser and ask: “Use this page's Site Tools to review the unresolved lane-position question. Read the live scene, evidence relationships, and full consistency results; focus the blocker; then create the smallest coordinated two-car alternative for review from the existing timed paths. Keep the baseline, claims, endpoints, point IDs, times, and unrelated geometry unchanged. Explain the missing evidence, your assumptions, the before/after versions, and what remains unresolved. Do not apply anything, confirm or answer claims, or infer fault.” The in-product Site Tools guide also provides an exact-coordinate deterministic alternative.
 
@@ -23,7 +24,7 @@ To start without WebMCP, run the app locally and choose **Open Roundabout demo**
 
 The public GitHub Pages build is a shared-origin demo. Use synthetic or non-sensitive data there: browser storage is scoped to `artem-musii.github.io`, not to the `/replay/` path. For sensitive evaluation, use a dedicated origin and an appropriate device/browser profile. In current source, `/#demo`, a landing-page scenario card, and **Case options → Start fresh demo copy** each create a new seed-v6 run without overwriting an earlier one, then replace the location with a stable `#case/<encoded-case-id>` route. The landing page lists every retained run under **Your local cases**, where a visible, cancel-first human control can permanently remove one local case and its stored evidence bytes. Site Tools cannot request that deletion. A saved run resumes only from its route in the same origin and browser profile; an unavailable route shows a recovery message instead of opening a different case. Valid legacy seed-v1 through seed-v6 records remain loadable.
 
-The public URL serves the verified seed-v6 application release at [`b252fbde9551d0a1d2c41a1282ced66dc8ae1b20`](https://github.com/artem-musii/replay/commit/b252fbde9551d0a1d2c41a1282ced66dc8ae1b20). CI, deployment, and byte-for-byte public verification are complete.
+The public URL serves a verified seed-v6 release. Its live [release evidence](https://artem-musii.github.io/replay/release-evidence.json) identifies the exact clean source commit and payload manifest used by the post-deploy byte verifier.
 
 ## Human-agent workflow
 
@@ -200,7 +201,7 @@ Vite prints the preview URL, normally `http://localhost:4173/`.
 3. Open **Case options → WebMCP inspector**.
 4. Confirm `document.modelContext` is detected and the expected lifecycle tools are registered.
 5. Inspect annotations and schemas. If the browser exposes `getTools()` and `executeTool()`, run a read-only tool from the inspector and confirm the returned case version and visible state.
-6. Execute the sequence in [docs/demo-script.md](docs/demo-script.md). Verify the successful result agrees with the persisted case and committed engine state; capture browser-paint timing separately rather than assuming paint is transactionally coupled to the tool promise.
+6. Run the guided proof in **Guide → Site Tools**. Verify the successful result agrees with the persisted case and committed engine state; capture browser-paint timing separately rather than assuming paint is transactionally coupled to the tool promise.
 
 ### ChatGPT/Codex Site Tools
 
@@ -208,7 +209,7 @@ Vite prints the preview URL, normally `http://localhost:4173/`.
 2. In the ChatGPT desktop app or Codex, choose a model/workspace combination currently supported by Site Tools and open that URL in the built-in browser.
 3. Keep the page open and ask: “Inspect this case and separate what is confirmed, reported, unknown, and inconsistent.”
 4. Confirm the agent discovers REPLAY’s page tools, calls the read-only operations, and focuses the live inconsistency.
-5. Continue with the prompts in [docs/demo-script.md](docs/demo-script.md).
+5. Continue with the prompts in **Guide → Site Tools** and the checks in [docs/testing-in-chatgpt.md](docs/testing-in-chatgpt.md).
 
 WebMCP and Site Tools remain evolving and rollout-dependent. A fallback status does not disable the manual product. Current external API and availability notes are recorded with dates and official links in [docs/source-of-truth.md](docs/source-of-truth.md).
 

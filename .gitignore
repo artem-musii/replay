@@ -10,6 +10,7 @@ test-results-release/
 *.local
 *.tsbuildinfo
 design-sources/generated/
+demo/
 .env
 .env.*
 !.env.example
