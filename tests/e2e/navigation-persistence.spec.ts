@@ -140,6 +140,16 @@ test("deletes only the human-confirmed local case and keeps the other saved case
 
   const dialog = page.getByRole("alertdialog", { name: "Delete “Remove this case”?" });
   await expect(dialog).toBeVisible();
+  await expect(page.locator(".dialog-backdrop")).toHaveCSS("position", "fixed");
+  const viewport = page.viewportSize();
+  const dialogBox = await dialog.boundingBox();
+  if (!viewport || !dialogBox) throw new Error("The open deletion dialog must have geometry");
+  expect(Math.abs(dialogBox.x + dialogBox.width / 2 - viewport.width / 2)).toBeLessThan(2);
+  if (viewport.width > 520) {
+    expect(Math.abs(dialogBox.y + dialogBox.height / 2 - viewport.height / 2)).toBeLessThan(2);
+  } else {
+    expect(viewport.height - (dialogBox.y + dialogBox.height)).toBe(12);
+  }
   await expect(
     dialog.getByText("Site Tools cannot request or confirm this deletion"),
   ).toBeVisible();

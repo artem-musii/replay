@@ -1,4 +1,5 @@
 @import "./landing.css";
+@import "./dialog.css";
 
 :root {
   --font-sans: "Inter Variable", Inter, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
@@ -183,6 +184,13 @@ img {
 .button--quiet:hover:not(:disabled) {
   color: var(--ink);
   background: var(--paper-deep);
+}
+.button--danger {
+  background: var(--conflict);
+  color: var(--paper-raised);
+}
+.button--danger:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--conflict), var(--ink) 14%);
 }
 
 .brand-mark {
